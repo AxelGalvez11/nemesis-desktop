@@ -22,6 +22,7 @@ import { $dismissedAutoProjectIds, $panesFlipped, $pinnedSessionIds, $sidebarAge
 import { $newChatProfile, $profiles, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile';
 import { $activeProjectId, $projects, $projectScope, $projectTree, $projectTreeLoading, $removedSessionIds, $reposScanning, ALL_PROJECTS, enterProject, exitProjectScope, fetchProjectSessions, openProjectCreate, refreshProjects, refreshProjectTree, refreshWorktrees, scanAndRecordRepos } from '@/store/projects';
 import { $cronSessions, $currentCwd, $gatewayState, $messagingPlatformTotals, $messagingSessions, $messagingTruncated, $selectedStoredSessionId, $sessionProfileTotals, $sessions, $sessionsLoading, $sessionsTotal, $workingSessionIds, sessionPinId, setCurrentCwd } from '@/store/session';
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis';
 import { ARTIFACTS_ROUTE, MESSAGING_ROUTE, SKILLS_ROUTE, STUDY_ROUTE } from '../../routes';
 import { countLabel } from './chrome';
 import { SidebarCronJobsSection } from './cron-jobs-section';
@@ -38,7 +39,7 @@ import { SidebarSessionsSection, VIRTUALIZE_THRESHOLD } from './sessions-section
 const NON_SESSION_INITIAL_ROWS = 3;
 const NON_SESSION_LOAD_STEP = 10;
 const NEW_SESSION_KBD = comboTokens('mod+n');
-const SIDEBAR_NAV = [
+const SIDEBAR_NAV_ALL = [
     {
         id: 'new-session',
         label: '',
@@ -55,6 +56,7 @@ const SIDEBAR_NAV = [
     { id: 'artifacts', label: '', icon: props => _jsx(Codicon, { name: "files", ...props }), route: ARTIFACTS_ROUTE },
     { id: 'study', label: 'Study', icon: props => _jsx(Codicon, { name: "mortar-board", ...props }), route: STUDY_ROUTE }
 ];
+const SIDEBAR_NAV = SIDEBAR_NAV_ALL.filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_NAV.has(item.id));
 // Two modes via the `compact` height variant (styles.css):
 //   tall    → each section is shrink-0, capped, its own scroller; Sessions is flex-1.
 //   compact → COMPACT_FLAT drops the caps so the whole stack scrolls as one.
@@ -736,7 +738,7 @@ export function ChatSidebar({ currentView, onNavigate, onLoadMoreSessions, onLoa
                                                 else {
                                                     onNewSessionInWorkspace(null);
                                                 }
-                                            }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "add", size: "0.75rem" }) })) : null, _jsx("div", { className: "grid size-6 place-items-center", children: !showAllProfiles && agentSessions.length > 0 ? (_jsx(Button, { "aria-label": agentsGrouped ? s.showSessions : s.showProjects, className: cn(HEADER_NAV_BTN, agentsGrouped && 'bg-(--ui-control-active-background) text-foreground opacity-100'), onClick: event => {
+                                            }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "add", size: "0.75rem" }) })) : null, _jsx("div", { className: "grid size-6 place-items-center", children: !NEMESIS_STUDENT_BUILD && !showAllProfiles && agentSessions.length > 0 ? (_jsx(Button, { "aria-label": agentsGrouped ? s.showSessions : s.showProjects, className: cn(HEADER_NAV_BTN, agentsGrouped && 'bg-(--ui-control-active-background) text-foreground opacity-100'), onClick: event => {
                                                     event.stopPropagation();
                                                     setSidebarRecentsOpen(true);
                                                     setSidebarAgentsGrouped(!agentsGrouped);

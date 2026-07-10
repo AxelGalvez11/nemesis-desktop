@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { codiconIcon } from '@/components/ui/codicon';
 import { Tip } from '@/components/ui/tooltip';
+import { NEMESIS_STUDENT_BUILD, STUDENT_SETTINGS_KEEP } from '@/nemesis';
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes';
 import { useI18n } from '@/i18n';
 import { triggerHaptic } from '@/lib/haptics';
@@ -22,7 +23,7 @@ import { KEYS_VIEWS, KeysSettings } from './keys-settings';
 import { NotificationsSettings } from './notifications-settings';
 import { PROVIDER_VIEWS, ProvidersSettings } from './providers-settings';
 import { SessionsSettings } from './sessions-settings';
-const SETTINGS_VIEWS = [
+const SETTINGS_VIEWS_ALL = [
     ...SECTIONS.map(s => `config:${s.id}`),
     'providers',
     'gateway',
@@ -31,6 +32,7 @@ const SETTINGS_VIEWS = [
     'sessions',
     'about'
 ];
+const SETTINGS_VIEWS = SETTINGS_VIEWS_ALL.filter(view => !NEMESIS_STUDENT_BUILD || STUDENT_SETTINGS_KEEP.has(view));
 export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
     const { t } = useI18n();
     const navigate = useNavigate();
@@ -47,7 +49,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
             navigate(`${SKILLS_ROUTE}?tab=mcp${suffix}`, { replace: true });
         }
     }, [navigate, search]);
-    const [activeView, setActiveView] = useRouteEnumParam('tab', SETTINGS_VIEWS, 'config:model');
+    const [activeView, setActiveView] = useRouteEnumParam('tab', SETTINGS_VIEWS, (NEMESIS_STUDENT_BUILD ? 'config:appearance' : 'config:model'));
     // Providers subnav (Accounts vs API keys) lives in its own param so each
     // sub-view is deep-linkable and survives a refresh.
     const [providerView, setProviderView] = useRouteEnumParam('pview', PROVIDER_VIEWS, 'accounts');
@@ -186,7 +188,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
             label: t.settings.nav.about,
             onSelect: () => setActiveView('about')
         }
-    ];
+    ].filter(group => !NEMESIS_STUDENT_BUILD || STUDENT_SETTINGS_KEEP.has(group.id));
     const navFooter = (_jsxs(_Fragment, { children: [_jsx(Tip, { label: t.settings.exportConfig, children: _jsx(OverlayIconButton, { onClick: () => void exportConfig(), children: _jsx(Download, {}) }) }), _jsx(Tip, { label: t.settings.importConfig, children: _jsx(OverlayIconButton, { onClick: () => {
                         triggerHaptic('open');
                         importInputRef.current?.click();

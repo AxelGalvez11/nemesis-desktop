@@ -2,6 +2,7 @@ import { jsx as _jsx } from "react/jsx-runtime";
 import { useStore } from '@nanostores/react';
 import { useCallback, useMemo } from 'react';
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel';
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel';
 import { Codicon } from '@/components/ui/codicon';
@@ -276,7 +277,7 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
         },
         {
             className: `w-7 justify-center px-0${terminalTakeover ? ' bg-accent/55 text-foreground' : ''}`,
-            hidden: !chatOpen,
+            hidden: !chatOpen || NEMESIS_STUDENT_BUILD,
             icon: _jsx(Terminal, { className: "size-3.5" }),
             id: 'terminal',
             onSelect: () => setTerminalTakeover(!$terminalTakeover.get()),

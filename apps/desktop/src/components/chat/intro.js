@@ -107,7 +107,7 @@ function fallbackCopyForPersonality(personalityKey) {
 function pickCopy(copies, seed = 0) {
     return copies[Math.abs(seed) % copies.length] || FALLBACK_COPY[0];
 }
-const WORDMARK = 'HERMES AGENT';
+const WORDMARK = 'NEMESIS';
 function resolveCopy(personality, seed) {
     const personalityKey = normalizeKey(personality);
     const copies = NEUTRAL_PERSONALITIES.has(personalityKey)

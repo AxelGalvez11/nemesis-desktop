@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { HUD_HEADING, HUD_ITEM, HUD_POSITION, HUD_SURFACE, HUD_TEXT } from '@/app/floating-hud'
 import { setTerminalTakeover } from '@/app/right-sidebar/store'
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_PALETTE } from '@/nemesis'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { KbdCombo } from '@/components/ui/kbd'
 import { getHermesConfigRecord, listAllProfileSessions } from '@/hermes'
@@ -462,7 +463,7 @@ export function CommandPalette() {
             label: t.starmap.title,
             run: go(STARMAP_ROUTE)
           }
-        ]
+        ].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_PALETTE.has(item.id))
       },
       ...branchGroup,
       {

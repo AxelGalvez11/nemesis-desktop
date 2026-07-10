@@ -95,6 +95,8 @@ import {
   setCurrentCwd
 } from '@/store/session'
 
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis'
+
 import { type AppView, ARTIFACTS_ROUTE, MESSAGING_ROUTE, SKILLS_ROUTE, STUDY_ROUTE } from '../../routes'
 import type { SidebarNavItem } from '../../types'
 
@@ -130,7 +132,7 @@ const NON_SESSION_LOAD_STEP = 10
 
 const NEW_SESSION_KBD = comboTokens('mod+n')
 
-const SIDEBAR_NAV: SidebarNavItem[] = [
+const SIDEBAR_NAV_ALL: SidebarNavItem[] = [
   {
     id: 'new-session',
     label: '',
@@ -147,6 +149,8 @@ const SIDEBAR_NAV: SidebarNavItem[] = [
   { id: 'artifacts', label: '', icon: props => <Codicon name="files" {...props} />, route: ARTIFACTS_ROUTE },
   { id: 'study', label: 'Study', icon: props => <Codicon name="mortar-board" {...props} />, route: STUDY_ROUTE }
 ]
+
+const SIDEBAR_NAV = SIDEBAR_NAV_ALL.filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_NAV.has(item.id))
 
 // Two modes via the `compact` height variant (styles.css):
 //   tall    → each section is shrink-0, capped, its own scroller; Sessions is flex-1.
@@ -1268,7 +1272,7 @@ export function ChatSidebar({
                         </Button>
                       ) : null}
                       <div className="grid size-6 place-items-center">
-                        {!showAllProfiles && agentSessions.length > 0 ? (
+                        {!NEMESIS_STUDENT_BUILD && !showAllProfiles && agentSessions.length > 0 ? (
                           <Button
                             aria-label={agentsGrouped ? s.showSessions : s.showProjects}
                             className={cn(

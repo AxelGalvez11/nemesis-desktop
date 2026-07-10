@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 import { codiconIcon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
+import { NEMESIS_STUDENT_BUILD, STUDENT_SETTINGS_KEEP } from '@/nemesis'
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
@@ -26,7 +27,7 @@ import { PROVIDER_VIEWS, ProvidersSettings, type ProviderView } from './provider
 import { SessionsSettings } from './sessions-settings'
 import type { SettingsPageProps, SettingsView as SettingsViewId } from './types'
 
-const SETTINGS_VIEWS: readonly SettingsViewId[] = [
+const SETTINGS_VIEWS_ALL: readonly SettingsViewId[] = [
   ...SECTIONS.map(s => `config:${s.id}` as SettingsViewId),
   'providers',
   'gateway',
@@ -35,6 +36,10 @@ const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'sessions',
   'about'
 ]
+
+const SETTINGS_VIEWS: readonly SettingsViewId[] = SETTINGS_VIEWS_ALL.filter(
+  view => !NEMESIS_STUDENT_BUILD || STUDENT_SETTINGS_KEEP.has(view)
+)
 
 export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: SettingsPageProps) {
   const { t } = useI18n()
@@ -55,7 +60,11 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     }
   }, [navigate, search])
 
-  const [activeView, setActiveView] = useRouteEnumParam('tab', SETTINGS_VIEWS, 'config:model' as SettingsViewId)
+  const [activeView, setActiveView] = useRouteEnumParam(
+    'tab',
+    SETTINGS_VIEWS,
+    (NEMESIS_STUDENT_BUILD ? 'config:appearance' : 'config:model') as SettingsViewId
+  )
   // Providers subnav (Accounts vs API keys) lives in its own param so each
   // sub-view is deep-linkable and survives a refresh.
   const [providerView, setProviderView] = useRouteEnumParam<ProviderView>('pview', PROVIDER_VIEWS, 'accounts')
@@ -201,7 +210,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       label: t.settings.nav.about,
       onSelect: () => setActiveView('about')
     }
-  ]
+  ].filter(group => !NEMESIS_STUDENT_BUILD || STUDENT_SETTINGS_KEEP.has(group.id))
 
   const navFooter = (
     <>

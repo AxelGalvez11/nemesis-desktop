@@ -3,6 +3,7 @@ import { useCallback, useMemo } from 'react'
 
 import type { CommandCenterSection } from '@/app/command-center'
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
 import { Codicon } from '@/components/ui/codicon'
@@ -397,7 +398,7 @@ export function useStatusbarItems({
       },
       {
         className: `w-7 justify-center px-0${terminalTakeover ? ' bg-accent/55 text-foreground' : ''}`,
-        hidden: !chatOpen,
+        hidden: !chatOpen || NEMESIS_STUDENT_BUILD,
         icon: <Terminal className="size-3.5" />,
         id: 'terminal',
         onSelect: () => setTerminalTakeover(!$terminalTakeover.get()),
