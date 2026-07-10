@@ -186,3 +186,14 @@ export function correctPharmTerms(text) {
     }
     return { changes, corrected: parts.join('') };
 }
+/** Canonical lexicon terms literally present in `text` (word-boundary, case-insensitive).
+ *  Fuel for the Recorder's live-insights pane: cheap enough to run per caption chunk. */
+export function detectPharmTerms(text) {
+    const found = [];
+    for (const term of LEXICON) {
+        if (new RegExp(`\\b${term}\\b`, 'i').test(text)) {
+            found.push(term);
+        }
+    }
+    return found;
+}

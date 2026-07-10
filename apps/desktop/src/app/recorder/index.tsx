@@ -5,7 +5,7 @@
 // ~/Documents/Nemesis Recordings — and, while recording, streams ~8s chunks of the live
 // mix through the local Whisper model so the transcript scrolls in as the lecture happens.
 // On stop, the transcript auto-saves as a Library note (Lectures folder).
-import { IconLock, IconMicrophone } from '@tabler/icons-react'
+import { IconCheck, IconLock, IconMicrophone, IconSparkles } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -16,7 +16,7 @@ import { setComposerDraft } from '@/store/composer'
 
 import { createFolder, saveNote } from '../library/vault'
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes'
-import { correctPharmTerms } from './pharm-lexicon'
+import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
 import { preloadTranscriber, transcribeAudio, transcribeSamples } from './transcribe'
 
 const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
@@ -126,6 +126,9 @@ export function RecorderView() {
   const [liveSegments, setLiveSegments] = useState<string[]>([])
   const [liveStatus, setLiveStatus] = useState('')
   const [lectureNote, setLectureNote] = useState<null | string>(null)
+  // Live insights: drugs the lecture just touched (lexicon spotting, fully on-device).
+  // Tapping queues them; after Stop, one click asks Nemesis about the whole queue.
+  const [insights, setInsights] = useState<{ term: string; at: string; queued: boolean }[]>([])
   const [recordings, setRecordings] = useState<RecordingFile[]>([])
   const [playing, setPlaying] = useState<null | { path: string; src: string }>(null)
   const [transcripts, setTranscripts] = useState<Record<string, string>>({})
@@ -223,7 +226,42 @@ export function RecorderView() {
   const appendLiveSegment = useCallback((text: string) => {
     liveSegmentsRef.current = [...liveSegmentsRef.current, text]
     setLiveSegments(liveSegmentsRef.current)
+
+    const terms = detectPharmTerms(text)
+
+    if (terms.length) {
+      const at = new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+      setInsights(current => {
+        const known = new Set(current.map(insight => insight.term))
+        const fresh = terms.filter(term => !known.has(term)).map(term => ({ at, queued: false, term }))
+
+        return fresh.length ? [...fresh, ...current].slice(0, 30) : current
+      })
+    }
   }, [])
+
+  const toggleQueued = useCallback((term: string) => {
+    setInsights(current =>
+      current.map(insight => (insight.term === term ? { ...insight, queued: !insight.queued } : insight))
+    )
+  }, [])
+
+  const askQueued = useCallback(() => {
+    const queued = insights.filter(insight => insight.queued).map(insight => insight.term)
+
+    if (!queued.length) {
+      return
+    }
+
+    const context = liveSegmentsRef.current.slice(-6).join(' ').slice(-1200)
+    setComposerDraft(
+      `These drugs came up in the lecture I just recorded: ${queued.join(', ')}. ` +
+        'For each, give me the exam-relevant rundown: drug class, mechanism in one line, the classic adverse effect, ' +
+        'and the single interaction I must know — cite PMIDs inline where it matters.' +
+        (context ? `\n\nTranscript context:\n"${context}"` : '')
+    )
+    navigate(NEW_CHAT_ROUTE)
+  }, [insights, navigate])
 
   const pumpLive = useCallback(async () => {
     if (livePumpingRef.current || liveFailedRef.current) {
@@ -354,6 +392,7 @@ export function RecorderView() {
     setLiveSegments([])
     setLiveStatus('')
     setLectureNote(null)
+    setInsights([])
 
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -655,6 +694,36 @@ export function RecorderView() {
                 </div>
               </div>
             )}
+            {liveCaptions && insights.length > 0 && (
+              <div className="w-full max-w-xl rounded-md border border-border bg-muted/30 px-3 py-2 text-left">
+                <div className="flex items-center justify-between pb-1.5">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-primary">
+                    <IconSparkles size={11} />
+                    Live insights — drugs just mentioned
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">tap to queue for Nemesis</span>
+                </div>
+                <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+                  {insights.map(insight => (
+                    <button
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
+                        insight.queued
+                          ? 'border-(--theme-primary) text-foreground'
+                          : 'border-border text-muted-foreground hover:text-foreground'
+                      )}
+                      key={insight.term}
+                      onClick={() => toggleQueued(insight.term)}
+                      type="button"
+                    >
+                      {insight.queued && <IconCheck size={11} />}
+                      {insight.term}
+                      <span className="text-[9px] opacity-60">{insight.at}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <Button onClick={stop} size="lg" variant="secondary">
               Stop &amp; save
             </Button>
@@ -684,9 +753,9 @@ export function RecorderView() {
               Live transcript while recording — auto-saves a lecture note to the Library
             </label>
             {lectureNote && (
-              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs">
-                <span>
-                  Lecture note saved to Library → {LECTURE_FOLDER} <span className="text-primary">✓</span>
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs">
+                <span className="inline-flex items-center gap-1">
+                  Lecture note saved to Library → {LECTURE_FOLDER} <IconCheck className="text-primary" size={12} />
                 </span>
                 <Button
                   className="h-6 px-2 text-xs"
@@ -696,6 +765,13 @@ export function RecorderView() {
                 >
                   Open note
                 </Button>
+                {insights.some(insight => insight.queued) && (
+                  <Button className="h-6 px-2 text-xs" onClick={askQueued} size="sm" variant="secondary">
+                    <IconSparkles size={12} />
+                    Ask about {insights.filter(insight => insight.queued).length} queued drug
+                    {insights.filter(insight => insight.queued).length === 1 ? '' : 's'}
+                  </Button>
+                )}
               </div>
             )}
             <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">

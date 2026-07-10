@@ -4,7 +4,7 @@
 // traffic); this is the per-answer receipt.
 import { type FC, useMemo } from 'react'
 
-import { sourcesFromText } from '@/app/right-sidebar/sources'
+import { SourceFavicon, sourcesFromText } from '@/app/right-sidebar/sources'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 
 export const MessageSources: FC<{ text: string }> = ({ text }) => {
@@ -24,6 +24,7 @@ export const MessageSources: FC<{ text: string }> = ({ text }) => {
           title={`${source.title}\n${source.url}`}
           type="button"
         >
+          <SourceFavicon domain={source.domain} />
           <span className="text-[10px] font-semibold uppercase tracking-wide text-(--theme-primary)">
             {source.badge}
           </span>

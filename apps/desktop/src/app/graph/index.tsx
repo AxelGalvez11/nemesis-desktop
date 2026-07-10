@@ -3,6 +3,7 @@
 // community 3D graph plugin). Clicking a node opens that note in the Library; wikilink
 // targets that don't exist yet render as dim "ghost" nodes and a click CREATES the note
 // (Obsidian's edit affordance), so the graph is a place to grow the vault, not just view it.
+import { IconAdjustmentsHorizontal } from '@tabler/icons-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -18,12 +19,83 @@ interface GraphNode {
   ghost?: boolean
 }
 
+// Structural slice of the 3d-force-graph instance we tune at runtime.
+interface TunableGraph {
+  nodeRelSize: (n: number) => unknown
+  d3Force: (name: string) => undefined | { distance?: (n: number) => unknown; strength?: (n: number) => unknown }
+  d3ReheatSimulation: () => unknown
+  controls: () => { autoRotate?: boolean }
+}
+
+interface GraphControlsState {
+  nodeSize: number
+  spread: number
+  repulsion: number
+  rotate: boolean
+}
+
+const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1'
+const DEFAULT_CONTROLS: GraphControlsState = { nodeSize: 4, repulsion: 40, rotate: true, spread: 34 }
+
+function loadControls(): GraphControlsState {
+  try {
+    const raw = window.localStorage.getItem(GRAPH_SETTINGS_KEY)
+
+    if (raw) {
+      return { ...DEFAULT_CONTROLS, ...(JSON.parse(raw) as Partial<GraphControlsState>) }
+    }
+  } catch {
+    // fall through to defaults
+  }
+
+  return DEFAULT_CONTROLS
+}
+
+function ControlSlider({
+  label,
+  max,
+  min,
+  onChange,
+  step,
+  value
+}: {
+  label: string
+  max: number
+  min: number
+  onChange: (value: number) => void
+  step: number
+  value: number
+}) {
+  return (
+    <label className="mb-2 block">
+      <span className="flex items-center justify-between text-xs text-muted-foreground">
+        {label}
+        <span className="tabular-nums">{value}</span>
+      </span>
+      <input
+        className="w-full accent-(--theme-primary)"
+        max={max}
+        min={min}
+        onChange={event => onChange(Number(event.target.value))}
+        step={step}
+        type="range"
+        value={value}
+      />
+    </label>
+  )
+}
+
 export function GraphView() {
   const hostRef = useRef<HTMLDivElement | null>(null)
+  const graphRef = useRef<null | TunableGraph>(null)
   const navigate = useNavigate()
   const [status, setStatus] = useState<'empty' | 'error' | 'loading' | 'ready'>('loading')
   const [noteCount, setNoteCount] = useState(0)
   const [ghostCount, setGhostCount] = useState(0)
+  const [controls, setControls] = useState<GraphControlsState>(() => loadControls())
+  const [panelOpen, setPanelOpen] = useState(false)
+  const controlsRef = useRef(controls)
+  controlsRef.current = controls
 
   useEffect(() => {
     const host = hostRef.current
@@ -92,7 +164,7 @@ export function GraphView() {
               ? `<div style="font: 12px sans-serif; color:#aaa">${graphNode.id} — click to create this note</div>`
               : `<div style="font: 12px sans-serif; color:#eee">${graphNode.id}</div>`
           })
-          .nodeRelSize(4)
+          .nodeRelSize(controlsRef.current.nodeSize)
           .nodeColor((node: object) => {
             const graphNode = node as GraphNode
 
@@ -131,9 +203,9 @@ export function GraphView() {
         instance.onEngineStop(() => instance.zoomToFit(500, 110))
         window.setTimeout(() => instance.zoomToFit(700, 110), 1500)
 
-        const controls = instance.controls() as { autoRotate?: boolean; autoRotateSpeed?: number }
-        controls.autoRotate = true
-        controls.autoRotateSpeed = 0.5
+        const orbit = instance.controls() as { autoRotate?: boolean; autoRotateSpeed?: number }
+        orbit.autoRotate = controlsRef.current.rotate
+        orbit.autoRotateSpeed = 0.5
 
         observer = new ResizeObserver(() => {
           instance.width(host.clientWidth || 800)
@@ -142,6 +214,7 @@ export function GraphView() {
         observer.observe(host)
 
         graph = instance
+        graphRef.current = instance as unknown as TunableGraph
         setNoteCount(notes.length)
         setGhostCount(ghostByLower.size)
         setStatus('ready')
@@ -155,9 +228,32 @@ export function GraphView() {
     return () => {
       disposed = true
       observer?.disconnect()
+      graphRef.current = null
       graph?._destructor?.()
     }
   }, [navigate])
+
+  // Live-apply the tuning panel: size, spread (link distance), repulsion (charge),
+  // rotation — then reheat so the layout actually re-settles.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(GRAPH_SETTINGS_KEY, JSON.stringify(controls))
+    } catch {
+      // persistence is best-effort
+    }
+
+    const graph = graphRef.current
+
+    if (!graph || status !== 'ready') {
+      return
+    }
+
+    graph.nodeRelSize(controls.nodeSize)
+    graph.d3Force('link')?.distance?.(controls.spread)
+    graph.d3Force('charge')?.strength?.(-controls.repulsion)
+    graph.d3ReheatSimulation()
+    graph.controls().autoRotate = controls.rotate
+  }, [controls, status])
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -173,10 +269,64 @@ export function GraphView() {
         )}
       </header>
       {status === 'ready' && (
-        <div className="absolute right-6 top-5 z-10">
-          <Button onClick={() => navigate(`${LIBRARY_ROUTE}?create=note`)} size="sm" variant="outline">
-            + New note
-          </Button>
+        <div className="absolute right-6 top-5 z-10 flex flex-col items-end gap-2">
+          <div className="flex gap-2">
+            <Button
+              aria-label="Graph settings"
+              onClick={() => setPanelOpen(value => !value)}
+              size="sm"
+              variant={panelOpen ? 'secondary' : 'outline'}
+            >
+              <IconAdjustmentsHorizontal size={14} />
+            </Button>
+            <Button onClick={() => navigate(`${LIBRARY_ROUTE}?create=note`)} size="sm" variant="outline">
+              + New note
+            </Button>
+          </div>
+          {panelOpen && (
+            <div className="w-60 rounded-lg border border-border bg-card/95 p-3 backdrop-blur">
+              <ControlSlider
+                label="Node size"
+                max={10}
+                min={1}
+                onChange={nodeSize => setControls(current => ({ ...current, nodeSize }))}
+                step={0.5}
+                value={controls.nodeSize}
+              />
+              <ControlSlider
+                label="Spread"
+                max={120}
+                min={10}
+                onChange={spread => setControls(current => ({ ...current, spread }))}
+                step={2}
+                value={controls.spread}
+              />
+              <ControlSlider
+                label="Repulsion"
+                max={140}
+                min={0}
+                onChange={repulsion => setControls(current => ({ ...current, repulsion }))}
+                step={5}
+                value={controls.repulsion}
+              />
+              <label className="mt-2 flex cursor-pointer items-center justify-between text-xs text-muted-foreground">
+                Slow auto-rotate
+                <input
+                  checked={controls.rotate}
+                  className="accent-(--theme-primary)"
+                  onChange={event => setControls(current => ({ ...current, rotate: event.target.checked }))}
+                  type="checkbox"
+                />
+              </label>
+              <button
+                className="mt-2 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                onClick={() => setControls(DEFAULT_CONTROLS)}
+                type="button"
+              >
+                Reset to defaults
+              </button>
+            </div>
+          )}
         </div>
       )}
       {status === 'error' && (

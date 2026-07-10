@@ -3,7 +3,7 @@
 // list. This replaces the developer file-tree as the default right-sidebar pane: students
 // ask evidence questions, so the rail should answer "where did that come from?".
 import { useStore } from '@nanostores/react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import { type ChatMessage, chatMessageText } from '@/lib/chat-messages'
 import { $messages } from '@/store/session'
@@ -210,6 +210,30 @@ export function extractSources(messages: readonly ChatMessage[]): SourceRef[] {
   return out.slice(0, 100)
 }
 
+/** Site icon for a pill — the domain's own favicon, falling back to a letter badge
+ *  (api subdomains and offline mode often have no icon to fetch). */
+export function SourceFavicon({ domain }: { domain: string }) {
+  const [failed, setFailed] = useState(false)
+
+  if (failed) {
+    return (
+      <span className="grid size-4 shrink-0 place-items-center rounded-sm bg-(--theme-primary)/15 text-[9px] font-bold text-(--theme-primary)">
+        {domain.charAt(0).toUpperCase()}
+      </span>
+    )
+  }
+
+  return (
+    <img
+      alt=""
+      className="size-4 shrink-0 rounded-sm"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      src={`https://${domain}/favicon.ico`}
+    />
+  )
+}
+
 export function SourcesTab() {
   const messages = useStore($messages)
   const sources = useMemo(() => extractSources(messages), [messages])
@@ -234,16 +258,17 @@ export function SourcesTab() {
           <div className="flex flex-wrap gap-1.5">
             {sources.map(source => (
               <button
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-foreground/85 transition-colors hover:border-(--theme-primary) hover:text-foreground"
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2 py-1 text-[11px] text-foreground/85 transition-colors hover:border-(--theme-primary) hover:text-foreground"
                 key={source.url}
                 onClick={() => openExternal(source.url)}
                 title={`${source.title}\n${source.url}`}
                 type="button"
               >
+                <SourceFavicon domain={source.domain} />
                 <span className="font-semibold uppercase tracking-wide text-[10px] text-(--theme-primary)">
                   {source.badge}
                 </span>
-                <span className="max-w-[9.5rem] truncate text-muted-foreground">{source.title}</span>
+                <span className="max-w-[8.5rem] truncate text-muted-foreground">{source.title}</span>
               </button>
             ))}
           </div>

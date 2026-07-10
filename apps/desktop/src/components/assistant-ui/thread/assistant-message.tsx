@@ -14,6 +14,7 @@ import {
   messageContentText,
   pickPrimaryPreviewTarget
 } from '@/components/assistant-ui/thread/content'
+import { ActivityStrip } from '@/components/assistant-ui/thread/activity-strip'
 import { MESSAGE_PARTS_COMPONENTS } from '@/components/assistant-ui/thread/message-parts'
 import { MessageSources } from '@/components/assistant-ui/thread/message-sources'
 import { StreamStallIndicator } from '@/components/assistant-ui/thread/status'
@@ -104,6 +105,7 @@ export const AssistantMessage: FC<{
         data-slot="aui_assistant-message-content"
       >
         {/* Todos render in the composer status stack now, not inline. */}
+        <ActivityStrip />
         <MessagePrimitive.Parts components={MESSAGE_PARTS_COMPONENTS} />
         {isRunning && <StreamStallIndicator />}
         {previewTargets.length > 0 && (

@@ -1853,3 +1853,13 @@ text-* variant utilities. */ .btn-arc {
 .nemesis-prose-editor .cm-editor.cm-focused {
   outline: none !important;
 }
+
+/* Nemesis student build: once a turn settles, its activity trail (thinking
+   disclosures + tool rows) folds behind the ActivityStrip's "Worked through
+   N steps" toggle. While running (data-nemesis-activity='live') nothing hides,
+   so live previews and tool-approval buttons stay fully interactive. */
+[data-nemesis-activity='collapsed'] [data-slot='aui_thinking-disclosure'],
+[data-nemesis-activity='collapsed'] [data-slot='tool-block'],
+[data-nemesis-activity='collapsed'] [data-tool-group] {
+  display: none;
+}
