@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { markDeckFileImported, scanDeckFiles } from './deck-files';
 import { parseCardPaste } from './import-cards';
 import { addCard, buildQueue, deckStats, deleteCard, deleteDeck, freshId, gradeCard, groupDecks, loadState, previewIntervals, reviewHeatmap, saveState, studyMotivation, toggleSuspendCard, updateCard } from './model';
 const GRADES = [
@@ -40,6 +41,7 @@ export function StudyView() {
     const [newDeckOpen, setNewDeckOpen] = useState(false);
     const [view, setView] = useState(() => loadViewMode());
     const [done, setDone] = useState(0);
+    const [autoImported, setAutoImported] = useState([]);
     const now = useMemo(() => new Date(), [state, reviewing]);
     const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now]);
     const current = queue[0];
@@ -47,6 +49,47 @@ export function StudyView() {
     const update = useCallback((next) => {
         setState(next);
         saveState(next);
+    }, []);
+    // Agent-created decks: import any new deck files Nemesis wrote into the vault's
+    // Flashcards folder (see deck-files.ts). Runs once per page visit.
+    useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+            const candidates = await scanDeckFiles();
+            if (cancelled || !candidates.length) {
+                return;
+            }
+            const importedNames = [];
+            setState(current => {
+                let next = current;
+                for (const candidate of candidates) {
+                    markDeckFileImported(candidate.fileName);
+                    if (!candidate.cards.length) {
+                        continue;
+                    }
+                    const deck = {
+                        id: freshId('deck'),
+                        name: candidate.name,
+                        course: candidate.course,
+                        createdAt: new Date().toISOString(),
+                        cards: candidate.cards.map(card => ({ back: card.back, front: card.front, id: freshId('card'), tags: [] }))
+                    };
+                    next = { ...next, decks: [...next.decks, deck] };
+                    importedNames.push(candidate.name);
+                }
+                if (next !== current) {
+                    saveState(next);
+                }
+                return next;
+            });
+            if (importedNames.length) {
+                setAutoImported(importedNames);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     const startReview = useCallback((deckId) => {
         setReviewDeckId(deckId);
@@ -144,7 +187,7 @@ export function StudyView() {
     return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: [_jsxs("header", { className: "flex shrink-0 items-center justify-between gap-3 px-6 pb-3 pt-5", children: [_jsxs("div", { children: [_jsx("h1", { className: "text-lg font-semibold", children: "Study" }), _jsxs("p", { className: "text-xs text-muted-foreground", children: [totals.due, " due \u00B7 ", totals.fresh, " new \u00B7 ", totals.total, " cards"] })] }), _jsx("div", { className: "flex items-center gap-2", children: reviewing || browseDeckId ? (_jsx(Button, { onClick: () => {
                                 exitReview();
                                 setBrowseDeckId(null);
-                            }, size: "sm", variant: "outline", children: "Back to decks" })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mr-1 flex items-center overflow-hidden rounded-md border border-border", children: [_jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'cards' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('cards'), title: "Card view", type: "button", children: _jsx(IconLayoutGrid, { size: 14 }) }), _jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'list' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('list'), title: "List view", type: "button", children: _jsx(IconList, { size: 14 }) })] }), _jsx(Button, { onClick: () => setNewDeckOpen(true), size: "sm", variant: "outline", children: "New deck" }), _jsx(Button, { onClick: () => setImportOpen(true), size: "sm", variant: "outline", children: "Import cards" }), _jsx(Button, { disabled: totals.due === 0, onClick: () => startReview(null), size: "sm", children: "Study all" })] })) })] }), reviewing ? (current ? (_jsx(ReviewSurface, { done: done, item: current, intervals: previewIntervals(state, current.card.id, now), onGrade: grade, onReveal: () => setRevealed(true), remaining: queue.length, revealed: revealed })) : (_jsx(EmptyState, { className: "flex-1", description: done > 0 ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.` : 'Nothing is due right now.', title: "All caught up" }))) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), state: state })) : (_jsx(DeckBrowser, { onBrowse: setBrowseDeckId, onStudy: startReview, state: state, view: view })), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen }), newDeckOpen && _jsx(NewDeckDialog, { onClose: () => setNewDeckOpen(false), onCreate: createDeck })] }));
+                            }, size: "sm", variant: "outline", children: "Back to decks" })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mr-1 flex items-center overflow-hidden rounded-md border border-border", children: [_jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'cards' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('cards'), title: "Card view", type: "button", children: _jsx(IconLayoutGrid, { size: 14 }) }), _jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'list' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('list'), title: "List view", type: "button", children: _jsx(IconList, { size: 14 }) })] }), _jsx(Button, { onClick: () => setNewDeckOpen(true), size: "sm", variant: "outline", children: "New deck" }), _jsx(Button, { onClick: () => setImportOpen(true), size: "sm", variant: "outline", children: "Import cards" }), _jsx(Button, { disabled: totals.due === 0, onClick: () => startReview(null), size: "sm", children: "Study all" })] })) })] }), autoImported.length > 0 && !reviewing && !browseDeckId && (_jsxs("div", { className: "mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs", children: [_jsxs("span", { children: ["Nemesis added ", autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`, ":", ' ', autoImported.join(', ')] }), _jsx("button", { className: "text-muted-foreground hover:text-foreground", onClick: () => setAutoImported([]), type: "button", children: "Dismiss" })] })), reviewing ? (current ? (_jsx(ReviewSurface, { done: done, item: current, intervals: previewIntervals(state, current.card.id, now), onGrade: grade, onReveal: () => setRevealed(true), remaining: queue.length, revealed: revealed })) : (_jsx(EmptyState, { className: "flex-1", description: done > 0 ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.` : 'Nothing is due right now.', title: "All caught up" }))) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), state: state })) : (_jsx(DeckBrowser, { onBrowse: setBrowseDeckId, onStudy: startReview, state: state, view: view })), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen }), newDeckOpen && _jsx(NewDeckDialog, { onClose: () => setNewDeckOpen(false), onCreate: createDeck })] }));
 }
 function NewDeckDialog({ onClose, onCreate }) {
     const [name, setName] = useState('');

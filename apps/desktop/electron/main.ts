@@ -8584,7 +8584,7 @@ app.whenReady().then(() => {
   // Nemesis data folders. The fs:writeText IPC requires the parent directory to
   // already exist, so the Library (notes vault) and Recordings homes are created
   // here once; the renderer then reads/writes inside them via the existing IPC.
-  for (const dir of ['Nemesis Library', 'Nemesis Recordings']) {
+  for (const dir of ['Nemesis Library', 'Nemesis Recordings', path.join('Nemesis Library', 'Flashcards')]) {
     try {
       fs.mkdirSync(path.join(os.homedir(), 'Documents', dir), { recursive: true })
     } catch {

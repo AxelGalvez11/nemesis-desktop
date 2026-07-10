@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
+import { markDeckFileImported, scanDeckFiles } from './deck-files'
 import { parseCardPaste } from './import-cards'
 import {
   addCard,
@@ -74,6 +75,7 @@ export function StudyView() {
   const [newDeckOpen, setNewDeckOpen] = useState(false)
   const [view, setView] = useState<DeckViewMode>(() => loadViewMode())
   const [done, setDone] = useState(0)
+  const [autoImported, setAutoImported] = useState<string[]>([])
 
   const now = useMemo(() => new Date(), [state, reviewing])
   const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now])
@@ -83,6 +85,59 @@ export function StudyView() {
   const update = useCallback((next: StudyState) => {
     setState(next)
     saveState(next)
+  }, [])
+
+  // Agent-created decks: import any new deck files Nemesis wrote into the vault's
+  // Flashcards folder (see deck-files.ts). Runs once per page visit.
+  useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      const candidates = await scanDeckFiles()
+
+      if (cancelled || !candidates.length) {
+        return
+      }
+
+      const importedNames: string[] = []
+
+      setState(current => {
+        let next = current
+
+        for (const candidate of candidates) {
+          markDeckFileImported(candidate.fileName)
+
+          if (!candidate.cards.length) {
+            continue
+          }
+
+          const deck: StudyDeck = {
+            id: freshId('deck'),
+            name: candidate.name,
+            course: candidate.course,
+            createdAt: new Date().toISOString(),
+            cards: candidate.cards.map(card => ({ back: card.back, front: card.front, id: freshId('card'), tags: [] }))
+          }
+          next = { ...next, decks: [...next.decks, deck] }
+          importedNames.push(candidate.name)
+        }
+
+        if (next !== current) {
+          saveState(next)
+        }
+
+        return next
+      })
+
+      if (importedNames.length) {
+        setAutoImported(importedNames)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const startReview = useCallback((deckId: null | string) => {
@@ -275,6 +330,22 @@ export function StudyView() {
           )}
         </div>
       </header>
+
+      {autoImported.length > 0 && !reviewing && !browseDeckId && (
+        <div className="mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs">
+          <span>
+            Nemesis added {autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`}:{' '}
+            {autoImported.join(', ')}
+          </span>
+          <button
+            className="text-muted-foreground hover:text-foreground"
+            onClick={() => setAutoImported([])}
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {reviewing ? (
         current ? (
