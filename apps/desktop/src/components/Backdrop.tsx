@@ -1,6 +1,8 @@
 import { Leva, useControls } from 'leva'
 import { type CSSProperties, useEffect, useState } from 'react'
 
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
+
 const BLEND_MODES = [
   'normal',
   'multiply',
@@ -87,7 +89,7 @@ export function Backdrop() {
     <>
       <Leva collapsed hidden={!import.meta.env.DEV || !controlsOpen} titleBar={{ title: 'backdrop', drag: true }} />
 
-      {statue.enabled && (
+      {statue.enabled && !NEMESIS_STUDENT_BUILD && (
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 z-2"

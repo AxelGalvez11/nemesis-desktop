@@ -1,6 +1,7 @@
 import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-runtime";
 import { Leva, useControls } from 'leva';
 import { useEffect, useState } from 'react';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 const BLEND_MODES = [
     'normal',
     'multiply',
@@ -60,7 +61,7 @@ export function Backdrop() {
         },
         scale: { value: 160, min: 100, max: 300, step: 5, label: 'height (dvh)' }
     }, { collapsed: true });
-    return (_jsxs(_Fragment, { children: [_jsx(Leva, { collapsed: true, hidden: !import.meta.env.DEV || !controlsOpen, titleBar: { title: 'backdrop', drag: true } }), statue.enabled && (_jsx("div", { "aria-hidden": true, className: "pointer-events-none absolute inset-0 z-2", style: {
+    return (_jsxs(_Fragment, { children: [_jsx(Leva, { collapsed: true, hidden: !import.meta.env.DEV || !controlsOpen, titleBar: { title: 'backdrop', drag: true } }), statue.enabled && !NEMESIS_STUDENT_BUILD && (_jsx("div", { "aria-hidden": true, className: "pointer-events-none absolute inset-0 z-2", style: {
                     mixBlendMode: statue.blendMode,
                     opacity: statue.opacity
                 }, children: _jsx("img", { alt: "", className: "w-auto min-w-dvw object-cover", fetchPriority: "low", src: assetPath('ds-assets/filler-bg0.jpg'), style: {
