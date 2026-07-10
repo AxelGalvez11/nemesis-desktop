@@ -25,9 +25,11 @@ import {
   deckStats,
   freshId,
   gradeCard,
+  groupDecks,
   loadState,
   previewIntervals,
   type QueueItem,
+  reviewHeatmap,
   saveState,
   type StudyDeck,
   type StudyRating,
@@ -199,7 +201,7 @@ export function StudyView() {
           />
         )
       ) : (
-        <DeckGrid onStudy={startReview} state={state} />
+        <DeckBrowser onStudy={startReview} state={state} />
       )}
 
       <ImportDialog onImport={importCards} onOpenChange={setImportOpen} open={importOpen} />
@@ -207,38 +209,93 @@ export function StudyView() {
   )
 }
 
-function DeckGrid({ onStudy, state }: { onStudy: (deckId: string) => void; state: StudyState }) {
+function DeckBrowser({ onStudy, state }: { onStudy: (deckId: string) => void; state: StudyState }) {
   const now = new Date()
+  const groups = groupDecks(state, now)
 
   if (!state.decks.length) {
     return <EmptyState className="flex-1" description="Import cards to build your first deck." title="No decks yet" />
   }
 
   return (
-    <div className="grid grid-cols-1 gap-3 px-6 pb-6 md:grid-cols-2 xl:grid-cols-3">
-      {state.decks.map(deck => {
-        const stats = deckStats(state, deck.id, now)
-
-        return (
-          <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4" key={deck.id}>
-            <div className="min-w-0">
-              <div className="flex items-start justify-between gap-2">
-                <div className="truncate text-sm font-medium">{deck.name}</div>
-                {stats.due > 0 && <Badge variant="muted">{stats.due} due</Badge>}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {deck.course ? `${deck.course} · ` : ''}
-                {stats.total} cards · {stats.fresh} new
-              </div>
-            </div>
-            <div className="mt-auto">
-              <Button disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
-                {stats.due > 0 ? 'Study' : 'Done for now'}
-              </Button>
-            </div>
+    <div className="pb-8">
+      <Heatmap state={state} />
+      {groups.map(group => (
+        <section className="px-6 pt-5" key={group.course}>
+          <div className="mb-2 flex items-baseline justify-between border-b border-border pb-1.5">
+            <h2 className="text-sm font-semibold">{group.course}</h2>
+            <span className="text-xs text-muted-foreground">
+              {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} · {group.stats.total} cards
+            </span>
           </div>
-        )
-      })}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {group.decks.map(deck => (
+              <DeckCard deck={deck} key={deck.id} now={now} onStudy={onStudy} state={state} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function DeckCard({
+  deck,
+  now,
+  onStudy,
+  state
+}: {
+  deck: StudyDeck
+  now: Date
+  onStudy: (deckId: string) => void
+  state: StudyState
+}) {
+  const stats = deckStats(state, deck.id, now)
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
+      <div className="min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="truncate text-sm font-medium">{deck.name}</div>
+          {stats.due > 0 && <Badge variant="muted">{stats.due} due</Badge>}
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {stats.total} cards · {stats.fresh} new
+        </div>
+      </div>
+      <div className="mt-auto">
+        <Button disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
+          {stats.due > 0 ? 'Study' : 'Done for now'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// GitHub-style contribution grid of review activity. Crimson intensity by daily count.
+const HEAT_MIX = ['', '30%', '52%', '76%', '100%']
+
+function Heatmap({ state }: { state: StudyState }) {
+  const { cells, total } = useMemo(() => reviewHeatmap(state, new Date().toISOString()), [state])
+
+  return (
+    <div className="px-6 pt-1">
+      <div className="mb-2 text-xs text-muted-foreground">{total} reviews in the last 18 weeks</div>
+      <div className="grid grid-flow-col grid-rows-7 gap-[3px]" style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}>
+        {cells.map(cell => (
+          <div
+            className="rounded-[2px]"
+            key={cell.date}
+            style={{
+              backgroundColor:
+                cell.level === 0
+                  ? 'color-mix(in srgb, gray 16%, transparent)'
+                  : `color-mix(in srgb, var(--theme-primary) ${HEAT_MIX[cell.level]}, transparent)`
+            }}
+            title={`${cell.date}: ${cell.count} review${cell.count === 1 ? '' : 's'}`}
+          />
+        ))}
+      </div>
     </div>
   )
 }

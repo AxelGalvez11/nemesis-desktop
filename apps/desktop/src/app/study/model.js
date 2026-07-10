@@ -5,7 +5,9 @@
 // v1 persistence is a small localStorage JSON blob (same pattern as store/onboarding);
 // the upgrade path is backend/vault storage once Nemesis accounts land.
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
-const STORAGE_KEY = 'nemesis.study.v1';
+// Bumped to v2 for the grouped-decks + heatmap seed. Pre-release, so discarding the old
+// demo blob is fine; once real student data exists this needs a migration, not a bump.
+const STORAGE_KEY = 'nemesis.study.v2';
 const QUEUE_LIMIT = 200;
 const scheduler = fsrs();
 const RATING = {
@@ -48,7 +50,7 @@ export function loadState() {
     catch {
         // corrupted blob → fall through to a fresh seeded state
     }
-    return { version: 1, decks: [seedDeck()], schedule: {}, reviews: [] };
+    return { version: 1, decks: seedDecks(), schedule: {}, reviews: seedReviews() };
 }
 export function saveState(state) {
     try {
@@ -108,6 +110,52 @@ export function gradeCard(state, cardId, rating, now) {
         reviews: [...state.reviews, { cardId, rating, at: now.toISOString() }]
     };
 }
+/** Group decks by course (the "folder"). Ungrouped decks fall under "Other". Pure. */
+export function groupDecks(state, now) {
+    const byCourse = new Map();
+    for (const deck of state.decks) {
+        const key = deck.course?.trim() || 'Other';
+        const list = byCourse.get(key) ?? [];
+        list.push(deck);
+        byCourse.set(key, list);
+    }
+    return [...byCourse.entries()]
+        .map(([course, decks]) => ({
+        course,
+        decks,
+        stats: decks.reduce((sum, deck) => {
+            const s = deckStats(state, deck.id, now);
+            return { due: sum.due + s.due, fresh: sum.fresh + s.fresh, total: sum.total + s.total };
+        }, { due: 0, fresh: 0, total: 0 })
+    }))
+        .sort((a, b) => (b.stats.due - a.stats.due) || a.course.localeCompare(b.course));
+}
+/** GitHub-style contribution grid: review counts per day for the last `weeks` weeks,
+ *  laid out oldest→newest, each column a Sun-anchored week. Pure. */
+export function reviewHeatmap(state, todayIso, weeks = 18) {
+    const perDay = new Map();
+    for (const review of state.reviews) {
+        const day = review.at.slice(0, 10); // UTC calendar day from the ISO timestamp
+        perDay.set(day, (perDay.get(day) ?? 0) + 1);
+    }
+    // Work entirely in UTC so the per-day keys (UTC) and cell dates (UTC) always agree,
+    // regardless of the machine's timezone. Anchor on the UTC Sunday that starts the window.
+    const DAY = 86_400_000;
+    const todayUtc = new Date(`${todayIso.slice(0, 10)}T00:00:00.000Z`);
+    // End the grid on this week's Saturday (so today is always in the last column, GitHub-style)
+    // and start `weeks` Sundays back — columns stay Sun→Sat aligned.
+    const endMs = todayUtc.getTime() + (6 - todayUtc.getUTCDay()) * DAY;
+    const startMs = endMs - (weeks * 7 - 1) * DAY;
+    const cells = [];
+    let total = 0;
+    for (let i = 0; i < weeks * 7; i++) {
+        const iso = new Date(startMs + i * DAY).toISOString().slice(0, 10);
+        const count = perDay.get(iso) ?? 0;
+        total += count;
+        cells.push({ count, date: iso, level: count === 0 ? 0 : count < 5 ? 1 : count < 12 ? 2 : count < 25 ? 3 : 4 });
+    }
+    return { cells, total };
+}
 /** Interval each grade would schedule, humanized — the hint row under the grade buttons. */
 export function previewIntervals(state, cardId, now) {
     const stored = state.schedule[cardId];
@@ -141,12 +189,13 @@ export function freshId(prefix) {
     idCounter += 1;
     return `${prefix}-${Date.now().toString(36)}-${idCounter.toString(36)}`;
 }
-/** Demo deck so the page teaches itself on first open. Application-level pharm cards, not "what is X" filler. */
-function seedDeck() {
+/** Demo decks across two courses so the page (and its grouping) teaches itself on first open.
+ *  Application-level pharm cards, not "what is X" filler. */
+function seedDecks() {
     const card = (front, back, tags) => ({ id: freshId('card'), front, back, tags });
-    return {
+    const cardio = {
         id: freshId('deck'),
-        name: 'Cardio pharm essentials (demo)',
+        name: 'Cardio pharm essentials',
         course: 'Pharmacology',
         createdAt: new Date().toISOString(),
         cards: [
@@ -160,4 +209,41 @@ function seedDeck() {
             card('Warfarin patient starts TMP-SMX for a UTI. What happens to the INR and why?', 'INR rises — TMP-SMX inhibits CYP2C9 (warfarin metabolism) and displaces protein binding. Bleeding risk: monitor INR closely or pick another agent.', ['anticoagulants', 'interactions'])
         ]
     };
+    const antimicrobials = {
+        id: freshId('deck'),
+        name: 'Antimicrobial pearls',
+        course: 'Infectious disease',
+        createdAt: new Date().toISOString(),
+        cards: [
+            card('Why is vancomycin trough (or AUC) monitoring required, and what toxicity does it guard against?', 'Narrow therapeutic window — nephrotoxicity (and, classically, ototoxicity). AUC/MIC ≥ 400 targets efficacy while limiting kidney injury.', ['vancomycin', 'monitoring']),
+            card('A patient on ciprofloxacin should avoid taking it with what common products, and why?', 'Di/trivalent cations — antacids, calcium, iron, dairy — chelate fluoroquinolones and slash absorption. Separate doses by 2-6 hours.', ['fluoroquinolones', 'interactions']),
+            card('Which antibiotic class carries a disulfiram-like reaction with alcohol, and name the prototype.', 'Nitroimidazoles — metronidazole. Alcohol → flushing, nausea, tachycardia. Counsel to avoid alcohol during and 3 days after.', ['metronidazole', 'counseling']),
+            card('Cell-wall synthesis inhibitor vs protein-synthesis inhibitor: which bucket do beta-lactams vs macrolides fall in?', 'Beta-lactams (penicillins, cephalosporins) inhibit cell-wall synthesis. Macrolides (azithromycin) bind the 50S ribosome to block protein synthesis.', ['mechanisms'])
+        ]
+    };
+    return [cardio, antimicrobials];
+}
+/** Demo review history so the activity heatmap isn't blank on first open — a realistic
+ *  (deterministic) scatter over the last ~12 weeks. These are demo entries tied to no real
+ *  card; the student's real reviews append here as they study, and the grid always counts
+ *  the true contents of `reviews`. Clearing/rebuilding decks does not remove them until the
+ *  student studies for real. */
+function seedReviews() {
+    const out = [];
+    const today = new Date();
+    for (let daysAgo = 84; daysAgo >= 1; daysAgo--) {
+        const date = new Date(today);
+        date.setDate(today.getDate() - daysAgo);
+        const weekend = date.getDay() === 0 || date.getDay() === 6;
+        // Deterministic pseudo-organic intensity (no RNG): weekdays busier, some rest days.
+        const wobble = ((daysAgo * 2654435761) % 97) / 97;
+        const base = weekend ? 4 : 13;
+        const count = Math.max(0, Math.round(base * wobble * 1.7) - (wobble < 0.22 ? base : 0));
+        for (let i = 0; i < count; i++) {
+            const at = new Date(date);
+            at.setHours(9 + (i % 12), (i * 7) % 60, 0, 0);
+            out.push({ at: at.toISOString(), cardId: `seed#${daysAgo}#${i}`, rating: wobble > 0.6 ? 'good' : 'hard' });
+        }
+    }
+    return out;
 }
