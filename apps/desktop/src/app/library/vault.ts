@@ -15,7 +15,7 @@ export interface VaultNote {
   folder: string
 }
 
-export type VaultFileKind = 'pdf' | 'slides' | 'doc' | 'image' | 'other'
+export type VaultFileKind = 'pdf' | 'slides' | 'doc' | 'image' | 'html' | 'other'
 
 export interface VaultFile {
   name: string
@@ -35,6 +35,7 @@ function fileKind(name: string): null | VaultFileKind {
   const ext = name.toLowerCase().split('.').pop() ?? ''
 
   if (ext === 'pdf') return 'pdf'
+  if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'pptx' || ext === 'ppt' || ext === 'key') return 'slides'
   if (ext === 'docx' || ext === 'doc' || ext === 'pages') return 'doc'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image'

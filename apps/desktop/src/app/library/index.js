@@ -233,13 +233,15 @@ export function LibraryView() {
 function FileGlyph({ kind }) {
     const Icon = kind === 'pdf'
         ? IconFileTypePdf
-        : kind === 'slides'
+        : kind === 'html'
             ? IconPresentation
-            : kind === 'image'
-                ? IconPhoto
-                : kind === 'doc'
-                    ? IconFileText
-                    : IconPaperclip;
+            : kind === 'slides'
+                ? IconPresentation
+                : kind === 'image'
+                    ? IconPhoto
+                    : kind === 'doc'
+                        ? IconFileText
+                        : IconPaperclip;
     return _jsx(Icon, { className: "-mt-px mr-1.5 inline shrink-0 opacity-70", size: 14 });
 }
 function TreeLevel({ collapsed, depth, node, onSelect, onToggle, selection }) {
@@ -265,7 +267,7 @@ function FilePreview({ file }) {
     const url = fileUrl(file.path);
     const openExternal = () => void window.hermesDesktop?.openExternal?.(url);
     const reveal = () => void window.hermesDesktop?.revealPath?.(file.path);
-    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between gap-2 px-5 pb-2 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: file.name }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: openExternal, size: "sm", variant: "outline", children: "Open in default app" }), _jsx(Button, { onClick: reveal, size: "sm", variant: "outline", children: "Reveal" })] })] }), _jsx("div", { className: "min-h-0 flex-1 px-5 pb-5", children: file.kind === 'pdf' ? (_jsx(PdfViewer, { path: file.path })) : file.kind === 'image' ? (_jsx("div", { className: "grid h-full place-items-center rounded-lg border border-border bg-card p-4", children: _jsx("img", { alt: file.name, className: "max-h-full max-w-full object-contain", src: url }) })) : (_jsx(EmptyState, { className: "h-full", description: file.kind === 'slides'
+    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between gap-2 px-5 pb-2 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: file.name }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: openExternal, size: "sm", variant: "outline", children: "Open in default app" }), _jsx(Button, { onClick: reveal, size: "sm", variant: "outline", children: "Reveal" })] })] }), _jsx("div", { className: "min-h-0 flex-1 px-5 pb-5", children: file.kind === 'pdf' ? (_jsx(PdfViewer, { path: file.path })) : file.kind === 'html' ? (_jsx("iframe", { className: "h-full w-full rounded-lg border border-border bg-white", sandbox: "", src: url, title: file.name })) : file.kind === 'image' ? (_jsx("div", { className: "grid h-full place-items-center rounded-lg border border-border bg-card p-4", children: _jsx("img", { alt: file.name, className: "max-h-full max-w-full object-contain", src: url }) })) : (_jsx(EmptyState, { className: "h-full", description: file.kind === 'slides'
                         ? 'PowerPoint/Keynote files open in their own app — click “Open in default app”.'
                         : 'This file type opens in its own app — click “Open in default app”.', title: file.name })) })] }));
 }

@@ -438,13 +438,15 @@ function FileGlyph({ kind }: { kind: VaultFile['kind'] }) {
   const Icon =
     kind === 'pdf'
       ? IconFileTypePdf
-      : kind === 'slides'
+      : kind === 'html'
         ? IconPresentation
-        : kind === 'image'
-          ? IconPhoto
-          : kind === 'doc'
-            ? IconFileText
-            : IconPaperclip
+        : kind === 'slides'
+          ? IconPresentation
+          : kind === 'image'
+            ? IconPhoto
+            : kind === 'doc'
+              ? IconFileText
+              : IconPaperclip
 
   return <Icon className="-mt-px mr-1.5 inline shrink-0 opacity-70" size={14} />
 }
@@ -562,6 +564,15 @@ function FilePreview({ file }: { file: VaultFile }) {
       <div className="min-h-0 flex-1 px-5 pb-5">
         {file.kind === 'pdf' ? (
           <PdfViewer path={file.path} />
+        ) : file.kind === 'html' ? (
+          // Agent-generated deliverables (slides/reports) render live. Sandboxed:
+          // no scripts, so the deck's own scroll-snap CSS drives it and nothing runs.
+          <iframe
+            className="h-full w-full rounded-lg border border-border bg-white"
+            sandbox=""
+            src={url}
+            title={file.name}
+          />
         ) : file.kind === 'image' ? (
           <div className="grid h-full place-items-center rounded-lg border border-border bg-card p-4">
             <img alt={file.name} className="max-h-full max-w-full object-contain" src={url} />

@@ -8,6 +8,8 @@ function fileKind(name) {
     const ext = name.toLowerCase().split('.').pop() ?? '';
     if (ext === 'pdf')
         return 'pdf';
+    if (ext === 'html' || ext === 'htm')
+        return 'html';
     if (ext === 'pptx' || ext === 'ppt' || ext === 'key')
         return 'slides';
     if (ext === 'docx' || ext === 'doc' || ext === 'pages')

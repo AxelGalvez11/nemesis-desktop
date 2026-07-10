@@ -618,7 +618,7 @@ function DeckCard({
   const pct = masteryPct(stats)
 
   return (
-    <div className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-(--theme-primary)/40 hover:shadow-lg hover:shadow-black/20">
+    <div className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-(--theme-primary)/40 hover:shadow-lg hover:shadow-black/20">
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-[15px] font-semibold leading-snug tracking-tight">{deck.name}</h3>
         {stats.due > 0 && <DuePill due={stats.due} />}
@@ -1137,7 +1137,7 @@ function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => voi
             return (
               <button
                 className={cn(
-                  'flex items-center justify-center rounded-lg border p-3 text-center text-sm leading-snug transition-all',
+                  'flex items-center justify-center rounded-lg border p-3 text-center text-sm leading-snug transition-[transform,opacity,border-color,background-color] duration-200 ease-out active:scale-[0.98]',
                   isMatched && 'pointer-events-none scale-95 border-transparent bg-transparent opacity-0',
                   isSelected && 'border-(--theme-primary) bg-(--theme-primary)/10',
                   isWrong && 'nemesis-shake border-destructive text-destructive',

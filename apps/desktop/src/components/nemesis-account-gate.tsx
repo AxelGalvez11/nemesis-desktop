@@ -22,9 +22,11 @@ import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import {
   $account,
   $accountDialogOpen,
+  $deviceKey,
   BILLING_URL,
   bypassAccount,
   initAccount,
+  mintDeviceKey,
   planLabel,
   refreshEntitlement,
   SIGNUP_URL,
@@ -35,10 +37,13 @@ import {
 export const NemesisAccountGate: FC = () => {
   const account = useStore($account)
   const dialogOpen = useStore($accountDialogOpen)
+  const deviceKey = useStore($deviceKey)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
+  const [keyBusy, setKeyBusy] = useState(false)
+  const [keyError, setKeyError] = useState<null | string>(null)
 
   useEffect(() => {
     if (NEMESIS_STUDENT_BUILD) {
@@ -160,6 +165,47 @@ export const NemesisAccountGate: FC = () => {
             <span className="rounded-full bg-(--theme-primary)/15 px-2.5 py-1 text-[11px] font-semibold text-(--theme-primary)">
               {planLabel(account.plan)}
             </span>
+          </div>
+        )}
+
+        {!account.bypass && (
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium">Metered model key</div>
+                <div className="text-xs text-muted-foreground">
+                  {deviceKey
+                    ? `Active · ends …${deviceKey.slice(-4)} — usage counts against your plan`
+                    : 'Bills model usage to your plan instead of a local key.'}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                {deviceKey && (
+                  <Button
+                    onClick={() => void navigator.clipboard?.writeText(deviceKey).catch(() => {})}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    Copy
+                  </Button>
+                )}
+                <Button
+                  disabled={keyBusy}
+                  onClick={() => {
+                    setKeyBusy(true)
+                    setKeyError(null)
+                    void mintDeviceKey()
+                      .catch(err => setKeyError(err instanceof Error ? err.message : 'failed'))
+                      .finally(() => setKeyBusy(false))
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  {keyBusy ? 'Minting…' : deviceKey ? 'New key' : 'Mint key'}
+                </Button>
+              </div>
+            </div>
+            {keyError && <p className="pt-1.5 text-xs text-destructive">{keyError}</p>}
           </div>
         )}
 

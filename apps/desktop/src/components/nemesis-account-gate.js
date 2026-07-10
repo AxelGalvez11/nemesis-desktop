@@ -12,14 +12,17 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Loader } from '@/components/ui/loader';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
-import { $account, $accountDialogOpen, BILLING_URL, bypassAccount, initAccount, planLabel, refreshEntitlement, SIGNUP_URL, signIn, signOut } from '@/nemesis-account';
+import { $account, $accountDialogOpen, $deviceKey, BILLING_URL, bypassAccount, initAccount, mintDeviceKey, planLabel, refreshEntitlement, SIGNUP_URL, signIn, signOut } from '@/nemesis-account';
 export const NemesisAccountGate = () => {
     const account = useStore($account);
     const dialogOpen = useStore($accountDialogOpen);
+    const deviceKey = useStore($deviceKey);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
+    const [keyBusy, setKeyBusy] = useState(false);
+    const [keyError, setKeyError] = useState(null);
     useEffect(() => {
         if (NEMESIS_STUDENT_BUILD) {
             void initAccount();
@@ -60,7 +63,15 @@ export const NemesisAccountGate = () => {
                                         ? 'Upgrade for the full study engine.'
                                         : account.periodEnd
                                             ? `Renews ${new Date(account.periodEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
-                                            : account.planStatus || 'Active' })] }), _jsx("span", { className: "rounded-full bg-(--theme-primary)/15 px-2.5 py-1 text-[11px] font-semibold text-(--theme-primary)", children: planLabel(account.plan) })] })), _jsxs(DialogFooter, { className: "flex-wrap gap-2 sm:justify-between", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: () => void window.hermesDesktop?.openExternal?.(BILLING_URL), size: "sm", variant: "secondary", children: account.plan === 'free' ? 'Upgrade' : 'Manage billing' }), !account.bypass && (_jsx(Button, { onClick: () => void refreshEntitlement(), size: "sm", variant: "outline", children: "Refresh plan" }))] }), _jsx(Button, { onClick: () => {
+                                            : account.planStatus || 'Active' })] }), _jsx("span", { className: "rounded-full bg-(--theme-primary)/15 px-2.5 py-1 text-[11px] font-semibold text-(--theme-primary)", children: planLabel(account.plan) })] })), !account.bypass && (_jsxs("div", { className: "rounded-lg border border-border bg-muted/30 px-3 py-2.5", children: [_jsxs("div", { className: "flex items-center justify-between gap-2", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: "Metered model key" }), _jsx("div", { className: "text-xs text-muted-foreground", children: deviceKey
+                                                ? `Active · ends …${deviceKey.slice(-4)} — usage counts against your plan`
+                                                : 'Bills model usage to your plan instead of a local key.' })] }), _jsxs("div", { className: "flex shrink-0 gap-1.5", children: [deviceKey && (_jsx(Button, { onClick: () => void navigator.clipboard?.writeText(deviceKey).catch(() => { }), size: "sm", variant: "ghost", children: "Copy" })), _jsx(Button, { disabled: keyBusy, onClick: () => {
+                                                setKeyBusy(true);
+                                                setKeyError(null);
+                                                void mintDeviceKey()
+                                                    .catch(err => setKeyError(err instanceof Error ? err.message : 'failed'))
+                                                    .finally(() => setKeyBusy(false));
+                                            }, size: "sm", variant: "outline", children: keyBusy ? 'Minting…' : deviceKey ? 'New key' : 'Mint key' })] })] }), keyError && _jsx("p", { className: "pt-1.5 text-xs text-destructive", children: keyError })] })), _jsxs(DialogFooter, { className: "flex-wrap gap-2 sm:justify-between", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: () => void window.hermesDesktop?.openExternal?.(BILLING_URL), size: "sm", variant: "secondary", children: account.plan === 'free' ? 'Upgrade' : 'Manage billing' }), !account.bypass && (_jsx(Button, { onClick: () => void refreshEntitlement(), size: "sm", variant: "outline", children: "Refresh plan" }))] }), _jsx(Button, { onClick: () => {
                                 $accountDialogOpen.set(false);
                                 void signOut();
                             }, size: "sm", variant: "ghost", children: "Sign out" })] })] }) }));

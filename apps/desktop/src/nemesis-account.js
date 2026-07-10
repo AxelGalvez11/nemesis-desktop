@@ -184,6 +184,51 @@ export async function refreshEntitlement() {
         // keep current state; a later refresh can succeed
     }
 }
+// --- Metered LLM proxy device key -------------------------------------------
+// The proxy (cloud/nemesis-llm in the kit) authenticates the agent's model calls with a
+// long-lived device key so every token is attributed, budgeted, and billed to the plan.
+const DEVICE_KEY_STORE = 'nemesis.devicekey.v1';
+export const LLM_PROXY_URL = `${SUPABASE_URL}/functions/v1/nemesis-llm`;
+export const $deviceKey = atom(loadDeviceKey());
+function loadDeviceKey() {
+    try {
+        return window.localStorage.getItem(DEVICE_KEY_STORE);
+    }
+    catch {
+        return null;
+    }
+}
+export async function mintDeviceKey() {
+    const stored = loadSession();
+    if (!stored) {
+        throw new Error('Sign in first.');
+    }
+    const session = await refreshIfNeeded(stored);
+    const response = await fetch(`${LLM_PROXY_URL}/device-key`, {
+        body: JSON.stringify({ label: 'Nemesis desktop' }),
+        headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${session.accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        method: 'POST'
+    });
+    if (response.status === 404) {
+        throw new Error('Metering proxy is not deployed yet — deploy cloud/nemesis-llm first.');
+    }
+    const data = (await response.json().catch(() => ({})));
+    if (!response.ok || !data.key) {
+        throw new Error(data.error || `could not mint a device key (${response.status})`);
+    }
+    try {
+        window.localStorage.setItem(DEVICE_KEY_STORE, data.key);
+    }
+    catch {
+        // best-effort
+    }
+    $deviceKey.set(data.key);
+    return data.key;
+}
 /** Human label for a plan code: 'health_pro' → 'Health Pro'. */
 export function planLabel(plan) {
     if (!plan || plan === 'free') {
