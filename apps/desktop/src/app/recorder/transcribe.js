@@ -55,3 +55,15 @@ export async function transcribeAudio(arrayBuffer, onStatus) {
     const result = await transcriber(audio, { chunk_length_s: 30, return_timestamps: false, stride_length_s: 5 });
     return (result.text || '').trim();
 }
+/** Live-caption path: transcribe raw 16 kHz mono samples directly (no decode step).
+ *  The Recorder feeds ~8s chunks of the live mix through here while recording. */
+export async function transcribeSamples(samples, onStatus) {
+    const transcriber = await getTranscriber(onStatus);
+    onStatus?.({ stage: 'transcribing' });
+    const result = await transcriber(samples, { chunk_length_s: 30, return_timestamps: false });
+    return (result.text || '').trim();
+}
+/** Warm the model in the background (first run downloads ~40MB once). */
+export function preloadTranscriber(onStatus) {
+    return getTranscriber(onStatus).catch(() => null);
+}

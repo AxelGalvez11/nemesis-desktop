@@ -5,11 +5,12 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 // externally) preview in place. Autosaves 800ms after typing.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CodeEditor } from '@/components/chat/code-editor';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { NoteEditor } from './note-editor';
+import { PdfViewer } from './pdf-viewer';
 import { buildIndex, createFolder, extractWikilinks, loadVaultContents, saveNote, SEED_NOTES, VAULT_DIR } from './vault';
 function buildTree(contents) {
     const root = { files: [], folders: [], name: '', notes: [], path: '' };
@@ -86,7 +87,8 @@ export function LibraryView() {
     }, [refresh]);
     const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents]);
     const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents]);
-    // Deep link from the Graph page: /library?note=Title
+    // Deep links from the Graph page: /library?note=Title opens a note,
+    // /library?create=note lands with the new-note field already open.
     useEffect(() => {
         const requested = searchParams.get('note');
         if (requested && contents) {
@@ -94,6 +96,10 @@ export function LibraryView() {
             if (note) {
                 setSelection({ kind: 'note', note });
             }
+        }
+        if (searchParams.get('create') === 'note') {
+            setCreating('note');
+            setDraft('');
         }
     }, [contents, searchParams]);
     const activeNote = selection?.kind === 'note' ? selection.note : null;
@@ -110,6 +116,25 @@ export function LibraryView() {
         }, 800);
     }, []);
     const targetFolder = selection?.kind === 'note' ? selection.note.folder : selection?.kind === 'file' ? selection.file.folder : '';
+    // Click a [[wikilink]] in the editor: open the note if it exists, create it if not —
+    // the Obsidian affordance that makes links feel alive.
+    const openWikilink = useCallback(async (target) => {
+        const loaded = contents ?? (await refresh());
+        if (!loaded) {
+            return;
+        }
+        const existing = loaded.notes.find(n => n.title.toLowerCase() === target.toLowerCase());
+        if (existing) {
+            setSelection({ kind: 'note', note: existing });
+            return;
+        }
+        await saveNote(target, `# ${target}\n\n`);
+        const after = await refresh();
+        const created = after?.notes.find(n => n.title.toLowerCase() === target.toLowerCase());
+        if (created) {
+            setSelection({ kind: 'note', note: created });
+        }
+    }, [contents, refresh]);
     const submitCreate = useCallback(async () => {
         const name = draft.trim();
         if (!name) {
@@ -152,7 +177,7 @@ export function LibraryView() {
                                 const next = new Set(current);
                                 next.has(path) ? next.delete(path) : next.add(path);
                                 return next;
-                            }), selection: selection }) })] }), _jsx("main", { className: "flex min-w-0 flex-1 flex-col", children: selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "flex items-center justify-between px-5 pb-1 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: selection.note.title }), _jsx("span", { className: "text-xs text-muted-foreground", children: saving ? 'Saving…' : 'Saved to disk' })] }), _jsx("div", { className: "nemesis-prose-editor min-h-0 flex-1 px-6 pb-3", children: _jsx(CodeEditor, { filePath: selection.note.path, initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value) }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx(EmptyState, { className: "flex-1", description: "Pick a note on the left, or create one.", title: "No note open" })) }), activeNote && (_jsxs("aside", { className: "hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border px-4 pb-4 pt-5 lg:flex", children: [_jsx(LinkGroup, { emptyLabel: "Write [[Note title]] to connect ideas.", onOpen: title => {
+                            }), selection: selection }) })] }), _jsx("main", { className: "flex min-w-0 flex-1 flex-col", children: selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "flex items-center justify-between px-5 pb-1 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: selection.note.title }), _jsx("span", { className: "text-xs text-muted-foreground", children: saving ? 'Saving…' : 'Saved to disk' })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-6 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target) }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx(EmptyState, { className: "flex-1", description: "Pick a note on the left, or create one.", title: "No note open" })) }), activeNote && (_jsxs("aside", { className: "hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border px-4 pb-4 pt-5 lg:flex", children: [_jsx(LinkGroup, { emptyLabel: "Write [[Note title]] to connect ideas.", onOpen: title => {
                             const note = contents.notes.find(n => n.title === title);
                             if (note)
                                 setSelection({ kind: 'note', note });
@@ -186,7 +211,7 @@ function FilePreview({ file }) {
     const url = fileUrl(file.path);
     const openExternal = () => void window.hermesDesktop?.openExternal?.(url);
     const reveal = () => void window.hermesDesktop?.revealPath?.(file.path);
-    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between gap-2 px-5 pb-2 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: file.name }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: openExternal, size: "sm", variant: "outline", children: "Open in default app" }), _jsx(Button, { onClick: reveal, size: "sm", variant: "outline", children: "Reveal" })] })] }), _jsx("div", { className: "min-h-0 flex-1 px-5 pb-5", children: file.kind === 'pdf' ? (_jsx("iframe", { className: "h-full w-full rounded-lg border border-border bg-white", src: url, title: file.name })) : file.kind === 'image' ? (_jsx("div", { className: "grid h-full place-items-center rounded-lg border border-border bg-card p-4", children: _jsx("img", { alt: file.name, className: "max-h-full max-w-full object-contain", src: url }) })) : (_jsx(EmptyState, { className: "h-full", description: file.kind === 'slides'
+    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between gap-2 px-5 pb-2 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: file.name }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: openExternal, size: "sm", variant: "outline", children: "Open in default app" }), _jsx(Button, { onClick: reveal, size: "sm", variant: "outline", children: "Reveal" })] })] }), _jsx("div", { className: "min-h-0 flex-1 px-5 pb-5", children: file.kind === 'pdf' ? (_jsx(PdfViewer, { path: file.path })) : file.kind === 'image' ? (_jsx("div", { className: "grid h-full place-items-center rounded-lg border border-border bg-card p-4", children: _jsx("img", { alt: file.name, className: "max-h-full max-w-full object-contain", src: url }) })) : (_jsx(EmptyState, { className: "h-full", description: file.kind === 'slides'
                         ? 'PowerPoint/Keynote files open in their own app — click “Open in default app”.'
                         : 'This file type opens in its own app — click “Open in default app”.', title: `${FILE_ICON[file.kind]} ${file.name}` })) })] }));
 }

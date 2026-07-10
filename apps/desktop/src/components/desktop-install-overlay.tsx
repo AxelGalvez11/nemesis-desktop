@@ -17,6 +17,7 @@ import { useI18n } from '@/i18n'
 import { ChevronDown, ChevronRight, iconSize } from '@/lib/icons'
 import { capitalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 
 /**
  * DesktopInstallOverlay
@@ -65,6 +66,36 @@ function formatStageName(name: string): string {
     .split('-')
     .map((word, i) => (i === 0 ? capitalize(word) : word))
     .join(' ')
+}
+
+// Student build: the raw installer stage ids read like plumbing ("venv", "node-deps").
+// Show plain-English labels instead; ids we don't recognize fall back to the generic
+// formatter so a manifest change never renders a blank row.
+const STUDENT_STAGE_LABELS: Record<string, string> = {
+  complete: 'Ready to go',
+  config: 'Applying your settings',
+  gateway: 'Starting Nemesis',
+  'node-deps': 'Installing app components',
+  path: 'Connecting everything',
+  prerequisites: 'Checking your computer',
+  'python-deps': 'Installing the study engine',
+  repository: 'Downloading Nemesis',
+  setup: 'Finishing setup',
+  'system-packages': 'Installing system pieces',
+  uv: 'Setting up install tools',
+  venv: 'Preparing a private workspace'
+}
+
+function stageLabel(name: string): string {
+  if (NEMESIS_STUDENT_BUILD) {
+    const friendly = STUDENT_STAGE_LABELS[name.toLowerCase()]
+
+    if (friendly) {
+      return friendly
+    }
+  }
+
+  return formatStageName(name)
 }
 
 function formatDuration(ms: number | null | undefined): string {
@@ -139,7 +170,7 @@ function StageRow({ descriptor, result, now }: StageRowProps) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className={cn('truncate text-sm', state === 'running' ? 'font-medium' : 'text-muted-foreground')}>
-            {formatStageName(descriptor.name)}
+            {stageLabel(descriptor.name)}
           </span>
           {state !== 'running' && <span className="flex size-4 shrink-0 items-center justify-center">{icon}</span>}
         </div>
@@ -430,7 +461,7 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
               <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
                   {copy.progress(completedCount, totalCount)}
-                  {currentStage && copy.currentStage(formatStageName(currentStage))}
+                  {currentStage && copy.currentStage(stageLabel(currentStage))}
                   {currentElapsed && ` (${currentElapsed})`}
                 </span>
                 <span className="tabular-nums">{progressPct}%</span>

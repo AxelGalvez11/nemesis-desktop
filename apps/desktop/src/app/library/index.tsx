@@ -5,12 +5,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { CodeEditor } from '@/components/chat/code-editor'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
+import { NoteEditor } from './note-editor'
+import { PdfViewer } from './pdf-viewer'
 import {
   buildIndex,
   createFolder,
@@ -127,7 +128,8 @@ export function LibraryView() {
   const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents])
   const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents])
 
-  // Deep link from the Graph page: /library?note=Title
+  // Deep links from the Graph page: /library?note=Title opens a note,
+  // /library?create=note lands with the new-note field already open.
   useEffect(() => {
     const requested = searchParams.get('note')
 
@@ -137,6 +139,11 @@ export function LibraryView() {
       if (note) {
         setSelection({ kind: 'note', note })
       }
+    }
+
+    if (searchParams.get('create') === 'note') {
+      setCreating('note')
+      setDraft('')
     }
   }, [contents, searchParams])
 
@@ -161,6 +168,35 @@ export function LibraryView() {
 
   const targetFolder =
     selection?.kind === 'note' ? selection.note.folder : selection?.kind === 'file' ? selection.file.folder : ''
+
+  // Click a [[wikilink]] in the editor: open the note if it exists, create it if not —
+  // the Obsidian affordance that makes links feel alive.
+  const openWikilink = useCallback(
+    async (target: string) => {
+      const loaded = contents ?? (await refresh())
+
+      if (!loaded) {
+        return
+      }
+
+      const existing = loaded.notes.find(n => n.title.toLowerCase() === target.toLowerCase())
+
+      if (existing) {
+        setSelection({ kind: 'note', note: existing })
+
+        return
+      }
+
+      await saveNote(target, `# ${target}\n\n`)
+      const after = await refresh()
+      const created = after?.notes.find(n => n.title.toLowerCase() === target.toLowerCase())
+
+      if (created) {
+        setSelection({ kind: 'note', note: created })
+      }
+    },
+    [contents, refresh]
+  )
 
   const submitCreate = useCallback(async () => {
     const name = draft.trim()
@@ -262,12 +298,12 @@ export function LibraryView() {
               <h2 className="truncate text-base font-medium">{selection.note.title}</h2>
               <span className="text-xs text-muted-foreground">{saving ? 'Saving…' : 'Saved to disk'}</span>
             </div>
-            <div className="nemesis-prose-editor min-h-0 flex-1 px-6 pb-3">
-              <CodeEditor
-                filePath={selection.note.path}
+            <div className="min-h-0 flex-1 overflow-hidden px-6 pb-3">
+              <NoteEditor
                 initialValue={selection.note.content}
                 key={selection.note.path}
                 onChange={value => scheduleSave(selection.note, value)}
+                onOpenWikilink={target => void openWikilink(target)}
               />
             </div>
           </>
@@ -430,7 +466,7 @@ function FilePreview({ file }: { file: VaultFile }) {
       </div>
       <div className="min-h-0 flex-1 px-5 pb-5">
         {file.kind === 'pdf' ? (
-          <iframe className="h-full w-full rounded-lg border border-border bg-white" src={url} title={file.name} />
+          <PdfViewer path={file.path} />
         ) : file.kind === 'image' ? (
           <div className="grid h-full place-items-center rounded-lg border border-border bg-card p-4">
             <img alt={file.name} className="max-h-full max-w-full object-contain" src={url} />

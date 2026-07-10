@@ -2,6 +2,7 @@
 // note). Interaction model deliberately mirrors what health-science students already have
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
+import { IconLayoutGrid, IconList } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +27,7 @@ import {
   buildQueue,
   deckStats,
   deleteCard,
+  deleteDeck,
   freshId,
   gradeCard,
   groupDecks,
@@ -50,6 +52,18 @@ const GRADES: { key: string; label: string; rating: StudyRating }[] = [
   { key: '4', label: 'Easy', rating: 'easy' }
 ]
 
+type DeckViewMode = 'cards' | 'list'
+
+const VIEW_MODE_KEY = 'nemesis.study.view'
+
+function loadViewMode(): DeckViewMode {
+  try {
+    return window.localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'cards'
+  } catch {
+    return 'cards'
+  }
+}
+
 export function StudyView() {
   const [state, setState] = useState<StudyState>(() => loadState())
   const [reviewDeckId, setReviewDeckId] = useState<null | string>(null)
@@ -57,6 +71,8 @@ export function StudyView() {
   const [reviewing, setReviewing] = useState(false)
   const [revealed, setRevealed] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [newDeckOpen, setNewDeckOpen] = useState(false)
+  const [view, setView] = useState<DeckViewMode>(() => loadViewMode())
   const [done, setDone] = useState(0)
 
   const now = useMemo(() => new Date(), [state, reviewing])
@@ -139,6 +155,42 @@ export function StudyView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [current, exitReview, grade, revealed, reviewing])
 
+  const setViewMode = useCallback((mode: DeckViewMode) => {
+    setView(mode)
+
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, mode)
+    } catch {
+      // persistence is best-effort
+    }
+  }, [])
+
+  const createDeck = useCallback(
+    (name: string, course: string) => {
+      const deck: StudyDeck = {
+        id: freshId('deck'),
+        name: name.trim() || 'New deck',
+        course: course.trim() || undefined,
+        createdAt: new Date().toISOString(),
+        cards: []
+      }
+
+      update({ ...state, decks: [...state.decks, deck] })
+      setNewDeckOpen(false)
+      // Straight into the card browser so the first card is one click away.
+      setBrowseDeckId(deck.id)
+    },
+    [state, update]
+  )
+
+  const removeDeck = useCallback(
+    (deckId: string) => {
+      update(deleteDeck(state, deckId))
+      setBrowseDeckId(null)
+    },
+    [state, update]
+  )
+
   const importCards = useCallback(
     (name: string, course: string, text: string) => {
       const parsed = parseCardPaste(text)
@@ -186,6 +238,33 @@ export function StudyView() {
             </Button>
           ) : (
             <>
+              <div className="mr-1 flex items-center overflow-hidden rounded-md border border-border">
+                <button
+                  className={cn(
+                    'px-2 py-1.5 transition-colors',
+                    view === 'cards' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => setViewMode('cards')}
+                  title="Card view"
+                  type="button"
+                >
+                  <IconLayoutGrid size={14} />
+                </button>
+                <button
+                  className={cn(
+                    'px-2 py-1.5 transition-colors',
+                    view === 'list' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => setViewMode('list')}
+                  title="List view"
+                  type="button"
+                >
+                  <IconList size={14} />
+                </button>
+              </div>
+              <Button onClick={() => setNewDeckOpen(true)} size="sm" variant="outline">
+                New deck
+              </Button>
               <Button onClick={() => setImportOpen(true)} size="sm" variant="outline">
                 Import cards
               </Button>
@@ -219,31 +298,77 @@ export function StudyView() {
         <CardBrowser
           deck={state.decks.find(deck => deck.id === browseDeckId) ?? null}
           onChange={update}
+          onDeleteDeck={() => removeDeck(browseDeckId)}
           state={state}
         />
       ) : (
-        <DeckBrowser onBrowse={setBrowseDeckId} onStudy={startReview} state={state} />
+        <DeckBrowser onBrowse={setBrowseDeckId} onStudy={startReview} state={state} view={view} />
       )}
 
       <ImportDialog onImport={importCards} onOpenChange={setImportOpen} open={importOpen} />
+      {newDeckOpen && <NewDeckDialog onClose={() => setNewDeckOpen(false)} onCreate={createDeck} />}
     </div>
+  )
+}
+
+function NewDeckDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string, course: string) => void }) {
+  const [name, setName] = useState('')
+  const [course, setCourse] = useState('')
+
+  return (
+    <Dialog onOpenChange={open => !open && onClose()} open>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New deck</DialogTitle>
+          <DialogDescription>Decks with the same course name group together on this page.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <Input
+            autoFocus
+            onChange={event => setName(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && name.trim()) {
+                onCreate(name, course)
+              }
+            }}
+            placeholder="Deck name (e.g. Renal pharm)"
+            value={name}
+          />
+          <Input
+            onChange={event => setCourse(event.target.value)}
+            placeholder="Course / group (e.g. Pharmacology — optional)"
+            value={course}
+          />
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose} variant="outline">
+            Cancel
+          </Button>
+          <Button disabled={!name.trim()} onClick={() => onCreate(name, course)}>
+            Create deck
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
 function DeckBrowser({
   onBrowse,
   onStudy,
-  state
+  state,
+  view
 }: {
   onBrowse: (deckId: string) => void
   onStudy: (deckId: string) => void
   state: StudyState
+  view: DeckViewMode
 }) {
   const now = new Date()
   const groups = groupDecks(state, now)
 
   if (!state.decks.length) {
-    return <EmptyState className="flex-1" description="Import cards to build your first deck." title="No decks yet" />
+    return <EmptyState className="flex-1" description="Create a deck or import cards to get going." title="No decks yet" />
   }
 
   return (
@@ -257,13 +382,55 @@ function DeckBrowser({
               {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} · {group.stats.total} cards
             </span>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {group.decks.map(deck => (
-              <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onStudy={onStudy} state={state} />
-            ))}
-          </div>
+          {view === 'list' ? (
+            <div className="overflow-hidden rounded-lg border border-border">
+              {group.decks.map(deck => (
+                <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onStudy={onStudy} state={state} />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {group.decks.map(deck => (
+                <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onStudy={onStudy} state={state} />
+              ))}
+            </div>
+          )}
         </section>
       ))}
+    </div>
+  )
+}
+
+function DeckRow({
+  deck,
+  now,
+  onBrowse,
+  onStudy,
+  state
+}: {
+  deck: StudyDeck
+  now: Date
+  onBrowse: (deckId: string) => void
+  onStudy: (deckId: string) => void
+  state: StudyState
+}) {
+  const stats = deckStats(state, deck.id, now)
+
+  return (
+    <div className="flex items-center gap-3 border-t border-border bg-card px-3 py-2 first:border-t-0 hover:bg-accent/50">
+      <div className="min-w-0 flex-1 truncate text-sm">{deck.name}</div>
+      <span className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
+        {stats.total} cards · {stats.fresh} new
+      </span>
+      <span className="w-16 shrink-0 text-right">{stats.due > 0 && <Badge variant="muted">{stats.due} due</Badge>}</span>
+      <div className="flex shrink-0 gap-1.5">
+        <Button disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
+          Study
+        </Button>
+        <Button onClick={() => onBrowse(deck.id)} size="sm" variant="outline">
+          Cards
+        </Button>
+      </div>
     </div>
   )
 }
@@ -396,14 +563,17 @@ function Heatmap({ state }: { state: StudyState }) {
 function CardBrowser({
   deck,
   onChange,
+  onDeleteDeck,
   state
 }: {
   deck: null | StudyDeck
   onChange: (next: StudyState) => void
+  onDeleteDeck: () => void
   state: StudyState
 }) {
   const [editing, setEditing] = useState<null | StudyCard>(null)
   const [adding, setAdding] = useState(false)
+  const [armDelete, setArmDelete] = useState(false)
 
   if (!deck) {
     return <EmptyState className="flex-1" description="This deck no longer exists." title="Deck not found" />
@@ -419,9 +589,20 @@ function CardBrowser({
             {deck.cards.length} card{deck.cards.length === 1 ? '' : 's'}
           </p>
         </div>
-        <Button onClick={() => setAdding(true)} size="sm" variant="outline">
-          Add card
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            className={cn(armDelete && 'text-destructive')}
+            onBlur={() => setArmDelete(false)}
+            onClick={() => (armDelete ? onDeleteDeck() : setArmDelete(true))}
+            size="sm"
+            variant="outline"
+          >
+            {armDelete ? 'Really delete?' : 'Delete deck'}
+          </Button>
+          <Button onClick={() => setAdding(true)} size="sm" variant="outline">
+            Add card
+          </Button>
+        </div>
       </div>
 
       {deck.cards.length === 0 ? (

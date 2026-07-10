@@ -129,6 +129,20 @@ export function deleteCard(state, deckId, cardId) {
 export function toggleSuspendCard(state, deckId, cardId) {
     return mapDeckCards(state, deckId, cards => cards.map(card => (card.id === cardId ? { ...card, suspended: !card.suspended } : card)));
 }
+// --- Deck management ---------------------------------------------------------
+/** Delete a deck and its cards' schedules. The review log keeps its history —
+ *  streaks and the heatmap don't lie just because a deck was retired. */
+export function deleteDeck(state, deckId) {
+    const deck = state.decks.find(candidate => candidate.id === deckId);
+    if (!deck) {
+        return state;
+    }
+    const schedule = { ...state.schedule };
+    for (const card of deck.cards) {
+        delete schedule[card.id];
+    }
+    return { ...state, decks: state.decks.filter(candidate => candidate.id !== deckId), schedule };
+}
 export function studyMotivation(state, todayIso, windowDays = 90) {
     const DAY = 86_400_000;
     const days = new Set(state.reviews.map(review => review.at.slice(0, 10)));

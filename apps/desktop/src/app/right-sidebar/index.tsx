@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import type { ComponentProps } from 'react'
+import { type ComponentProps, useState } from 'react'
 
 import { TreeSkeleton } from '@/components/chat/skeletons'
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -9,6 +9,7 @@ import { useDelayedTrue } from '@/hooks/use-delayed-true'
 import { useI18n } from '@/i18n'
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { $panesFlipped } from '@/store/layout'
 import { notifyError } from '@/store/notifications'
 import { setCurrentSessionPreviewTarget } from '@/store/preview'
@@ -18,6 +19,7 @@ import { SidebarPanelLabel } from '../shell/sidebar-label'
 
 import { ProjectTree } from './files/tree'
 import { useProjectTree } from './files/use-project-tree'
+import { SourcesTab } from './sources'
 
 interface RightSidebarPaneProps {
   onActivateFile: (path: string) => void
@@ -29,6 +31,9 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
   const r = t.rightSidebar
   const panesFlipped = useStore($panesFlipped)
   const currentCwd = useStore($currentCwd).trim()
+  // Student build: the rail defaults to the agent's cited sources — the thing a student
+  // actually asks of a research answer — with the file tree one tab away.
+  const [tab, setTab] = useState<'files' | 'sources'>(NEMESIS_STUDENT_BUILD ? 'sources' : 'files')
 
   // The file tree is simply "browse the session's working directory". If the
   // session has a cwd — a repo, a sibling worktree, or any folder — show it. A
@@ -81,24 +86,47 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
           : 'border-l shadow-[inset_0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'
       )}
     >
-      <FilesystemTab
-        canCollapse={canCollapse}
-        collapseNonce={collapseNonce}
-        cwd={effectiveCwd}
-        cwdName={cwdName}
-        data={data}
-        error={rootError}
-        hasWorkspace={hasWorkspace}
-        loading={rootLoading}
-        onActivateFile={onActivateFile}
-        onActivateFolder={onActivateFolder}
-        onCollapseAll={collapseAll}
-        onLoadChildren={loadChildren}
-        onNodeOpenChange={setNodeOpen}
-        onPreviewFile={previewFile}
-        onRefresh={() => void refreshRoot()}
-        openState={openState}
-      />
+      {NEMESIS_STUDENT_BUILD && (
+        <div className="flex shrink-0 items-center gap-1 px-2 pt-1.5">
+          {(['sources', 'files'] as const).map(id => (
+            <button
+              className={cn(
+                'rounded-md px-2 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.07em] transition-colors',
+                tab === id
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+              key={id}
+              onClick={() => setTab(id)}
+              type="button"
+            >
+              {id === 'sources' ? 'Sources' : 'Files'}
+            </button>
+          ))}
+        </div>
+      )}
+      {NEMESIS_STUDENT_BUILD && tab === 'sources' ? (
+        <SourcesTab />
+      ) : (
+        <FilesystemTab
+          canCollapse={canCollapse}
+          collapseNonce={collapseNonce}
+          cwd={effectiveCwd}
+          cwdName={cwdName}
+          data={data}
+          error={rootError}
+          hasWorkspace={hasWorkspace}
+          loading={rootLoading}
+          onActivateFile={onActivateFile}
+          onActivateFolder={onActivateFolder}
+          onCollapseAll={collapseAll}
+          onLoadChildren={loadChildren}
+          onNodeOpenChange={setNodeOpen}
+          onPreviewFile={previewFile}
+          onRefresh={() => void refreshRoot()}
+          openState={openState}
+        />
+      )}
     </aside>
   )
 }

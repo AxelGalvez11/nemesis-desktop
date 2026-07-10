@@ -213,6 +213,26 @@ export function toggleSuspendCard(state: StudyState, deckId: string, cardId: str
   )
 }
 
+// --- Deck management ---------------------------------------------------------
+
+/** Delete a deck and its cards' schedules. The review log keeps its history —
+ *  streaks and the heatmap don't lie just because a deck was retired. */
+export function deleteDeck(state: StudyState, deckId: string): StudyState {
+  const deck = state.decks.find(candidate => candidate.id === deckId)
+
+  if (!deck) {
+    return state
+  }
+
+  const schedule = { ...state.schedule }
+
+  for (const card of deck.cards) {
+    delete schedule[card.id]
+  }
+
+  return { ...state, decks: state.decks.filter(candidate => candidate.id !== deckId), schedule }
+}
+
 // --- Motivational stats (streaks + retention) -------------------------------
 
 export interface StudyMotivation {

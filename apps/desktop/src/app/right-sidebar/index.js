@@ -1,5 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useStore } from '@nanostores/react';
+import { useState } from 'react';
 import { TreeSkeleton } from '@/components/chat/skeletons';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,7 @@ import { useDelayedTrue } from '@/hooks/use-delayed-true';
 import { useI18n } from '@/i18n';
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $panesFlipped } from '@/store/layout';
 import { notifyError } from '@/store/notifications';
 import { setCurrentSessionPreviewTarget } from '@/store/preview';
@@ -15,11 +17,15 @@ import { $currentCwd } from '@/store/session';
 import { SidebarPanelLabel } from '../shell/sidebar-label';
 import { ProjectTree } from './files/tree';
 import { useProjectTree } from './files/use-project-tree';
+import { SourcesTab } from './sources';
 export function RightSidebarPane({ onActivateFile, onActivateFolder }) {
     const { t } = useI18n();
     const r = t.rightSidebar;
     const panesFlipped = useStore($panesFlipped);
     const currentCwd = useStore($currentCwd).trim();
+    // Student build: the rail defaults to the agent's cited sources — the thing a student
+    // actually asks of a research answer — with the file tree one tab away.
+    const [tab, setTab] = useState(NEMESIS_STUDENT_BUILD ? 'sources' : 'files');
     // The file tree is simply "browse the session's working directory". If the
     // session has a cwd — a repo, a sibling worktree, or any folder — show it. A
     // bare/detached chat (resolveNewSessionCwd → '') has none, so it shows the
@@ -43,9 +49,11 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }) {
             notifyError(error, r.previewUnavailable);
         }
     };
-    return (_jsx("aside", { "aria-label": r.aria, className: cn('before:pointer-events-none relative flex h-full w-full min-w-0 flex-col overflow-hidden border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background) pt-(--titlebar-height) text-(--ui-text-tertiary)', panesFlipped
+    return (_jsxs("aside", { "aria-label": r.aria, className: cn('before:pointer-events-none relative flex h-full w-full min-w-0 flex-col overflow-hidden border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background) pt-(--titlebar-height) text-(--ui-text-tertiary)', panesFlipped
             ? 'border-r shadow-[inset_-0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'
-            : 'border-l shadow-[inset_0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'), children: _jsx(FilesystemTab, { canCollapse: canCollapse, collapseNonce: collapseNonce, cwd: effectiveCwd, cwdName: cwdName, data: data, error: rootError, hasWorkspace: hasWorkspace, loading: rootLoading, onActivateFile: onActivateFile, onActivateFolder: onActivateFolder, onCollapseAll: collapseAll, onLoadChildren: loadChildren, onNodeOpenChange: setNodeOpen, onPreviewFile: previewFile, onRefresh: () => void refreshRoot(), openState: openState }) }));
+            : 'border-l shadow-[inset_0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'), children: [NEMESIS_STUDENT_BUILD && (_jsx("div", { className: "flex shrink-0 items-center gap-1 px-2 pt-1.5", children: ['sources', 'files'].map(id => (_jsx("button", { className: cn('rounded-md px-2 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.07em] transition-colors', tab === id
+                        ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                        : 'text-muted-foreground hover:text-foreground'), onClick: () => setTab(id), type: "button", children: id === 'sources' ? 'Sources' : 'Files' }, id))) })), NEMESIS_STUDENT_BUILD && tab === 'sources' ? (_jsx(SourcesTab, {})) : (_jsx(FilesystemTab, { canCollapse: canCollapse, collapseNonce: collapseNonce, cwd: effectiveCwd, cwdName: cwdName, data: data, error: rootError, hasWorkspace: hasWorkspace, loading: rootLoading, onActivateFile: onActivateFile, onActivateFolder: onActivateFolder, onCollapseAll: collapseAll, onLoadChildren: loadChildren, onNodeOpenChange: setNodeOpen, onPreviewFile: previewFile, onRefresh: () => void refreshRoot(), openState: openState }))] }));
 }
 // Sidebar palette + hover-reveal: header actions stay reachable while moving
 // from the project label to the action buttons.
