@@ -1295,6 +1295,162 @@ def _bare_task_id_for_session_key(session_key: str) -> str:
     return session_key
 
 
+def _origin_for_tab_routing(url: str) -> str:
+    """Return a normalized ``scheme://host[:port]`` origin key for ``url``.
+
+    Pure string parsing — no network I/O. Used only to decide whether a
+    navigation is crossing origins for the CDP-override per-origin-tab
+    mechanism (see ``_ensure_origin_tab``). Falls back to the raw stripped
+    URL when it doesn't parse into a recognizable origin (e.g. ``about:blank``
+    or a malformed value) so callers always get a non-empty, stable key rather
+    than crashing on edge-case input.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+    except Exception:
+        pass
+    return (url or "").strip().lower()
+
+
+def _label_for_origin(origin: str) -> str:
+    """Derive a stable, CLI-safe ``agent-browser tab --label`` token from an origin.
+
+    Labels are passed as a bare CLI argument (``tab new --label <label>``), so
+    they must avoid characters agent-browser's arg parser or shell quoting
+    could mishandle (``:``, ``/``, ``.`` are all present in a raw origin like
+    ``https://outlook.office.com``). We keep this deterministic (same origin
+    -> same label within a process) rather than random so repeated calls for
+    an already-known origin resolve to the same tab without needing the
+    _origin_tabs map to be consulted by every caller.
+    """
+    import hashlib
+
+    slug = re.sub(r"[^a-z0-9]+", "-", origin.lower()).strip("-")[:40]
+    # Short content hash appended so two origins that collapse to the same
+    # sanitized slug (unlikely, but e.g. differing only in a stripped port)
+    # never collide on one label and silently share a tab.
+    digest = hashlib.sha256(origin.encode("utf-8", "ignore")).hexdigest()[:8]
+    return f"o-{slug}-{digest}" if slug else f"o-{digest}"
+
+
+def _plan_origin_tab(
+    origin: str,
+    known_origins: Dict[str, str],
+) -> Tuple[str, str]:
+    """Pure decision function: given a destination origin and the session's
+    known origin->label map, return ``(action, label)`` where action is
+    ``"new"`` (no tab exists yet for this origin — create + label + activate
+    one) or ``"switch"`` (a labeled tab for this origin already exists —
+    activate it). Every origin, including the first one seen in a task, gets
+    its own tab: reusing whatever tab the app-managed browser happened to
+    have active for the first navigation would leave that origin without a
+    label, so a later navigate back to it could not switch back and would
+    fall through to navigating whatever tab is currently active instead
+    (re-triggering the exact cross-origin corruption this mechanism exists
+    to prevent).
+    """
+    label = known_origins.get(origin)
+    if label:
+        return "switch", label
+    return "new", _label_for_origin(origin)
+
+
+def _ensure_origin_tab(session_key: str, url: str) -> None:
+    """Best-effort: route ``url``'s navigation to a tab dedicated to its origin.
+
+    Only called from ``browser_navigate`` when ``_get_cdp_override()`` is
+    truthy (persistent app-managed browser path) — gated by the caller, not
+    here, so this function's behavior is identical whether or not it's wired
+    up; it never runs for the local-headless-per-task or cloud/Browserbase
+    paths, which keep navigating whatever tab ``_run_browser_command`` already
+    targets exactly as before.
+
+    Mechanism: the daemon behind a given ``--cdp`` endpoint is long-lived
+    (agent-browser's client-daemon architecture — see README "Architecture")
+    and keeps a stable tab list + active-tab pointer across separate CLI
+    invocations for the same session, so ``agent-browser tab new --label X``
+    / ``agent-browser tab X`` issued from one Python call are visible to the
+    next. New tabs are created in the same browser instance the app spawned
+    (same default context), so they inherit the persistent profile's cookies
+    — login state is preserved even though the destination gets a fresh tab.
+
+    IMPORTANT: ``tab new`` is NOT assumed to leave the new tab active. The
+    README's own usage example creates a labeled tab and then issues a
+    separate ``tab <label>`` to switch to it before acting on it — so this
+    function always ends with an explicit ``tab <label>`` switch, both for a
+    freshly-created tab and for a previously-known one. The caller's
+    ``open <url>`` runs immediately after and must land on the origin's own
+    tab regardless of which tab happened to be active before this call.
+
+    Swallows all errors and never raises: if the ``tab`` command(s) fail
+    (daemon hiccup, agent-browser version without ``tab`` support, etc.) the
+    caller's subsequent ``open <url>`` still runs against whatever tab is
+    currently active — identical to today's pre-fix behavior. This function
+    can only make cross-origin navigation better or a no-op; it must never
+    make it worse or block a navigation outright.
+    """
+    origin = _origin_for_tab_routing(url)
+    if not origin:
+        return
+
+    with _cleanup_lock:
+        known = dict(_origin_tabs.get(session_key, {}))
+
+    action, label = _plan_origin_tab(origin, known)
+
+    if action == "new":
+        try:
+            create_result = _run_browser_command(
+                session_key, "tab", ["new", "--label", label], timeout=15
+            )
+        except Exception as exc:
+            logger.debug(
+                "_ensure_origin_tab: 'tab new' raised for session=%s origin=%s: %s",
+                session_key, origin, exc,
+            )
+            return
+
+        if not create_result.get("success"):
+            logger.debug(
+                "_ensure_origin_tab: 'tab new' failed for session=%s origin=%s: %s",
+                session_key, origin, create_result.get("error"),
+            )
+            return
+
+        # Record the mapping now that the tab is known to exist, independent
+        # of whether the follow-up switch below succeeds. If we only recorded
+        # after a successful switch, a switch failure here would leave the
+        # origin unmapped and the *next* navigation to it would issue another
+        # 'tab new --label <same label>' — duplicate-label tab, agent-browser
+        # behavior on a repeated label is undocumented and not worth risking.
+        with _cleanup_lock:
+            _origin_tabs.setdefault(session_key, {})[origin] = label
+
+    # Always end on an explicit switch — covers both the just-created tab and
+    # an already-known one. Best-effort: a failure here just means the
+    # upcoming "open" runs on whatever tab was already active, same as
+    # pre-fix behavior for this navigation only; the mapping (if this was a
+    # "new" tab) is still recorded above for the next call to retry the switch.
+    try:
+        switch_result = _run_browser_command(session_key, "tab", [label], timeout=15)
+    except Exception as exc:
+        logger.debug(
+            "_ensure_origin_tab: 'tab %s' (switch) raised for session=%s origin=%s: %s",
+            label, session_key, origin, exc,
+        )
+        return
+
+    if not switch_result.get("success"):
+        logger.debug(
+            "_ensure_origin_tab: 'tab %s' (switch) failed for session=%s origin=%s: %s",
+            label, session_key, origin, switch_result.get("error"),
+        )
+
+
 def _session_info_owned_by_task(session_info: Dict[str, Any], task_id: str, session_key: str) -> bool:
     """Return whether ``session_info`` still belongs to ``task_id``/``session_key``.
 
@@ -1401,6 +1557,18 @@ _recording_sessions: set = set()  # session_keys with active recordings
 # sidecar would fall back to the cloud session on its next snapshot call.
 _last_active_session_key: Dict[str, str] = {}  # task_id -> session_key
 _LOCAL_SUFFIX = "::local"
+
+# Per-origin tab reuse — CDP-override sessions only (see _get_cdp_override()).
+# Maps session_key -> {origin: agent-browser tab label}. Populated by
+# _ensure_origin_tab(), which browser_navigate() calls before every "open" when
+# a persistent app-managed browser is in play (browser.cdp_url / BROWSER_CDP_URL
+# set). Without this, every navigation in a task reuses the daemon's single
+# active tab regardless of origin, and an app SPA (e.g. a webmail client) whose
+# tab gets navigated away and back can end up in a corrupted client-side state
+# even though its auth cookies are still valid — see _ensure_origin_tab() for
+# the full mechanism. Cleared alongside _active_sessions in
+# _cleanup_single_browser_session() so labels don't survive a session reap.
+_origin_tabs: Dict[str, Dict[str, str]] = {}  # session_key -> {origin: tab_label}
 
 # Flag to track if cleanup has been done
 _cleanup_done = False
@@ -2806,6 +2974,19 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
     if is_first_nav:
         session_info["_first_nav"] = False
         _maybe_start_recording(nav_session_key)
+
+    # Per-origin tab reuse — ONLY for the app-managed persistent browser path
+    # (browser.cdp_url / BROWSER_CDP_URL). Reusing one tab across origins is
+    # fine for the normal local-headless-per-task and cloud/Browserbase
+    # sessions (they're single-purpose and thrown away per task), but a
+    # persistent CDP browser can carry a logged-in SPA whose client-side
+    # state gets corrupted by navigating its tab to an unrelated origin and
+    # back. Routes the upcoming "open" to a tab dedicated to this origin
+    # instead, so cross-origin navigation within one task never touches a
+    # different origin's tab. Best-effort: on any failure this is a no-op
+    # and "open" below runs exactly as it did before this call existed.
+    if _get_cdp_override():
+        _ensure_origin_tab(nav_session_key, url)
 
     result = _run_browser_command(
         nav_session_key,
@@ -4326,6 +4507,7 @@ def _cleanup_single_browser_session(task_id: str) -> None:
         with _cleanup_lock:
             _active_sessions.pop(task_id, None)
             _session_last_activity.pop(task_id, None)
+            _origin_tabs.pop(task_id, None)
 
         # Cloud mode: close the cloud browser session via provider API.
         # Local sidecars have bb_session_id=None so this no-ops for them.
