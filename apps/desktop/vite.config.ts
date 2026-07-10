@@ -28,6 +28,10 @@ const fsAllow = [
 export default defineConfig({
   base: './',
   plugins: [react(), tailwindcss()],
+  // transformers.js (Whisper transcription) self-loads its WASM at runtime — don't let
+  // Vite pre-bundle it, and let it resolve its own browser build (dist/transformers.web.js,
+  // which avoids the Node-native onnxruntime-node).
+  optimizeDeps: { exclude: ['@huggingface/transformers'] },
   css: {
     // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by
     // `@tailwindcss/vite`, so the renderer needs no PostCSS plugins — and

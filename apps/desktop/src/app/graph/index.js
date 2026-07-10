@@ -43,22 +43,23 @@ export function GraphView() {
                     .width(host.clientWidth || host.offsetWidth || 800)
                     .height(host.clientHeight || host.offsetHeight || 600)
                     .nodeLabel((node) => `<div style="font: 12px sans-serif; color:#eee">${node.id}</div>`)
-                    .nodeRelSize(6)
+                    .nodeRelSize(4)
                     .nodeColor((node) => (node.degree >= 2 ? accent : '#c8c8c8'))
-                    .nodeVal((node) => 2 + node.degree * 2)
-                    .nodeOpacity(0.95)
+                    .nodeVal((node) => 1 + node.degree)
+                    .nodeOpacity(0.9)
                     .linkColor(() => '#4a4a4a')
                     .linkWidth(0.5)
-                    .linkOpacity(0.6)
+                    .linkOpacity(0.55)
                     .onNodeClick((node) => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(node.id)}`))
                     .graphData({ links, nodes });
                 // Frame the whole graph once the force sim settles (and again as a fallback —
-                // the container can report 0px at construction inside the flex layout).
-                instance.onEngineStop(() => instance.zoomToFit(400, 60));
-                window.setTimeout(() => instance.zoomToFit(600, 60), 1400);
+                // the container can report 0px at construction inside the flex layout). Generous
+                // padding keeps the nodes comfortably inside the viewport rather than filling it.
+                instance.onEngineStop(() => instance.zoomToFit(500, 110));
+                window.setTimeout(() => instance.zoomToFit(700, 110), 1500);
                 const controls = instance.controls();
                 controls.autoRotate = true;
-                controls.autoRotateSpeed = 0.6;
+                controls.autoRotateSpeed = 0.5;
                 observer = new ResizeObserver(() => {
                     instance.width(host.clientWidth || 800);
                     instance.height(host.clientHeight || 600);

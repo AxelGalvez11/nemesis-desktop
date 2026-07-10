@@ -11,6 +11,9 @@ import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils'
 
+import { saveNote } from '../library/vault'
+import { transcribeAudio } from './transcribe'
+
 const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
 
 interface RecordingFile {
@@ -27,6 +30,9 @@ export function RecorderView() {
   const [withSystemAudio, setWithSystemAudio] = useState(true)
   const [recordings, setRecordings] = useState<RecordingFile[]>([])
   const [playing, setPlaying] = useState<null | { path: string; src: string }>(null)
+  const [transcripts, setTranscripts] = useState<Record<string, string>>({})
+  const [transcribingStatus, setTranscribingStatus] = useState<Record<string, string>>({})
+  const [savedNote, setSavedNote] = useState<Record<string, boolean>>({})
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamsRef = useRef<MediaStream[]>([])
@@ -179,6 +185,64 @@ export function RecorderView() {
     [playing]
   )
 
+  const readAudioBuffer = async (file: RecordingFile): Promise<ArrayBuffer> => {
+    const read = await window.hermesDesktop?.readFileDataUrl?.(file.path)
+    const src = typeof read === 'string' ? read : (read as { dataUrl?: string } | undefined)?.dataUrl
+
+    if (!src) {
+      throw new Error('Could not read the recording file.')
+    }
+
+    return (await fetch(src)).arrayBuffer()
+  }
+
+  const transcribe = useCallback(async (file: RecordingFile) => {
+    setTranscribingStatus(status => ({ ...status, [file.path]: 'Loading model…' }))
+
+    try {
+      const buffer = await readAudioBuffer(file)
+      const text = await transcribeAudio(buffer, update =>
+        setTranscribingStatus(status => ({
+          ...status,
+          [file.path]:
+            update.stage === 'loading-model'
+              ? `Loading model… ${Math.round(update.progress ?? 0)}%`
+              : update.stage === 'decoding'
+                ? 'Decoding audio…'
+                : 'Transcribing…'
+        }))
+      )
+      setTranscripts(current => ({ ...current, [file.path]: text || '(No speech detected.)' }))
+    } catch (err) {
+      setTranscripts(current => ({
+        ...current,
+        [file.path]: `Transcription failed: ${err instanceof Error ? err.message : 'unknown error'}`
+      }))
+    } finally {
+      setTranscribingStatus(status => {
+        const next = { ...status }
+        delete next[file.path]
+
+        return next
+      })
+    }
+  }, [])
+
+  const saveTranscriptNote = useCallback(
+    async (file: RecordingFile) => {
+      const text = transcripts[file.path]
+
+      if (!text) {
+        return
+      }
+
+      const title = `Lecture ${file.name.replace(/\.webm$/i, '').replace(/^lecture-/, '')}`
+      await saveNote(title, `# ${title}\n\n*Transcribed by Nemesis — review before relying on it.*\n\n${text}\n`)
+      setSavedNote(current => ({ ...current, [file.path]: true }))
+    },
+    [transcripts]
+  )
+
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const seconds = String(elapsed % 60).padStart(2, '0')
 
@@ -232,14 +296,46 @@ export function RecorderView() {
         <h2 className="pb-2 text-sm font-medium">Saved recordings</h2>
         {recordings.length ? (
           <ul className="flex flex-col gap-1.5">
-            {recordings.map(file => (
-              <li className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2" key={file.path}>
-                <span className="truncate text-sm">{file.name}</span>
-                <Button onClick={() => void play(file)} size="sm" variant="outline">
-                  {playing?.path === file.path ? 'Hide' : 'Play'}
-                </Button>
-              </li>
-            ))}
+            {recordings.map(file => {
+              const status = transcribingStatus[file.path]
+              const transcript = transcripts[file.path]
+
+              return (
+                <li className="flex flex-col gap-2 rounded-md border border-border px-3 py-2" key={file.path}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-sm">{file.name}</span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        disabled={Boolean(status)}
+                        onClick={() => void transcribe(file)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {status ?? (transcript ? 'Re-transcribe' : 'Transcribe')}
+                      </Button>
+                      <Button onClick={() => void play(file)} size="sm" variant="outline">
+                        {playing?.path === file.path ? 'Hide' : 'Play'}
+                      </Button>
+                    </div>
+                  </div>
+                  {transcript && (
+                    <div className="rounded-md bg-muted/40 p-3">
+                      <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{transcript}</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <Button
+                          disabled={savedNote[file.path]}
+                          onClick={() => void saveTranscriptNote(file)}
+                          size="sm"
+                          variant="secondary"
+                        >
+                          {savedNote[file.path] ? 'Saved to Library ✓' : 'Save as note'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         ) : (
           <EmptyState
@@ -251,8 +347,8 @@ export function RecorderView() {
         {playing && <audio autoPlay className="mt-3 w-full" controls src={playing.src} />}
         <p className="pt-4 text-[11px] leading-relaxed text-muted-foreground">
           Recording other people may require their consent where you live — check your school&rsquo;s policy. Nemesis
-          never records on its own, never hides the indicator, and transcription (turning lectures into notes) lands in
-          a coming update.
+          never records on its own and never hides the indicator. Transcription runs on your device (the first run
+          downloads a small model); the text is a draft — review it before you rely on it.
         </p>
       </section>
     </div>
