@@ -2,7 +2,7 @@
 // note). Interaction model deliberately mirrors what health-science students already have
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
-import { IconCards, IconLayoutGrid, IconList, IconPlayerPause } from '@tabler/icons-react'
+import { IconCards, IconFolderPlus, IconLayoutGrid, IconList, IconPlayerPause } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -25,6 +26,8 @@ import { markDeckFileImported, scanDeckFiles } from './deck-files'
 import { parseCardPaste } from './import-cards'
 import {
   addCard,
+  addSection,
+  assignDeckSection,
   buildQueue,
   deckStats,
   type DeckStats,
@@ -87,7 +90,8 @@ export function StudyView() {
   const [reviewing, setReviewing] = useState(false)
   const [revealed, setRevealed] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-  const [newDeckOpen, setNewDeckOpen] = useState(false)
+  const [newDeckSection, setNewDeckSection] = useState<null | string>(null)
+  const [newSectionOpen, setNewSectionOpen] = useState(false)
   const [view, setView] = useState<DeckViewMode>(() => loadViewMode())
   const [flip, setFlip] = useState(() => loadFlip())
   const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
@@ -98,6 +102,10 @@ export function StudyView() {
   const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now])
   const current: QueueItem | undefined = queue[0]
   const totals = deckStats(state, null, now)
+  const sections = useMemo(
+    () => groupDecks(state, now).map(group => group.course).filter(course => course.toLocaleLowerCase() !== 'other'),
+    [now, state]
+  )
 
   const update = useCallback((next: StudyState) => {
     setState(next)
@@ -135,7 +143,7 @@ export function StudyView() {
             createdAt: new Date().toISOString(),
             cards: candidate.cards.map(card => ({ back: card.back, front: card.front, id: freshId('card'), tags: [] }))
           }
-          next = { ...next, decks: [...next.decks, deck] }
+          next = addSection({ ...next, decks: [...next.decks, deck] }, candidate.course ?? '')
           importedNames.push(candidate.name)
         }
 
@@ -271,10 +279,23 @@ export function StudyView() {
       }
 
       update({ ...state, decks: [...state.decks, deck] })
-      setNewDeckOpen(false)
+      setNewDeckSection(null)
       // Straight into the card browser so the first card is one click away.
       setBrowseDeckId(deck.id)
     },
+    [state, update]
+  )
+
+  const createSection = useCallback(
+    (name: string) => {
+      update(addSection(state, name))
+      setNewSectionOpen(false)
+    },
+    [state, update]
+  )
+
+  const moveDeck = useCallback(
+    (deckId: string, section: string) => update(assignDeckSection(state, deckId, section)),
     [state, update]
   )
 
@@ -319,7 +340,7 @@ export function StudyView() {
             {totals.due} due · {totals.fresh} new · {totals.total} cards
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {reviewing || browseDeckId || matchDeckId ? (
             <Button
               onClick={() => {
@@ -369,7 +390,11 @@ export function StudyView() {
               >
                 <IconCards size={14} />
               </button>
-              <Button onClick={() => setNewDeckOpen(true)} size="sm" variant="outline">
+              <Button onClick={() => setNewSectionOpen(true)} size="sm" variant="outline">
+                <IconFolderPlus size={14} />
+                New section
+              </Button>
+              <Button onClick={() => setNewDeckSection('')} size="sm" variant="outline">
                 New deck
               </Button>
               <Button onClick={() => setImportOpen(true)} size="sm" variant="outline">
@@ -426,28 +451,94 @@ export function StudyView() {
           onChange={update}
           onDeleteDeck={() => removeDeck(browseDeckId)}
           onMatch={() => startMatch(browseDeckId)}
+          onMoveDeck={section => moveDeck(browseDeckId, section)}
+          sections={sections}
           state={state}
         />
       ) : (
-        <DeckBrowser onBrowse={setBrowseDeckId} onMatch={startMatch} onStudy={startReview} state={state} view={view} />
+        <DeckBrowser
+          onBrowse={setBrowseDeckId}
+          onCreateDeck={setNewDeckSection}
+          onMatch={startMatch}
+          onStudy={startReview}
+          state={state}
+          view={view}
+        />
       )}
 
-      <ImportDialog onImport={importCards} onOpenChange={setImportOpen} open={importOpen} />
-      {newDeckOpen && <NewDeckDialog onClose={() => setNewDeckOpen(false)} onCreate={createDeck} />}
+      <ImportDialog onImport={importCards} onOpenChange={setImportOpen} open={importOpen} sections={sections} />
+      {newDeckSection !== null && (
+        <NewDeckDialog
+          initialSection={newDeckSection}
+          onClose={() => setNewDeckSection(null)}
+          onCreate={createDeck}
+          sections={sections}
+        />
+      )}
+      {newSectionOpen && (
+        <NewSectionDialog
+          onClose={() => setNewSectionOpen(false)}
+          onCreate={createSection}
+          sections={sections}
+        />
+      )}
     </div>
   )
 }
 
-function NewDeckDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (name: string, course: string) => void }) {
+const OTHER_SECTION_VALUE = '__other__'
+
+function SectionSelect({
+  label,
+  onChange,
+  sections,
+  value
+}: {
+  label: string
+  onChange: (section: string) => void
+  sections: string[]
+  value: string
+}) {
+  return (
+    <Select
+      onValueChange={section => onChange(section === OTHER_SECTION_VALUE ? '' : section)}
+      value={value.trim() || OTHER_SECTION_VALUE}
+    >
+      <SelectTrigger aria-label={label} className="w-full">
+        <SelectValue placeholder="Other" />
+      </SelectTrigger>
+      <SelectContent>
+        {sections.map(section => (
+          <SelectItem key={section} value={section}>
+            {section}
+          </SelectItem>
+        ))}
+        <SelectItem value={OTHER_SECTION_VALUE}>Other</SelectItem>
+      </SelectContent>
+    </Select>
+  )
+}
+
+function NewDeckDialog({
+  initialSection,
+  onClose,
+  onCreate,
+  sections
+}: {
+  initialSection: string
+  onClose: () => void
+  onCreate: (name: string, course: string) => void
+  sections: string[]
+}) {
   const [name, setName] = useState('')
-  const [course, setCourse] = useState('')
+  const [course, setCourse] = useState(initialSection)
 
   return (
     <Dialog onOpenChange={open => !open && onClose()} open>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New deck</DialogTitle>
-          <DialogDescription>Decks with the same course name group together on this page.</DialogDescription>
+          <DialogDescription>Choose where this deck belongs. Ungrouped decks stay in Other.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <Input
@@ -461,11 +552,12 @@ function NewDeckDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (
             placeholder="Deck name (e.g. Renal pharm)"
             value={name}
           />
-          <Input
-            onChange={event => setCourse(event.target.value)}
-            placeholder="Course / group (e.g. Pharmacology — optional)"
-            value={course}
-          />
+          <div className="space-y-1.5">
+            <label className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+              Section
+            </label>
+            <SectionSelect label="Deck section" onChange={setCourse} sections={sections} value={course} />
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={onClose} variant="outline">
@@ -480,14 +572,64 @@ function NewDeckDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (
   )
 }
 
+function NewSectionDialog({
+  onClose,
+  onCreate,
+  sections
+}: {
+  onClose: () => void
+  onCreate: (name: string) => void
+  sections: string[]
+}) {
+  const [name, setName] = useState('')
+  const normalized = name.trim().toLocaleLowerCase()
+  const unavailable = normalized === 'other' || sections.some(section => section.toLocaleLowerCase() === normalized)
+  const valid = Boolean(normalized) && !unavailable
+
+  return (
+    <Dialog onOpenChange={open => !open && onClose()} open>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New section</DialogTitle>
+          <DialogDescription>Create a home for related decks. Empty sections remain visible until you add one.</DialogDescription>
+        </DialogHeader>
+        <Input
+          autoFocus
+          onChange={event => setName(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && valid) {
+              onCreate(name)
+            }
+          }}
+          placeholder="Section name (e.g. Pharmacology)"
+          value={name}
+        />
+        {normalized && unavailable && (
+          <p className="text-xs text-muted-foreground">That section already exists. “Other” is reserved for ungrouped decks.</p>
+        )}
+        <DialogFooter>
+          <Button onClick={onClose} variant="outline">
+            Cancel
+          </Button>
+          <Button disabled={!valid} onClick={() => onCreate(name)}>
+            Create section
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function DeckBrowser({
   onBrowse,
+  onCreateDeck,
   onMatch,
   onStudy,
   state,
   view
 }: {
   onBrowse: (deckId: string) => void
+  onCreateDeck: (section: string) => void
   onMatch: (deckId: string) => void
   onStudy: (deckId: string) => void
   state: StudyState
@@ -496,7 +638,7 @@ function DeckBrowser({
   const now = new Date()
   const groups = groupDecks(state, now)
 
-  if (!state.decks.length) {
+  if (!groups.length) {
     return <EmptyState className="flex-1" description="Create a deck or import cards to get going." title="No decks yet" />
   }
 
@@ -511,7 +653,19 @@ function DeckBrowser({
               {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} · {group.stats.total} cards
             </span>
           </div>
-          {view === 'list' ? (
+          {group.decks.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-5">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
+                Empty section
+              </p>
+              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                <span>No decks yet —</span>
+                <Button onClick={() => onCreateDeck(group.course)} size="inline" variant="textStrong">
+                  add one
+                </Button>
+              </div>
+            </div>
+          ) : view === 'list' ? (
             <div className="flex flex-col gap-2">
               {group.decks.map(deck => (
                 <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
@@ -538,7 +692,7 @@ function masteryPct(stats: DeckStats): number {
 function MasteryBar({ pct }: { pct: number }) {
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,color-mix(in_srgb,gray_18%,transparent))">
-      <div className="h-full rounded-full bg-(--theme-primary) transition-all" style={{ width: `${pct}%` }} />
+      <div className="h-full rounded-full bg-(--theme-primary)" style={{ width: `${pct}%` }} />
     </div>
   )
 }
@@ -653,10 +807,11 @@ function DeckCard({
 // legend, and a today marker — the "dynamic" upgrade.
 const HEAT_MIX = ['', '30%', '52%', '76%', '100%']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function heatColor(level: number): string {
   return level === 0
-    ? 'color-mix(in srgb, gray 16%, transparent)'
+    ? 'color-mix(in srgb, var(--ui-text-primary) 10%, transparent)'
     : `color-mix(in srgb, var(--theme-primary) ${HEAT_MIX[level]}, transparent)`
 }
 
@@ -695,44 +850,68 @@ function Heatmap({ state }: { state: StudyState }) {
   return (
     <div className="px-8 pt-2">
       <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs">
-        <Stat label="day streak" value={stats.currentStreak} />
-        <Stat label="longest" value={stats.longestStreak} />
-        <Stat label="days active" value={`${stats.daysLearnedPct}%`} />
-        {stats.retentionPct !== null && <Stat label="retention (30d)" value={`${stats.retentionPct}%`} />}
-        <span className="text-muted-foreground">{total} reviews · 18 weeks</span>
-      </div>
+        <div className="mb-4">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Review activity</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs">
+            <Stat label="day streak" value={stats.currentStreak} />
+            <Stat label="longest" value={stats.longestStreak} />
+            <Stat label="days active" value={`${stats.daysLearnedPct}%`} />
+            {stats.retentionPct !== null && <Stat label="retention (30d)" value={`${stats.retentionPct}%`} />}
+            <span className="text-muted-foreground">{total} reviews · past 53 weeks</span>
+          </div>
+          {total === 0 && <p className="mt-1 text-xs text-muted-foreground">Your year fills in as you grade cards.</p>}
+        </div>
 
-      <div className="inline-flex flex-col gap-1">
-        <div className="relative h-3 text-[9px] text-muted-foreground" style={{ width: `${weeks * 14}px` }}>
-          {monthLabels.map(m => (
-            <span className="absolute" key={`${m.label}-${m.col}`} style={{ left: `${m.col * 14}px` }}>
-              {m.label}
-            </span>
-          ))}
-        </div>
-        <div className="grid grid-flow-col grid-rows-7 gap-[3px]" style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}>
-          {cells.map(cell => (
-            <Tip
-              key={cell.date}
-              label={`${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`}
-              side="top"
-            >
+        <div className="overflow-x-auto pb-1">
+          <div className="min-w-max">
+            <div className="grid grid-cols-[2rem_auto] gap-x-2 gap-y-1">
+              <div />
+              <div className="relative h-3 text-[9px] text-muted-foreground" style={{ width: `${weeks * 14}px` }}>
+                {monthLabels.map(month => (
+                  <span
+                    className="absolute"
+                    key={`${month.label}-${month.col}`}
+                    style={{ left: `${month.col * 14}px` }}
+                  >
+                    {month.label}
+                  </span>
+                ))}
+              </div>
               <div
-                className={cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60')}
-                style={{ backgroundColor: heatColor(cell.level) }}
-              />
-            </Tip>
-          ))}
+                className="grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground"
+                style={{ gridTemplateRows: 'repeat(7, 11px)' }}
+              >
+                {WEEKDAYS.map(day => (
+                  <span key={day}>{day}</span>
+                ))}
+              </div>
+              <div
+                className="grid grid-flow-col grid-rows-7 gap-[3px]"
+                style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}
+              >
+                {cells.map(cell => (
+                  <Tip
+                    key={cell.date}
+                    label={`${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`}
+                    side="top"
+                  >
+                    <div
+                      className={cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60')}
+                      style={{ backgroundColor: heatColor(cell.level) }}
+                    />
+                  </Tip>
+                ))}
+              </div>
+            </div>
+            <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
+              <span>Less</span>
+              {[0, 1, 2, 3, 4].map(level => (
+                <span className="size-2.5 rounded-[2px]" key={level} style={{ backgroundColor: heatColor(level) }} />
+              ))}
+              <span>More</span>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-1 self-end text-[9px] text-muted-foreground">
-          <span>Less</span>
-          {[0, 1, 2, 3, 4].map(level => (
-            <span className="size-2.5 rounded-[2px]" key={level} style={{ backgroundColor: heatColor(level) }} />
-          ))}
-          <span>More</span>
-        </div>
-      </div>
       </div>
     </div>
   )
@@ -743,12 +922,16 @@ function CardBrowser({
   onChange,
   onDeleteDeck,
   onMatch,
+  onMoveDeck,
+  sections,
   state
 }: {
   deck: null | StudyDeck
   onChange: (next: StudyState) => void
   onDeleteDeck: () => void
   onMatch: () => void
+  onMoveDeck: (section: string) => void
+  sections: string[]
   state: StudyState
 }) {
   const [editing, setEditing] = useState<null | StudyCard>(null)
@@ -761,7 +944,7 @@ function CardBrowser({
 
   return (
     <div className="px-6 pb-8">
-      <div className="mb-2 flex items-baseline justify-between border-b border-border pb-1.5">
+      <div className="mb-2 flex items-center justify-between gap-3 border-b border-border pb-1.5">
         <div>
           <h2 className="text-sm font-semibold">{deck.name}</h2>
           <p className="text-xs text-muted-foreground">
@@ -769,7 +952,10 @@ function CardBrowser({
             {deck.cards.length} card{deck.cards.length === 1 ? '' : 's'}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="w-40">
+            <SectionSelect label="Move deck to section" onChange={onMoveDeck} sections={sections} value={deck.course ?? ''} />
+          </div>
           <Button
             className={cn(armDelete && 'text-destructive')}
             onBlur={() => setArmDelete(false)}
@@ -1198,7 +1384,7 @@ function ReviewSurface({
 
         {/* Session progress */}
         <div className="mb-4 h-1 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,theme(colors.muted.DEFAULT))">
-          <div className="h-full bg-(--theme-primary) transition-all duration-300" style={{ width: `${progress}%` }} />
+          <div className="h-full bg-(--theme-primary)" style={{ width: `${progress}%` }} />
         </div>
 
         {/* Card. Flip build = a 3D-rotating card with distinct front/back faces; plain
@@ -1277,11 +1463,13 @@ function ReviewSurface({
 function ImportDialog({
   onImport,
   onOpenChange,
-  open
+  open,
+  sections
 }: {
   onImport: (name: string, course: string, text: string) => boolean
   onOpenChange: (open: boolean) => void
   open: boolean
+  sections: string[]
 }) {
   const [name, setName] = useState('')
   const [course, setCourse] = useState('')
@@ -1308,7 +1496,12 @@ function ImportDialog({
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <Input onChange={event => setName(event.target.value)} placeholder="Deck name" value={name} />
-          <Input onChange={event => setCourse(event.target.value)} placeholder="Course (optional)" value={course} />
+          <div className="space-y-1.5">
+            <label className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+              Section
+            </label>
+            <SectionSelect label="Imported deck section" onChange={setCourse} sections={sections} value={course} />
+          </div>
           <Textarea
             className="min-h-40 font-mono text-xs"
             onChange={event => setText(event.target.value)}

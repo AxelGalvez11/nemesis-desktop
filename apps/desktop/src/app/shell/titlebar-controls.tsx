@@ -58,6 +58,8 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const sidebarOpen = useStore($sidebarOpen)
   const panesFlipped = useStore($panesFlipped)
   const previewPaneOpen = useStore($paneOpen(PREVIEW_PANE_ID))
+  const currentView = appViewForPath(location.pathname)
+  const showChatRailControls = !NEMESIS_STUDENT_BUILD || currentView === 'chat'
 
   const toggleHaptics = () => {
     if (!hapticsMuted) {
@@ -81,8 +83,8 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
     ? { open: previewPaneOpen, toggle: () => togglePane(PREVIEW_PANE_ID) }
     : { open: fileBrowserOpen, toggle: toggleFileBrowserOpen }
   const sessionsEdge = { open: sidebarOpen, toggle: toggleSidebarOpen }
-  const leftEdge = panesFlipped ? fileBrowserEdge : sessionsEdge
-  const rightEdge = panesFlipped ? sessionsEdge : fileBrowserEdge
+  const leftEdge = NEMESIS_STUDENT_BUILD ? sessionsEdge : panesFlipped ? fileBrowserEdge : sessionsEdge
+  const rightEdge = NEMESIS_STUDENT_BUILD ? fileBrowserEdge : panesFlipped ? sessionsEdge : fileBrowserEdge
 
   const leftToolbarTools: TitlebarTool[] = [
     {
@@ -123,12 +125,14 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const systemTools: TitlebarTool[] = [
     {
       active: hapticsMuted,
+      hidden: NEMESIS_STUDENT_BUILD,
       icon: <Codicon name={hapticsMuted ? 'mute' : 'unmute'} />,
       id: 'haptics',
       label: hapticsMuted ? t.titlebar.unmuteHaptics : t.titlebar.muteHaptics,
       onSelect: toggleHaptics
     },
     {
+      hidden: NEMESIS_STUDENT_BUILD,
       icon: <Codicon name="keyboard" />,
       id: 'keybinds',
       label: t.titlebar.openKeybinds,
@@ -138,6 +142,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
       }
     },
     {
+      hidden: NEMESIS_STUDENT_BUILD,
       icon: <Codicon name="settings-gear" />,
       id: 'settings',
       label: t.titlebar.openSettings,
@@ -152,14 +157,15 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   // visually own the window. These control clusters are `fixed` at a higher
   // z-index than the overlay card, so they'd otherwise bleed over it — hide them
   // and let the overlay's own chrome (close button, drag region) take over.
-  if (isOverlayView(appViewForPath(location.pathname))) {
+  if (isOverlayView(currentView)) {
     return null
   }
 
   const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
   const settingsTool = visibleSystemTools.find(tool => tool.id === 'settings')
   const visibleSystemToolsBeforeSettings = visibleSystemTools.filter(tool => tool.id !== 'settings')
-  const visiblePaneTools = tools.filter(tool => !tool.hidden)
+  const visiblePaneTools = showChatRailControls ? tools.filter(tool => !tool.hidden) : []
+  const showRightControls = visibleSystemTools.length > 0 || showChatRailControls
 
   return (
     <>
@@ -193,16 +199,18 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         </div>
       )}
 
-      <div
-        aria-label={t.shell.appControls}
-        className="fixed right-(--titlebar-tools-right) top-(--titlebar-controls-top) z-70 flex flex-row items-center justify-end gap-x-1 pointer-events-auto select-none [-webkit-app-region:no-drag]"
-      >
-        {visibleSystemToolsBeforeSettings.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
-        {settingsTool && <TitlebarToolButton navigate={navigate} tool={settingsTool} />}
-        <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />
-      </div>
+      {showRightControls && (
+        <div
+          aria-label={t.shell.appControls}
+          className="fixed right-(--titlebar-tools-right) top-(--titlebar-controls-top) z-70 flex flex-row items-center justify-end gap-x-1 pointer-events-auto select-none [-webkit-app-region:no-drag]"
+        >
+          {visibleSystemToolsBeforeSettings.map(tool => (
+            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+          ))}
+          {settingsTool && <TitlebarToolButton navigate={navigate} tool={settingsTool} />}
+          {showChatRailControls && <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />}
+        </div>
+      )}
     </>
   )
 }

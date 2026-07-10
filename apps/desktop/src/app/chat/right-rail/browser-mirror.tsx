@@ -91,9 +91,13 @@ export function BrowserMirror() {
       }
 
       lastViewportRef.current = { height, width }
+      // Render the page at the display's pixel density (capped at 2x) so the
+      // screencast is captured at retina resolution — otherwise a 1x capture is
+      // upscaled onto the retina panel and looks blurry.
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
       exec({
         method: 'Emulation.setDeviceMetricsOverride',
-        params: { deviceScaleFactor: 1, height, mobile: false, width }
+        params: { deviceScaleFactor: dpr, height, mobile: false, width }
       })
     },
     [exec]

@@ -259,18 +259,18 @@ export function RecorderView() {
     )
   }, [])
 
-  // Granola/Hyprnote's signature move: after the lecture, the agent merges rough notes +
-  // transcript into a clean study note — and since Nemesis has file tools over the vault,
-  // it updates the SAME Library file in place.
+  // Granola/Hyprnote's signature move: after the lecture, the agent turns rough notes +
+  // transcript into structured AI notes in the SAME Library file while preserving the
+  // raw transcript as the durable source material.
   const enhanceNote = useCallback(() => {
     if (!lectureNote) {
       return
     }
 
     setComposerDraft(
-      `Open my lecture note "${lectureNote}.md" in ~/Documents/Nemesis Library/${LECTURE_FOLDER}/ and rewrite it into a clean, structured study note. ` +
-        'Merge the "My notes" section with the "Transcript" section: keep my wording where it is good, fix transcription garbles against pharmacology vocabulary, ' +
-        'organize with headings and bullets, and keep the header lines about the recording date and audio file. Update that same file with the result. ' +
+      `Open my lecture note "${lectureNote}.md" in ~/Documents/Nemesis Library/${LECTURE_FOLDER}/ and add a clean, structured "AI notes" section immediately above the existing "Transcript" section. ` +
+        'Use both "My notes" and "Transcript" as source material: keep my wording where it is good, fix transcription garbles against pharmacology vocabulary, ' +
+        'and organize the AI notes with useful headings and bullets. Preserve the original Transcript section, My notes section, and the header lines about the recording date and audio file. Update that same file with the result. ' +
         'At the end add a "Flashcard candidates" section with 5 exam-style Q&A pairs from this lecture. Tell me when the file is updated.'
     )
     navigate(NEW_CHAT_ROUTE)
@@ -557,23 +557,20 @@ export function RecorderView() {
       await write(`${RECORDINGS_DIR}/${fileName}`, btoa(base64))
       await refreshList()
 
-      // Let in-flight transcription finish (bounded), then auto-save the lecture note:
-      // the student's typed notes and the transcript, as separate sections.
+      // Let in-flight transcription finish (bounded), then auto-save the companion
+      // Library note. Even a silent capture gets a durable placeholder beside its audio.
       setLiveStatus('Finishing transcript…')
       await drainLive(sampleRateRef.current)
       const transcript = liveSegmentsRef.current.join(' ').replace(/\s+/g, ' ').trim()
       const typedNotes = notesRef.current.trim()
-
-      if (transcript || typedNotes) {
-        const noteTitle = titleRef.current.trim() || lectureNoteTitle(at)
-        await createFolder(LECTURE_FOLDER)
-        await saveNote(
-          noteTitle,
-          `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`,
-          LECTURE_FOLDER
-        )
-        setLectureNote(noteTitle)
-      }
+      const noteTitle = titleRef.current.trim() || lectureNoteTitle(at)
+      await createFolder(LECTURE_FOLDER)
+      await saveNote(
+        noteTitle,
+        `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`,
+        LECTURE_FOLDER
+      )
+      setLectureNote(noteTitle)
 
       setLiveStatus('')
     } catch (err) {
@@ -887,7 +884,7 @@ export function RecorderView() {
           <div className="flex flex-wrap items-center gap-2 border-t border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-5 py-3 text-xs">
             <span className="mr-auto inline-flex items-center gap-1.5 font-medium">
               <IconCheck className="text-(--theme-primary)" size={13} />
-              Lecture note saved to Library → {LECTURE_FOLDER}
+              Transcript note saved to Library / {LECTURE_FOLDER} as {lectureNote}.md
             </span>
             <Button onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`)} size="xs" variant="outline">
               Open note

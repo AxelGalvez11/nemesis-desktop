@@ -2,6 +2,7 @@ import { atom, computed, type ReadableAtom } from 'nanostores'
 
 import { Codecs, persistentAtom } from '@/lib/persisted'
 import { arraysEqual, insertUniqueId } from '@/lib/storage'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 
 import { $paneStates, ensurePaneRegistered, setPaneOpen, setPaneWidthOverride, togglePane } from './panes'
 
@@ -64,7 +65,7 @@ export const $fileBrowserOpen: ReadableAtom<boolean> = computed(
 // no matching tab is reconciled back to the preview tab in the preview store.
 export const $rightRailActiveTabId = persistentAtom<RightRailTabId>(
   RIGHT_RAIL_ACTIVE_TAB_STORAGE_KEY,
-  RIGHT_RAIL_PREVIEW_TAB_ID,
+  NEMESIS_STUDENT_BUILD ? RIGHT_RAIL_SOURCES_TAB_ID : RIGHT_RAIL_PREVIEW_TAB_ID,
   { decode: raw => raw as RightRailTabId, encode: tabId => tabId }
 )
 

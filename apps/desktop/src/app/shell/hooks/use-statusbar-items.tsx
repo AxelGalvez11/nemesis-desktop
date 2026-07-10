@@ -1,11 +1,9 @@
 import { useStore } from '@nanostores/react'
-import { IconUser } from '@tabler/icons-react'
 import { useCallback, useMemo } from 'react'
 
 import type { CommandCenterSection } from '@/app/command-center'
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
 import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis'
-import { $account, $accountDialogOpen, planLabel } from '@/nemesis-account'
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
 import { Codicon } from '@/components/ui/codicon'
@@ -430,37 +428,12 @@ export function useStatusbarItems({
     ]
   )
 
-  // Student build: account chip — email · plan, click opens the Account dialog
-  // (plan badge, upgrade/billing, sign out). Lives left so it reads as identity.
-  const account = useStore($account)
-  const accountItem = useMemo<null | StatusbarItem>(() => {
-    if (!NEMESIS_STUDENT_BUILD) {
-      return null
-    }
-
-    const label =
-      account.status === 'signed-in'
-        ? account.bypass
-          ? 'Offline mode'
-          : `${account.email ?? 'Account'} · ${planLabel(account.plan)}`
-        : 'Sign in'
-
-    return {
-      icon: <IconUser size={12} />,
-      id: 'nemesis-account',
-      label,
-      onSelect: () => $accountDialogOpen.set(true),
-      title: 'Account & plan',
-      variant: 'action'
-    }
-  }, [account])
-
   const leftStatusbarItems = useMemo(
     () =>
-      [...(accountItem ? [accountItem] : []), ...coreLeftStatusbarItems, ...extraLeftItems].filter(
+      [...coreLeftStatusbarItems, ...extraLeftItems].filter(
         item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)
       ),
-    [accountItem, coreLeftStatusbarItems, extraLeftItems]
+    [coreLeftStatusbarItems, extraLeftItems]
   )
 
   const statusbarItems = useMemo(

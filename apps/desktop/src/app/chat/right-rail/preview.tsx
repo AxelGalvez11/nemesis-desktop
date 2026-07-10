@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useMemo } from 'react'
 
 import type { SetTitlebarToolGroup } from '@/app/shell/titlebar-controls'
+import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import {
   ContextMenu,
@@ -11,6 +12,7 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import { Tip } from '@/components/ui/tooltip'
+import { SegmentedControl, type SegmentedControlOption } from '@/components/ui/segmented-control'
 import { translateNow, useI18n } from '@/i18n'
 import { formatCombo } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
@@ -86,7 +88,214 @@ function tabLabelFor(target: PreviewTarget): string {
   return tail || value || translateNow('preview.tab')
 }
 
-export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatPreviewRailProps) {
+type StudentRailSegmentId =
+  | typeof RIGHT_RAIL_BROWSER_TAB_ID
+  | typeof RIGHT_RAIL_PREVIEW_TAB_ID
+  | typeof RIGHT_RAIL_SOURCES_TAB_ID
+
+export function ChatPreviewRail(props: ChatPreviewRailProps) {
+  return NEMESIS_STUDENT_BUILD ? <StudentChatPreviewRail {...props} /> : <DefaultChatPreviewRail {...props} />
+}
+
+function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatPreviewRailProps) {
+  const { t } = useI18n()
+  const previewReloadRequest = useStore($previewReloadRequest)
+  const activeTabId = useStore($rightRailActiveTabId)
+  const panesFlipped = useStore($panesFlipped)
+  const filePreviewTabs = useStore($filePreviewTabs)
+  const previewTarget = useStore($previewTarget)
+  const dirtyPreviewUrls = useStore($dirtyPreviewUrls)
+  const browserRailOpen = useStore($browserRailOpen)
+  const hasPreviewContent = Boolean(previewTarget || filePreviewTabs.length > 0)
+
+  const segments = useMemo<readonly SegmentedControlOption<StudentRailSegmentId>[]>(
+    () => [
+      { id: RIGHT_RAIL_SOURCES_TAB_ID, label: 'Sources' },
+      ...(browserRailOpen ? [{ id: RIGHT_RAIL_BROWSER_TAB_ID, label: 'Browser' } as const] : []),
+      ...(hasPreviewContent ? [{ id: RIGHT_RAIL_PREVIEW_TAB_ID, label: 'Preview' } as const] : [])
+    ],
+    [browserRailOpen, hasPreviewContent]
+  )
+
+  const activeFileTab = activeTabId.startsWith('file:')
+    ? filePreviewTabs.find(tab => tab.id === activeTabId)
+    : undefined
+  const activeSegmentId: StudentRailSegmentId =
+    activeTabId === RIGHT_RAIL_BROWSER_TAB_ID && browserRailOpen
+      ? RIGHT_RAIL_BROWSER_TAB_ID
+      : (activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID || activeFileTab) && hasPreviewContent
+        ? RIGHT_RAIL_PREVIEW_TAB_ID
+        : RIGHT_RAIL_SOURCES_TAB_ID
+  const activePreviewTarget =
+    activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID
+      ? previewTarget
+      : (activeFileTab?.target ?? previewTarget ?? filePreviewTabs[0]?.target ?? null)
+
+  const previewTabs = useMemo<readonly RailTab[]>(
+    () => [
+      ...(previewTarget
+        ? [{ id: RIGHT_RAIL_PREVIEW_TAB_ID, label: t.preview.tab, target: previewTarget } as RailTab]
+        : []),
+      ...filePreviewTabs.map(({ id, target }) => ({ id, label: tabLabelFor(target), target }) as RailTab)
+    ],
+    [filePreviewTabs, previewTarget, t.preview.tab]
+  )
+
+  useEffect(() => {
+    const activeTabAvailable =
+      activeTabId === RIGHT_RAIL_SOURCES_TAB_ID ||
+      (activeTabId === RIGHT_RAIL_BROWSER_TAB_ID && browserRailOpen) ||
+      (activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID && Boolean(previewTarget)) ||
+      Boolean(activeFileTab)
+
+    if (!activeTabAvailable) {
+      selectRightRailTab(RIGHT_RAIL_SOURCES_TAB_ID)
+    }
+  }, [activeFileTab, activeTabId, browserRailOpen, previewTarget])
+
+  const selectSegment = (id: StudentRailSegmentId) => {
+    if (id !== RIGHT_RAIL_PREVIEW_TAB_ID) {
+      selectRightRailTab(id)
+
+      return
+    }
+
+    if (activeSegmentId === RIGHT_RAIL_PREVIEW_TAB_ID) {
+      return
+    }
+
+    selectRightRailTab(
+      previewTarget ? RIGHT_RAIL_PREVIEW_TAB_ID : (filePreviewTabs[0]?.id ?? RIGHT_RAIL_SOURCES_TAB_ID)
+    )
+  }
+
+  const closeActiveView = () => {
+    if (activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID) {
+      closeRightRail()
+
+      return
+    }
+
+    if (activeSegmentId === RIGHT_RAIL_BROWSER_TAB_ID) {
+      closeRightRailTab(RIGHT_RAIL_BROWSER_TAB_ID)
+
+      return
+    }
+
+    closeRightRailTab(activeFileTab?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID)
+  }
+
+  const activeSegmentLabel = segments.find(segment => segment.id === activeSegmentId)?.label ?? 'Sources'
+
+  return (
+    <aside
+      className={cn(
+        'relative flex h-full w-full min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)',
+        panesFlipped ? 'border-r' : 'border-l'
+      )}
+      style={{ paddingTop: 'var(--right-rail-top-inset, 0px)' }}
+    >
+      <div className="flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2 [-webkit-app-region:no-drag]">
+        <SegmentedControl
+          className="min-w-0 max-w-full bg-(--ui-bg-tertiary) [&>button]:min-w-0 [&>button]:truncate [&>button]:transition-none [&>button]:active:scale-[0.98] [&>button]:motion-reduce:active:scale-100 [&>button[aria-pressed=true]]:bg-(--theme-primary)/15 [&>button[aria-pressed=true]]:text-(--theme-primary) [&>button[aria-pressed=true]]:shadow-none"
+          onChange={selectSegment}
+          options={segments}
+          value={activeSegmentId}
+        />
+        <Tip
+          label={
+            activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
+              ? t.preview.closePane
+              : t.preview.closeTab(activeSegmentLabel)
+          }
+        >
+          <Button
+            aria-label={
+              activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
+                ? t.preview.closePane
+                : t.preview.closeTab(activeSegmentLabel)
+            }
+            className="ml-auto shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100"
+            onClick={closeActiveView}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <Codicon name="close" size="0.75rem" />
+          </Button>
+        </Tip>
+      </div>
+
+      {activeSegmentId === RIGHT_RAIL_PREVIEW_TAB_ID && filePreviewTabs.length > 0 && (
+        <div
+          className="flex h-7 shrink-0 overflow-x-auto border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="tablist"
+        >
+          {previewTabs.map(tab => {
+            const active = tab.id === activeTabId
+            const dirty = Boolean(dirtyPreviewUrls[tab.target.url])
+
+            return (
+              <div
+                className={cn(
+                  'group/file-tab relative flex h-full min-w-24 max-w-40 shrink-0 items-center border-r border-(--ui-stroke-quaternary) text-[0.65rem] font-medium [-webkit-app-region:no-drag]',
+                  active
+                    ? 'bg-(--ui-editor-surface-background) text-foreground'
+                    : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
+                )}
+                key={tab.id}
+              >
+                {active && (
+                  <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-px bg-(--theme-primary)" />
+                )}
+                <Tip label={tab.target.path || tab.target.url || tab.label}>
+                  <button
+                    aria-selected={active}
+                    className="min-w-0 flex-1 truncate py-1 pl-2 pr-1 text-left outline-none active:scale-[0.98] motion-reduce:active:scale-100"
+                    onClick={() => selectRightRailTab(tab.id)}
+                    role="tab"
+                    type="button"
+                  >
+                    {tab.label}
+                  </button>
+                </Tip>
+                {dirty && <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-(--theme-primary)" />}
+                <button
+                  aria-label={t.preview.closeTab(tab.label)}
+                  className="mx-1 grid size-4 shrink-0 place-items-center rounded-sm text-(--ui-text-tertiary) opacity-0 hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 group-hover/file-tab:opacity-100 active:scale-[0.97] motion-reduce:active:scale-100"
+                  onClick={() => closeRightRailTab(tab.id)}
+                  type="button"
+                >
+                  <Codicon name="close" size="0.65rem" />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? (
+          <div className="flex h-full min-h-0 flex-col bg-(--ui-sidebar-surface-background)">
+            <SourcesTab />
+          </div>
+        ) : activeSegmentId === RIGHT_RAIL_BROWSER_TAB_ID ? (
+          <BrowserMirror />
+        ) : activePreviewTarget ? (
+          <PreviewPane
+            embedded
+            onRestartServer={activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID ? onRestartServer : undefined}
+            reloadRequest={previewReloadRequest}
+            setTitlebarToolGroup={setTitlebarToolGroup}
+            target={activePreviewTarget}
+          />
+        ) : null}
+      </div>
+    </aside>
+  )
+}
+
+function DefaultChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatPreviewRailProps) {
   const { t } = useI18n()
   const previewReloadRequest = useStore($previewReloadRequest)
   const activeTabId = useStore($rightRailActiveTabId)

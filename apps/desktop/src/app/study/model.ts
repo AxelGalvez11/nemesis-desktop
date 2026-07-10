@@ -35,9 +35,11 @@ export interface ReviewEntry {
 export interface StudyState {
   version: 1
   decks: StudyDeck[]
+  /** Persisted course/group names so an empty section can exist without a deck. */
+  sections: string[]
   /** cardId → FSRS schedule. Absent = never studied (new). */
   schedule: Record<string, StoredSchedule>
-  /** Append-only review log (feeds the future heatmap). */
+  /** Append-only review log that feeds the activity heatmap. */
   reviews: ReviewEntry[]
 }
 
@@ -50,7 +52,7 @@ export interface QueueItem {
   isNew: boolean
 }
 
-// Bumped to v2 for the grouped-decks + heatmap seed. Pre-release, so discarding the old
+// Bumped to v2 for grouped decks + review activity. Pre-release, so discarding the old
 // demo blob is fine; once real student data exists this needs a migration, not a bump.
 const STORAGE_KEY = 'nemesis.study.v2'
 const QUEUE_LIMIT = 200
@@ -89,6 +91,23 @@ function isDue(stored: StoredSchedule | undefined, now: Date): boolean {
   return new Date(stored.due).getTime() <= now.getTime()
 }
 
+function normalizeSections(sections: string[] | undefined, decks: StudyDeck[]): string[] {
+  const names: string[] = []
+  const seen = new Set<string>()
+
+  for (const raw of [...(sections ?? []), ...decks.map(deck => deck.course ?? '')]) {
+    const name = raw.trim()
+    const key = name.toLocaleLowerCase()
+
+    if (name && key !== 'other' && !seen.has(key)) {
+      names.push(name)
+      seen.add(key)
+    }
+  }
+
+  return names
+}
+
 export function loadState(): StudyState {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -97,14 +116,20 @@ export function loadState(): StudyState {
       const parsed = JSON.parse(raw) as StudyState
 
       if (parsed && parsed.version === 1 && Array.isArray(parsed.decks)) {
-        return parsed
+        return {
+          ...parsed,
+          reviews: (parsed.reviews ?? []).filter(review => !review.cardId.startsWith('seed#')),
+          sections: normalizeSections(parsed.sections, parsed.decks)
+        }
       }
     }
   } catch {
     // corrupted blob → fall through to a fresh seeded state
   }
 
-  return { version: 1, decks: seedDecks(), schedule: {}, reviews: seedReviews() }
+  const decks = seedDecks()
+
+  return { version: 1, decks, sections: normalizeSections([], decks), schedule: {}, reviews: [] }
 }
 
 export function saveState(state: StudyState): void {
@@ -233,6 +258,29 @@ export function deleteDeck(state: StudyState, deckId: string): StudyState {
   return { ...state, decks: state.decks.filter(candidate => candidate.id !== deckId), schedule }
 }
 
+export function addSection(state: StudyState, name: string): StudyState {
+  const section = name.trim()
+
+  if (
+    !section ||
+    section.toLocaleLowerCase() === 'other' ||
+    state.sections.some(existing => existing.toLocaleLowerCase() === section.toLocaleLowerCase())
+  ) {
+    return state
+  }
+
+  return { ...state, sections: [...state.sections, section] }
+}
+
+export function assignDeckSection(state: StudyState, deckId: string, section: string): StudyState {
+  const course = section.trim() || undefined
+
+  return {
+    ...state,
+    decks: state.decks.map(deck => (deck.id === deckId ? { ...deck, course } : deck))
+  }
+}
+
 // --- Motivational stats (streaks + retention) -------------------------------
 
 export interface StudyMotivation {
@@ -320,9 +368,21 @@ export interface DeckGroup {
 /** Group decks by course (the "folder"). Ungrouped decks fall under "Other". Pure. */
 export function groupDecks(state: StudyState, now: Date): DeckGroup[] {
   const byCourse = new Map<string, StudyDeck[]>()
+  const canonicalNames = new Map<string, string>()
+
+  for (const section of state.sections) {
+    const name = section.trim()
+
+    if (name) {
+      byCourse.set(name, [])
+      canonicalNames.set(name.toLocaleLowerCase(), name)
+    }
+  }
 
   for (const deck of state.decks) {
-    const key = deck.course?.trim() || 'Other'
+    const course = deck.course?.trim()
+    const normalized = course?.toLocaleLowerCase()
+    const key = !course || normalized === 'other' ? 'Other' : (canonicalNames.get(course.toLocaleLowerCase()) ?? course)
     const list = byCourse.get(key) ?? []
     list.push(deck)
     byCourse.set(key, list)
@@ -353,7 +413,7 @@ export interface HeatCell {
 
 /** GitHub-style contribution grid: review counts per day for the last `weeks` weeks,
  *  laid out oldest→newest, each column a Sun-anchored week. Pure. */
-export function reviewHeatmap(state: StudyState, todayIso: string, weeks = 18): { cells: HeatCell[]; total: number } {
+export function reviewHeatmap(state: StudyState, todayIso: string, weeks = 53): { cells: HeatCell[]; total: number } {
   const perDay = new Map<string, number>()
 
   for (const review of state.reviews) {
@@ -513,32 +573,4 @@ function seedDecks(): StudyDeck[] {
   }
 
   return [cardio, antimicrobials]
-}
-
-/** Demo review history so the activity heatmap isn't blank on first open — a realistic
- *  (deterministic) scatter over the last ~12 weeks. These are demo entries tied to no real
- *  card; the student's real reviews append here as they study, and the grid always counts
- *  the true contents of `reviews`. Clearing/rebuilding decks does not remove them until the
- *  student studies for real. */
-function seedReviews(): ReviewEntry[] {
-  const out: ReviewEntry[] = []
-  const today = new Date()
-
-  for (let daysAgo = 84; daysAgo >= 1; daysAgo--) {
-    const date = new Date(today)
-    date.setDate(today.getDate() - daysAgo)
-    const weekend = date.getDay() === 0 || date.getDay() === 6
-    // Deterministic pseudo-organic intensity (no RNG): weekdays busier, some rest days.
-    const wobble = ((daysAgo * 2654435761) % 97) / 97
-    const base = weekend ? 4 : 13
-    const count = Math.max(0, Math.round(base * wobble * 1.7) - (wobble < 0.22 ? base : 0))
-
-    for (let i = 0; i < count; i++) {
-      const at = new Date(date)
-      at.setHours(9 + (i % 12), (i * 7) % 60, 0, 0)
-      out.push({ at: at.toISOString(), cardId: `seed#${daysAgo}#${i}`, rating: wobble > 0.6 ? 'good' : 'hard' })
-    }
-  }
-
-  return out
 }

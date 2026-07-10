@@ -13,12 +13,14 @@ import { SearchField } from '@/components/ui/search-field'
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem
 } from '@/components/ui/sidebar'
+import { Tip } from '@/components/ui/tooltip'
 import { searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { comboTokens } from '@/lib/keybinds/combo'
@@ -26,6 +28,7 @@ import { profileColor } from '@/lib/profile-color'
 import { sessionMatchesSearch } from '@/lib/session-search'
 import { normalizeSessionSource, sessionSourceLabel } from '@/lib/session-source'
 import { cn } from '@/lib/utils'
+import { $account, $accountDialogOpen, planLabel } from '@/nemesis-account'
 import { $cronJobs } from '@/store/cron'
 import {
   $dismissedAutoProjectIds,
@@ -104,6 +107,7 @@ import {
   LIBRARY_ROUTE,
   MESSAGING_ROUTE,
   RECORDER_ROUTE,
+  SETTINGS_ROUTE,
   SKILLS_ROUTE,
   STUDY_ROUTE
 } from '../../routes'
@@ -163,6 +167,13 @@ const SIDEBAR_NAV_ALL: SidebarNavItem[] = [
 ]
 
 const SIDEBAR_NAV = SIDEBAR_NAV_ALL.filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_NAV.has(item.id))
+
+const SETTINGS_NAV_ITEM: SidebarNavItem = {
+  id: 'settings',
+  label: 'Settings',
+  icon: props => <Codicon name="settings-gear" {...props} />,
+  route: SETTINGS_ROUTE
+}
 
 // Two modes via the `compact` height variant (styles.css):
 //   tall    → each section is shrink-0, capped, its own scroller; Sessions is flex-1.
@@ -1417,8 +1428,62 @@ export function ChatSidebar({
           </div>
         )}
       </SidebarContent>
+      {contentVisible && NEMESIS_STUDENT_BUILD && (
+        <StudentSidebarFooter onOpenSettings={() => onNavigate(SETTINGS_NAV_ITEM)} />
+      )}
       <ProjectDialog />
     </Sidebar>
+  )
+}
+
+interface StudentSidebarFooterProps {
+  onOpenSettings: () => void
+}
+
+function StudentSidebarFooter({ onOpenSettings }: StudentSidebarFooterProps) {
+  const account = useStore($account)
+  const accountEmail = account.bypass
+    ? 'Offline mode'
+    : account.status === 'signed-in'
+      ? account.email || 'Account'
+      : account.status === 'loading'
+        ? 'Account'
+        : 'Sign in'
+  const accountInitial = account.email?.trim().charAt(0).toUpperCase() || 'N'
+
+  return (
+    <SidebarFooter className="sticky bottom-0 shrink-0 gap-1 border-t border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2.5 py-2">
+      <div className="flex min-w-0 items-center gap-1">
+        <Button
+          aria-label="Account & plan"
+          className="min-w-0 flex-1 justify-start gap-2 overflow-hidden rounded-md px-1.5 py-1 text-left text-(--ui-text-secondary) transition-colors duration-100 ease hover:bg-(--ui-control-hover-background) hover:text-foreground active:scale-[0.99] motion-reduce:active:scale-100"
+          onClick={() => $accountDialogOpen.set(true)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-(--ui-bg-quaternary) text-[0.65rem] font-semibold uppercase text-(--ui-text-secondary) shadow-[inset_0_0_0_1px_var(--ui-stroke-tertiary)]">
+            {accountInitial}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">{accountEmail}</span>
+          <span className="max-w-20 shrink truncate rounded-full bg-(--theme-primary)/15 px-1.5 py-0.5 text-[0.6rem] font-semibold text-(--theme-primary)">
+            {planLabel(account.plan)}
+          </span>
+        </Button>
+        <Tip label="Settings" side="top">
+          <Button
+            aria-label="Settings"
+            className="shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100"
+            onClick={onOpenSettings}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <Codicon name="settings-gear" size="0.8rem" />
+          </Button>
+        </Tip>
+      </div>
+    </SidebarFooter>
   )
 }
 
