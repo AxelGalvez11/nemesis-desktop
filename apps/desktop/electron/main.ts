@@ -13,6 +13,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  desktopCapturer,
   dialog,
   net as electronNet,
   ipcMain,
@@ -4943,8 +4944,26 @@ function isAudioCapturePermission(permission, details) {
 
 function installMediaPermissions() {
   // Async request handler: the prompt-style path (most platforms).
+  // display-capture is allowed for the Nemesis Recorder (consent-first lecture
+  // capture): the OS still forces its own Screen & System Audio Recording prompt,
+  // and the renderer drops the video track immediately — audio only.
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-    callback(isAudioCapturePermission(permission, details))
+    callback(permission === ('display-capture' as any) || isAudioCapturePermission(permission, details))
+  })
+
+  // Nemesis Recorder: answer getDisplayMedia with the primary screen + system-audio
+  // loopback (Electron 39+ routes this through the macOS CoreAudio process tap).
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer
+      .getSources({ types: ['screen'] })
+      .then(sources => {
+        if (sources.length) {
+          callback({ audio: 'loopback', video: sources[0] })
+        } else {
+          callback({})
+        }
+      })
+      .catch(() => callback({}))
   })
 
   // Synchronous check handler: Chromium consults this for getUserMedia on
@@ -4952,6 +4971,10 @@ function installMediaPermissions() {
   // the check defaults to false and the mic is denied before the request
   // handler ever runs.
   session.defaultSession.setPermissionCheckHandler((_webContents, permission, _origin, details) => {
+    if (permission === ('display-capture' as any)) {
+      return true
+    }
+
     if (permission === 'media' || permission === ('audioCapture' as any) /* todo: is this needed? */) {
       // details.mediaType is a single string here (not the mediaTypes array).
       const mediaType = details?.mediaType
@@ -7922,6 +7945,36 @@ ipcMain.handle('hermes:fs:rename', async (_event, targetPath, newName) => {
 // is hardened (resolveRequestedPathForIpc) and the parent must already exist —
 // this never creates directory trees or escapes the allowed roots, and content
 // is size-capped so it can't be abused as a bulk-write primitive.
+// Nemesis Recorder: persist a captured audio blob (base64) to disk. Same hardened
+// path resolution as writeText; capped so a runaway blob can't fill the disk.
+ipcMain.handle('hermes:fs:writeBinary', async (_event, filePath, base64) => {
+  const raw = String(filePath || '').trim()
+
+  if (!raw) {
+    throw new Error('Invalid path')
+  }
+
+  const data = Buffer.from(String(base64 || ''), 'base64')
+
+  if (!data.length) {
+    throw new Error('Empty payload')
+  }
+
+  if (data.length > 512 * 1024 * 1024) {
+    throw new Error('Recording too large')
+  }
+
+  const resolved = resolveRequestedPathForIpc(expandUserPath(raw), { purpose: 'Write recording' })
+
+  if (!directoryExists(path.dirname(resolved))) {
+    throw new Error('Parent directory does not exist')
+  }
+
+  await fs.promises.writeFile(resolved, data)
+
+  return { path: resolved }
+})
+
 ipcMain.handle('hermes:fs:writeText', async (_event, filePath, content) => {
   const raw = String(filePath || '').trim()
 

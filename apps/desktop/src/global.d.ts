@@ -104,6 +104,8 @@ declare global {
       renamePath?: (path: string, newName: string) => Promise<{ path: string }>
       // Write a small UTF-8 text file (hardened path, parent must exist).
       writeTextFile?: (path: string, content: string) => Promise<{ path: string }>
+      // Write a binary file from base64 (Nemesis Recorder; hardened path, 512MB cap).
+      writeBinaryFile?: (path: string, base64: string) => Promise<{ path: string }>
       // Move a file/folder to the OS trash (recoverable).
       trashPath?: (path: string) => Promise<boolean>
       // Git-driven worktree management for the "Start work" flow.

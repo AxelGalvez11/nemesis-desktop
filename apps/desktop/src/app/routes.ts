@@ -8,6 +8,7 @@ export const ARTIFACTS_ROUTE = '/artifacts'
 export const STUDY_ROUTE = '/study'
 export const LIBRARY_ROUTE = '/library'
 export const GRAPH_ROUTE = '/graph'
+export const RECORDER_ROUTE = '/recorder'
 export const CRON_ROUTE = '/cron'
 export const PROFILES_ROUTE = '/profiles'
 export const AGENTS_ROUTE = '/agents'
@@ -23,6 +24,7 @@ export type AppView =
   | 'library'
   | 'messaging'
   | 'profiles'
+  | 'recorder'
   | 'settings'
   | 'skills'
   | 'starmap'
@@ -38,6 +40,7 @@ export type AppRouteId =
   | 'messaging'
   | 'new'
   | 'profiles'
+  | 'recorder'
   | 'settings'
   | 'skills'
   | 'starmap'
@@ -59,6 +62,7 @@ export const APP_ROUTES = [
   { id: 'study', path: STUDY_ROUTE, view: 'study' },
   { id: 'library', path: LIBRARY_ROUTE, view: 'library' },
   { id: 'graph', path: GRAPH_ROUTE, view: 'graph' },
+  { id: 'recorder', path: RECORDER_ROUTE, view: 'recorder' },
   { id: 'cron', path: CRON_ROUTE, view: 'cron' },
   { id: 'profiles', path: PROFILES_ROUTE, view: 'profiles' },
   { id: 'agents', path: AGENTS_ROUTE, view: 'agents' },

@@ -1632,7 +1632,8 @@ export const zh = {
             artifacts: '产物',
             study: '学习',
             library: '资料库',
-            graph: '知识图谱'
+            graph: '知识图谱',
+            recorder: '录音'
         },
         searchAria: '搜索会话',
         searchPlaceholder: '搜索会话…',

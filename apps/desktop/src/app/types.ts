@@ -129,6 +129,7 @@ export type SidebarNavId =
   | 'library'
   | 'messaging'
   | 'new-session'
+  | 'recorder'
   | 'settings'
   | 'skills'
   | 'study'

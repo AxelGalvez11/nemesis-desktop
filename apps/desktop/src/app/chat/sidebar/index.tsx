@@ -103,6 +103,7 @@ import {
   GRAPH_ROUTE,
   LIBRARY_ROUTE,
   MESSAGING_ROUTE,
+  RECORDER_ROUTE,
   SKILLS_ROUTE,
   STUDY_ROUTE
 } from '../../routes'
@@ -157,7 +158,8 @@ const SIDEBAR_NAV_ALL: SidebarNavItem[] = [
   { id: 'artifacts', label: '', icon: props => <Codicon name="files" {...props} />, route: ARTIFACTS_ROUTE },
   { id: 'study', label: 'Study', icon: props => <Codicon name="mortar-board" {...props} />, route: STUDY_ROUTE },
   { id: 'library', label: 'Library', icon: props => <Codicon name="book" {...props} />, route: LIBRARY_ROUTE },
-  { id: 'graph', label: 'Graph', icon: props => <Codicon name="type-hierarchy-sub" {...props} />, route: GRAPH_ROUTE }
+  { id: 'graph', label: 'Graph', icon: props => <Codicon name="type-hierarchy-sub" {...props} />, route: GRAPH_ROUTE },
+  { id: 'recorder', label: 'Recorder', icon: props => <Codicon name="record" {...props} />, route: RECORDER_ROUTE }
 ]
 
 const SIDEBAR_NAV = SIDEBAR_NAV_ALL.filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_NAV.has(item.id))

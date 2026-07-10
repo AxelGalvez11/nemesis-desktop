@@ -1485,7 +1485,8 @@ export const en: Translations = {
       artifacts: 'Artifacts',
       study: 'Study',
       library: 'Library',
-      graph: 'Graph'
+      graph: 'Graph',
+      recorder: 'Recorder'
     },
     searchAria: 'Search sessions',
     searchPlaceholder: 'Search sessions…',
