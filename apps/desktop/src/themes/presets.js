@@ -189,6 +189,39 @@ export const monoTheme = {
         userBubbleBorder: '#363636'
     }
 };
+/** The Nemesis look: mono's grayscale field with a deep-crimson accent. Deliberately
+ *  distinct from the danger red (`--ui-red` #cf2d56) so "brand" never reads as "delete". */
+export const nemesisTheme = {
+    name: 'nemesis',
+    label: 'Nemesis',
+    description: 'Monochrome with a red edge',
+    colors: {
+        background: '#0e0e0e',
+        foreground: '#eaeaea',
+        card: '#141414',
+        cardForeground: '#eaeaea',
+        muted: '#1e1e1e',
+        mutedForeground: '#808080',
+        popover: '#181818',
+        popoverForeground: '#eaeaea',
+        primary: '#b3382e',
+        primaryForeground: '#fff5f3',
+        secondary: '#262626',
+        secondaryForeground: '#c8c8c8',
+        accent: '#261a18',
+        accentForeground: '#e8c7c2',
+        border: '#2a2a2a',
+        input: '#2a2a2a',
+        ring: '#c04a40',
+        midground: '#b3382e',
+        destructive: '#a84040',
+        destructiveForeground: '#fef2f2',
+        sidebarBackground: '#0a0a0a',
+        sidebarBorder: '#202020',
+        userBubble: '#1f1717',
+        userBubbleBorder: '#3d2b28'
+    }
+};
 /** Neon green on black. Matches the CLI cyberpunk skin and dashboard theme. */
 export const cyberpunkTheme = {
     name: 'cyberpunk',
@@ -261,6 +294,7 @@ export const slateTheme = {
     }
 };
 export const BUILTIN_THEMES = {
+    nemesis: nemesisTheme,
     nous: nousTheme,
     midnight: midnightTheme,
     ember: emberTheme,
@@ -270,4 +304,4 @@ export const BUILTIN_THEMES = {
 };
 export const BUILTIN_THEME_LIST = Object.values(BUILTIN_THEMES);
 /** Skin used when nothing is persisted or the persisted name is retired. */
-export const DEFAULT_SKIN_NAME = 'mono';
+export const DEFAULT_SKIN_NAME = 'nemesis';
