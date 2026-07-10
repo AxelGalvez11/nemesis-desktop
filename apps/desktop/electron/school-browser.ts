@@ -116,11 +116,18 @@ async function ensureBrowser(): Promise<{ ok: boolean; reason?: string }> {
     const child = spawn(
       bin,
       [
+        // Headless on purpose: the chat rail mirror IS the browser's only
+        // window — no duplicate Chrome floating on the desktop, and screencast
+        // frames match the emulated viewport exactly (no window-shaped
+        // letterboxing). Cookies persist in the profile either way; if a login
+        // page ever refuses headless, the runbook has a one-off headed command
+        // against this same profile.
+        '--headless=new',
         `--remote-debugging-port=${PORT}`,
         `--user-data-dir=${PROFILE_DIR}`,
         '--no-first-run',
         '--no-default-browser-check',
-        '--window-size=1280,860',
+        '--window-size=1000,1400',
         START_URL
       ],
       { detached: true, stdio: 'ignore' }

@@ -72,27 +72,32 @@ export function BrowserMirror() {
 
   // Match the PAGE's viewport to the mirror surface so sites lay out at the
   // panel's exact shape and frames fill it edge-to-edge (no letterboxing).
-  const syncViewport = useCallback(() => {
-    const box = surfaceRef.current?.getBoundingClientRect()
+  // `force` re-sends even when the panel size hasn't changed — needed after a
+  // navigation, which drops the per-page metrics override in some SPAs.
+  const syncViewport = useCallback(
+    (force = false) => {
+      const box = surfaceRef.current?.getBoundingClientRect()
 
-    if (!box || box.width < 80 || box.height < 80) {
-      return
-    }
+      if (!box || box.width < 80 || box.height < 80) {
+        return
+      }
 
-    const width = Math.round(box.width)
-    const height = Math.round(box.height)
-    const last = lastViewportRef.current
+      const width = Math.round(box.width)
+      const height = Math.round(box.height)
+      const last = lastViewportRef.current
 
-    if (Math.abs(width - last.width) < 4 && Math.abs(height - last.height) < 4) {
-      return
-    }
+      if (!force && Math.abs(width - last.width) < 4 && Math.abs(height - last.height) < 4) {
+        return
+      }
 
-    lastViewportRef.current = { height, width }
-    exec({
-      method: 'Emulation.setDeviceMetricsOverride',
-      params: { deviceScaleFactor: 1, height, mobile: false, width }
-    })
-  }, [exec])
+      lastViewportRef.current = { height, width }
+      exec({
+        method: 'Emulation.setDeviceMetricsOverride',
+        params: { deviceScaleFactor: 1, height, mobile: false, width }
+      })
+    },
+    [exec]
+  )
 
   const attach = useCallback(
     async (targetId: string) => {
@@ -178,6 +183,15 @@ export function BrowserMirror() {
       frameSizeRef.current = { height: frame.metadata.deviceHeight, width: frame.metadata.deviceWidth }
       imgRef.current.src = `data:image/jpeg;base64,${frame.data}`
       setStatus('live')
+
+      // Self-heal: if a frame arrives at a size far from the panel's viewport
+      // (a navigation dropped the override, or the browser fell back to its
+      // window size), re-assert the panel-shaped viewport once.
+      const want = lastViewportRef.current
+
+      if (want.width && Math.abs(frame.metadata.deviceWidth - want.width) > 24) {
+        syncViewport(true)
+      }
     })
 
     const offEvent = api()?.onEvent(event => {
@@ -187,6 +201,9 @@ export function BrowserMirror() {
 
       if (event.type === 'url-changed' && event.url) {
         setUrl(event.url)
+        // A top-frame navigation can drop the metrics override — re-assert the
+        // panel-shaped viewport so the new page fills the mirror too.
+        syncViewport(true)
       }
 
       if (event.type === 'detached') {
