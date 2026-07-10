@@ -2,7 +2,7 @@
 // note). Interaction model deliberately mirrors what health-science students already have
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
-import { IconLayoutGrid, IconList, IconPlayerPause } from '@tabler/icons-react'
+import { IconCards, IconLayoutGrid, IconList, IconPlayerPause } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -56,12 +56,26 @@ const GRADES: { key: string; label: string; rating: StudyRating }[] = [
 type DeckViewMode = 'cards' | 'list'
 
 const VIEW_MODE_KEY = 'nemesis.study.view'
+const FLIP_KEY = 'nemesis.study.flip'
 
 function loadViewMode(): DeckViewMode {
   try {
     return window.localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'cards'
   } catch {
     return 'cards'
+  }
+}
+
+function loadFlip(): boolean {
+  try {
+    // Default on, but never fight a reduced-motion preference.
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      return false
+    }
+
+    return window.localStorage.getItem(FLIP_KEY) !== 'off'
+  } catch {
+    return true
   }
 }
 
@@ -74,6 +88,8 @@ export function StudyView() {
   const [importOpen, setImportOpen] = useState(false)
   const [newDeckOpen, setNewDeckOpen] = useState(false)
   const [view, setView] = useState<DeckViewMode>(() => loadViewMode())
+  const [flip, setFlip] = useState(() => loadFlip())
+  const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
   const [done, setDone] = useState(0)
   const [autoImported, setAutoImported] = useState<string[]>([])
 
@@ -220,6 +236,29 @@ export function StudyView() {
     }
   }, [])
 
+  const toggleFlip = useCallback(() => {
+    setFlip(current => {
+      const next = !current
+
+      try {
+        window.localStorage.setItem(FLIP_KEY, next ? 'on' : 'off')
+      } catch {
+        // persistence is best-effort
+      }
+
+      return next
+    })
+  }, [])
+
+  const startMatch = useCallback(
+    (deckId: string) => {
+      setBrowseDeckId(null)
+      exitReview()
+      setMatchDeckId(deckId)
+    },
+    [exitReview]
+  )
+
   const createDeck = useCallback(
     (name: string, course: string) => {
       const deck: StudyDeck = {
@@ -280,11 +319,12 @@ export function StudyView() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {reviewing || browseDeckId ? (
+          {reviewing || browseDeckId || matchDeckId ? (
             <Button
               onClick={() => {
                 exitReview()
                 setBrowseDeckId(null)
+                setMatchDeckId(null)
               }}
               size="sm"
               variant="outline"
@@ -317,6 +357,17 @@ export function StudyView() {
                   <IconList size={14} />
                 </button>
               </div>
+              <button
+                className={cn(
+                  'rounded-md border border-border px-2 py-1.5 transition-colors',
+                  flip ? 'text-(--theme-primary)' : 'text-muted-foreground hover:text-foreground'
+                )}
+                onClick={toggleFlip}
+                title={flip ? 'Flip animation on' : 'Flip animation off'}
+                type="button"
+              >
+                <IconCards size={14} />
+              </button>
               <Button onClick={() => setNewDeckOpen(true)} size="sm" variant="outline">
                 New deck
               </Button>
@@ -351,6 +402,7 @@ export function StudyView() {
         current ? (
           <ReviewSurface
             done={done}
+            flip={flip}
             item={current}
             intervals={previewIntervals(state, current.card.id, now)}
             onGrade={grade}
@@ -365,15 +417,18 @@ export function StudyView() {
             title="All caught up"
           />
         )
+      ) : matchDeckId ? (
+        <MatchGame deck={state.decks.find(deck => deck.id === matchDeckId) ?? null} onExit={() => setMatchDeckId(null)} />
       ) : browseDeckId ? (
         <CardBrowser
           deck={state.decks.find(deck => deck.id === browseDeckId) ?? null}
           onChange={update}
           onDeleteDeck={() => removeDeck(browseDeckId)}
+          onMatch={() => startMatch(browseDeckId)}
           state={state}
         />
       ) : (
-        <DeckBrowser onBrowse={setBrowseDeckId} onStudy={startReview} state={state} view={view} />
+        <DeckBrowser onBrowse={setBrowseDeckId} onMatch={startMatch} onStudy={startReview} state={state} view={view} />
       )}
 
       <ImportDialog onImport={importCards} onOpenChange={setImportOpen} open={importOpen} />
@@ -426,11 +481,13 @@ function NewDeckDialog({ onClose, onCreate }: { onClose: () => void; onCreate: (
 
 function DeckBrowser({
   onBrowse,
+  onMatch,
   onStudy,
   state,
   view
 }: {
   onBrowse: (deckId: string) => void
+  onMatch: (deckId: string) => void
   onStudy: (deckId: string) => void
   state: StudyState
   view: DeckViewMode
@@ -456,13 +513,13 @@ function DeckBrowser({
           {view === 'list' ? (
             <div className="overflow-hidden rounded-lg border border-border">
               {group.decks.map(deck => (
-                <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onStudy={onStudy} state={state} />
+                <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
               ))}
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {group.decks.map(deck => (
-                <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onStudy={onStudy} state={state} />
+                <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
               ))}
             </div>
           )}
@@ -476,12 +533,14 @@ function DeckRow({
   deck,
   now,
   onBrowse,
+  onMatch,
   onStudy,
   state
 }: {
   deck: StudyDeck
   now: Date
   onBrowse: (deckId: string) => void
+  onMatch: (deckId: string) => void
   onStudy: (deckId: string) => void
   state: StudyState
 }) {
@@ -498,6 +557,9 @@ function DeckRow({
         <Button disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
           Study
         </Button>
+        <Button disabled={stats.total < 2} onClick={() => onMatch(deck.id)} size="sm" variant="outline">
+          Match
+        </Button>
         <Button onClick={() => onBrowse(deck.id)} size="sm" variant="outline">
           Cards
         </Button>
@@ -510,12 +572,14 @@ function DeckCard({
   deck,
   now,
   onBrowse,
+  onMatch,
   onStudy,
   state
 }: {
   deck: StudyDeck
   now: Date
   onBrowse: (deckId: string) => void
+  onMatch: (deckId: string) => void
   onStudy: (deckId: string) => void
   state: StudyState
 }) {
@@ -535,6 +599,9 @@ function DeckCard({
       <div className="mt-auto flex gap-2">
         <Button className="flex-1" disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
           {stats.due > 0 ? 'Study' : 'Done for now'}
+        </Button>
+        <Button disabled={stats.total < 2} onClick={() => onMatch(deck.id)} size="sm" variant="outline">
+          Match
         </Button>
         <Button onClick={() => onBrowse(deck.id)} size="sm" variant="outline">
           Cards
@@ -635,11 +702,13 @@ function CardBrowser({
   deck,
   onChange,
   onDeleteDeck,
+  onMatch,
   state
 }: {
   deck: null | StudyDeck
   onChange: (next: StudyState) => void
   onDeleteDeck: () => void
+  onMatch: () => void
   state: StudyState
 }) {
   const [editing, setEditing] = useState<null | StudyCard>(null)
@@ -669,6 +738,9 @@ function CardBrowser({
             variant="outline"
           >
             {armDelete ? 'Really delete?' : 'Delete deck'}
+          </Button>
+          <Button disabled={deck.cards.length < 2} onClick={onMatch} size="sm" variant="outline">
+            Match
           </Button>
           <Button onClick={() => setAdding(true)} size="sm" variant="outline">
             Add card
@@ -847,8 +919,207 @@ function AddCardDialog({
   )
 }
 
+function FlipFace({
+  back,
+  children,
+  label,
+  muted
+}: {
+  back?: boolean
+  children: React.ReactNode
+  label: string
+  muted?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        'absolute inset-0 flex min-h-64 flex-col justify-center gap-3 rounded-xl border border-border bg-card p-8 text-left [backface-visibility:hidden]',
+        back && '[transform:rotateY(180deg)]'
+      )}
+    >
+      <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className={cn('text-lg leading-relaxed', muted ? 'text-foreground/80' : 'text-foreground')}>{children}</div>
+    </div>
+  )
+}
+
+// Quizlet-style Match: pair every front with its back as fast as you can. Wrong pairs
+// shake and reset; a matched pair fades out. Pure client game over the deck's cards.
+interface MatchTile {
+  id: string
+  cardId: string
+  text: string
+  side: 'front' | 'back'
+}
+
+function buildMatchTiles(deck: StudyDeck, size: number): MatchTile[] {
+  // Deterministic-enough shuffle without RNG dependence on the module: seed off the
+  // clock once per round (fresh each mount).
+  const pool = [...deck.cards]
+  const seed = Date.now()
+
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = ((seed >> (i % 16)) ^ (i * 2654435761)) % (i + 1)
+    const k = j < 0 ? -j : j
+    ;[pool[i], pool[k]] = [pool[k], pool[i]]
+  }
+
+  const chosen = pool.slice(0, size)
+  const tiles: MatchTile[] = []
+
+  for (const card of chosen) {
+    tiles.push({ cardId: card.id, id: `${card.id}:f`, side: 'front', text: card.front })
+    tiles.push({ cardId: card.id, id: `${card.id}:b`, side: 'back', text: card.back })
+  }
+
+  for (let i = tiles.length - 1; i > 0; i--) {
+    const j = ((seed >> ((i + 3) % 16)) ^ (i * 40503)) % (i + 1)
+    const k = j < 0 ? -j : j
+    ;[tiles[i], tiles[k]] = [tiles[k], tiles[i]]
+  }
+
+  return tiles
+}
+
+function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => void }) {
+  const size = deck ? Math.min(6, deck.cards.length) : 0
+  const [tiles, setTiles] = useState<MatchTile[]>(() => (deck ? buildMatchTiles(deck, size) : []))
+  const [selected, setSelected] = useState<null | string>(null)
+  const [matched, setMatched] = useState<Set<string>>(new Set())
+  const [wrong, setWrong] = useState<[string, string] | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  const [won, setWon] = useState(false)
+
+  const restart = useCallback(() => {
+    if (!deck) {
+      return
+    }
+
+    setTiles(buildMatchTiles(deck, size))
+    setSelected(null)
+    setMatched(new Set())
+    setWrong(null)
+    setElapsed(0)
+    setWon(false)
+  }, [deck, size])
+
+  // Timer runs until the board is cleared.
+  useEffect(() => {
+    if (won) {
+      return
+    }
+
+    const id = window.setInterval(() => setElapsed(value => value + 1), 1000)
+
+    return () => window.clearInterval(id)
+  }, [won])
+
+  const pick = useCallback(
+    (tile: MatchTile) => {
+      if (matched.has(tile.id) || wrong || tile.id === selected) {
+        return
+      }
+
+      if (!selected) {
+        setSelected(tile.id)
+
+        return
+      }
+
+      const first = tiles.find(candidate => candidate.id === selected)
+
+      if (!first) {
+        setSelected(tile.id)
+
+        return
+      }
+
+      if (first.cardId === tile.cardId && first.side !== tile.side) {
+        const next = new Set(matched)
+        next.add(first.id)
+        next.add(tile.id)
+        setMatched(next)
+        setSelected(null)
+
+        if (next.size === tiles.length) {
+          setWon(true)
+        }
+      } else {
+        setWrong([first.id, tile.id])
+        setSelected(null)
+        window.setTimeout(() => setWrong(null), 550)
+      }
+    },
+    [matched, selected, tiles, wrong]
+  )
+
+  if (!deck) {
+    return <EmptyState className="flex-1" description="This deck no longer exists." title="Deck not found" />
+  }
+
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
+  const ss = String(elapsed % 60).padStart(2, '0')
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col px-6 pb-8">
+      <div className="flex items-center justify-between pb-3">
+        <div>
+          <h2 className="text-sm font-semibold">{deck.name} — Match</h2>
+          <p className="text-xs text-muted-foreground">Tap a term, then its match. Fastest time wins.</p>
+        </div>
+        <span className="text-lg font-semibold tabular-nums text-muted-foreground">
+          {mm}:{ss}
+        </span>
+      </div>
+
+      {won ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+          <div className="text-center">
+            <div className="text-2xl font-semibold">Matched them all</div>
+            <div className="pt-1 text-sm text-muted-foreground">
+              {size} pairs in {mm}:{ss}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={restart}>Play again</Button>
+            <Button onClick={onExit} variant="outline">
+              Back to decks
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid flex-1 auto-rows-fr grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-4">
+          {tiles.map(tile => {
+            const isMatched = matched.has(tile.id)
+            const isWrong = wrong?.includes(tile.id)
+            const isSelected = selected === tile.id
+
+            return (
+              <button
+                className={cn(
+                  'flex items-center justify-center rounded-lg border p-3 text-center text-sm leading-snug transition-all',
+                  isMatched && 'pointer-events-none scale-95 border-transparent bg-transparent opacity-0',
+                  isSelected && 'border-(--theme-primary) bg-(--theme-primary)/10',
+                  isWrong && 'nemesis-shake border-destructive text-destructive',
+                  !isMatched && !isSelected && !isWrong && 'border-border bg-card hover:border-(--theme-primary)/50'
+                )}
+                key={tile.id}
+                onClick={() => pick(tile)}
+                type="button"
+              >
+                {tile.text}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ReviewSurface({
   done,
+  flip,
   intervals,
   item,
   onGrade,
@@ -857,6 +1128,7 @@ function ReviewSurface({
   revealed
 }: {
   done: number
+  flip: boolean
   intervals: Record<StudyRating, string>
   item: QueueItem
   onGrade: (rating: StudyRating) => void
@@ -864,10 +1136,13 @@ function ReviewSurface({
   remaining: number
   revealed: boolean
 }) {
+  const total = done + remaining
+  const progress = total > 0 ? Math.round((done / total) * 100) : 0
+
   return (
     <div className="flex flex-1 flex-col items-center px-6 pb-8">
       <div className="flex w-full max-w-2xl flex-1 flex-col">
-        <div className="flex items-center justify-between pb-3 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between pb-2 text-xs text-muted-foreground">
           <span className="truncate">
             {item.deckName}
             {item.isNew && (
@@ -876,20 +1151,60 @@ function ReviewSurface({
               </Badge>
             )}
           </span>
-          <span>
+          <span className="tabular-nums">
             {done} done · {remaining} left
           </span>
         </div>
 
-        <div className="flex min-h-64 flex-1 flex-col justify-center gap-5 rounded-lg border border-border bg-card p-8">
-          <div className="text-base leading-relaxed">{item.card.front}</div>
-          {revealed && (
-            <>
-              <div className="border-t border-border" />
-              <div className="text-base leading-relaxed text-muted-foreground">{item.card.back}</div>
-            </>
-          )}
+        {/* Session progress */}
+        <div className="mb-4 h-1 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,theme(colors.muted.DEFAULT))">
+          <div className="h-full bg-(--theme-primary) transition-all duration-300" style={{ width: `${progress}%` }} />
         </div>
+
+        {/* Card. Flip build = a 3D-rotating card with distinct front/back faces; plain
+            build reveals the answer beneath a divider (unchanged behavior). */}
+        {flip ? (
+          <button
+            aria-label={revealed ? item.card.back : 'Show answer'}
+            className="nemesis-flip flex-1 [perspective:1600px]"
+            data-flipped={revealed ? 'true' : undefined}
+            onClick={() => !revealed && onReveal()}
+            type="button"
+          >
+            <div className="nemesis-flip-inner relative h-full min-h-64 w-full">
+              <FlipFace label="Question">{item.card.front}</FlipFace>
+              <FlipFace back label="Answer" muted>
+                {item.card.back}
+              </FlipFace>
+            </div>
+          </button>
+        ) : (
+          <div className="flex min-h-64 flex-1 flex-col justify-center gap-5 rounded-xl border border-border bg-card p-8">
+            <div>
+              <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Question</div>
+              <div className="text-lg leading-relaxed">{item.card.front}</div>
+            </div>
+            {revealed && (
+              <>
+                <div className="border-t border-border" />
+                <div>
+                  <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Answer</div>
+                  <div className="text-lg leading-relaxed text-foreground/80">{item.card.back}</div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {item.card.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-2.5">
+            {item.card.tags.map(tag => (
+              <Badge key={tag} variant="outline">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        )}
 
         <div className="pt-4">
           {revealed ? (

@@ -1863,3 +1863,28 @@ text-* variant utilities. */ .btn-arc {
 [data-nemesis-activity='collapsed'] [data-tool-group] {
   display: none;
 }
+
+/* Study flashcard flip (nemesis.study.flip). The inner wrapper rotates 180° on
+   reveal; the two faces are back-face-hidden so only one shows at a time. */
+.nemesis-flip-inner {
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.nemesis-flip[data-flipped='true'] .nemesis-flip-inner {
+  transform: rotateY(180deg);
+}
+
+/* Match game: wrong pair shakes briefly. */
+@keyframes nemesis-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+.nemesis-shake {
+  animation: nemesis-shake 0.4s ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nemesis-flip-inner { transition: none; }
+  .nemesis-shake { animation: none; }
+}
