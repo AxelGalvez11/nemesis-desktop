@@ -236,7 +236,7 @@ export function RecorderView() {
         return
       }
 
-      const title = `Lecture ${file.name.replace(/\.webm$/i, '').replace(/^lecture-/, '')}`
+      const title = `Lecture ${file.name.replace(/\.(webm|m4a|wav|aiff?|mp3)$/i, '').replace(/^lecture-/, '')}`
       await saveNote(title, `# ${title}\n\n*Transcribed by Nemesis — review before relying on it.*\n\n${text}\n`)
       setSavedNote(current => ({ ...current, [file.path]: true }))
     },
