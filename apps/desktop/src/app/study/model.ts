@@ -11,6 +11,8 @@ export interface StudyCard {
   front: string
   back: string
   tags: string[]
+  /** Suspended cards stay in the deck but never enter the review queue (Anki semantics). */
+  suspended?: boolean
 }
 
 export interface StudyDeck {
@@ -123,6 +125,10 @@ export function buildQueue(state: StudyState, deckId: null | string, now: Date):
     }
 
     for (const card of deck.cards) {
+      if (card.suspended) {
+        continue
+      }
+
       const stored = state.schedule[card.id]
 
       if (isDue(stored, now)) {
@@ -154,6 +160,11 @@ export function deckStats(state: StudyState, deckId: null | string, now: Date): 
 
     for (const card of deck.cards) {
       total++
+
+      if (card.suspended) {
+        continue
+      }
+
       const stored = state.schedule[card.id]
 
       if (!stored) {
@@ -166,6 +177,105 @@ export function deckStats(state: StudyState, deckId: null | string, now: Date): 
   }
 
   return { due, fresh, total }
+}
+
+// --- Card management (Anki-style browser/editor backing) -------------------
+
+function mapDeckCards(state: StudyState, deckId: string, map: (cards: StudyCard[]) => StudyCard[]): StudyState {
+  return {
+    ...state,
+    decks: state.decks.map(deck => (deck.id === deckId ? { ...deck, cards: map(deck.cards) } : deck))
+  }
+}
+
+export function updateCard(state: StudyState, deckId: string, card: StudyCard): StudyState {
+  return mapDeckCards(state, deckId, cards => cards.map(existing => (existing.id === card.id ? card : existing)))
+}
+
+export function addCard(state: StudyState, deckId: string, front: string, back: string, tags: string[]): StudyState {
+  const card: StudyCard = { back, front, id: freshId('card'), tags }
+
+  return mapDeckCards(state, deckId, cards => [...cards, card])
+}
+
+/** Delete a card AND its FSRS schedule so state doesn't leak. */
+export function deleteCard(state: StudyState, deckId: string, cardId: string): StudyState {
+  const next = mapDeckCards(state, deckId, cards => cards.filter(card => card.id !== cardId))
+  const schedule = { ...next.schedule }
+  delete schedule[cardId]
+
+  return { ...next, schedule }
+}
+
+export function toggleSuspendCard(state: StudyState, deckId: string, cardId: string): StudyState {
+  return mapDeckCards(state, deckId, cards =>
+    cards.map(card => (card.id === cardId ? { ...card, suspended: !card.suspended } : card))
+  )
+}
+
+// --- Motivational stats (streaks + retention) -------------------------------
+
+export interface StudyMotivation {
+  currentStreak: number
+  longestStreak: number
+  /** % of the last `windowDays` with at least one review. */
+  daysLearnedPct: number
+  /** % of graded reviews that were NOT "again" over the last 30 days (retention proxy). */
+  retentionPct: null | number
+}
+
+export function studyMotivation(state: StudyState, todayIso: string, windowDays = 90): StudyMotivation {
+  const DAY = 86_400_000
+  const days = new Set(state.reviews.map(review => review.at.slice(0, 10)))
+  const todayMs = new Date(`${todayIso.slice(0, 10)}T00:00:00.000Z`).getTime()
+
+  // Current streak: consecutive days ending today (or yesterday, so an unstudied
+  // "today so far" doesn't zero the streak before the student sits down).
+  let currentStreak = 0
+  let cursor = todayMs
+
+  if (!days.has(new Date(cursor).toISOString().slice(0, 10))) {
+    cursor -= DAY
+  }
+
+  while (days.has(new Date(cursor).toISOString().slice(0, 10))) {
+    currentStreak++
+    cursor -= DAY
+  }
+
+  // Longest streak across all history.
+  const sorted = [...days].sort()
+  let longestStreak = 0
+  let run = 0
+  let previous = Number.NaN
+
+  for (const day of sorted) {
+    const ms = new Date(`${day}T00:00:00.000Z`).getTime()
+    run = ms - previous === DAY ? run + 1 : 1
+    previous = ms
+    longestStreak = Math.max(longestStreak, run)
+  }
+
+  let learned = 0
+
+  for (let i = 0; i < windowDays; i++) {
+    if (days.has(new Date(todayMs - i * DAY).toISOString().slice(0, 10))) {
+      learned++
+    }
+  }
+
+  const cutoff = new Date(todayMs - 30 * DAY).toISOString()
+  const recent = state.reviews.filter(review => review.at >= cutoff)
+  const retentionPct = recent.length
+    ? Math.round((recent.filter(review => review.rating !== 'again').length / recent.length) * 100)
+    : null
+
+  return {
+    currentStreak,
+    daysLearnedPct: Math.round((learned / windowDays) * 100),
+    longestStreak,
+    retentionPct
+  }
 }
 
 /** Grade a card → next state (immutable: returns a new StudyState). */
