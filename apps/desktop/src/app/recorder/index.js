@@ -17,6 +17,24 @@ import { NEW_CHAT_ROUTE } from '../routes';
 import { correctPharmTerms } from './pharm-lexicon';
 import { transcribeAudio } from './transcribe';
 const RECORDINGS_DIR = '~/Documents/Nemesis Recordings';
+/** "lecture-2026-07-09T20-28-01.webm" → "Jul 9, 2026 · 8:28 PM"; else the raw name. */
+function recordingLabel(name) {
+    const match = name.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+    if (match) {
+        const [, y, mo, d, h, mi] = match;
+        const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
+        if (!Number.isNaN(date.getTime())) {
+            return date.toLocaleString(undefined, {
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                month: 'short',
+                year: 'numeric'
+            });
+        }
+    }
+    return name;
+}
 export function RecorderView() {
     const [state, setState] = useState('idle');
     const [error, setError] = useState(null);
@@ -33,6 +51,9 @@ export function RecorderView() {
     const streamsRef = useRef([]);
     const chunksRef = useRef([]);
     const tickRef = useRef(null);
+    const analyserRef = useRef(null);
+    const rafRef = useRef(null);
+    const canvasRef = useRef(null);
     const refreshList = useCallback(async () => {
         try {
             const dir = await window.hermesDesktop?.readDir?.(RECORDINGS_DIR);
@@ -51,7 +72,40 @@ export function RecorderView() {
         return () => stopEverything();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+    // Live waveform: draw the ACTUAL captured signal (mic + system mix) — honest, since it
+    // reflects real audio, unlike faking live transcript text.
+    const drawWave = useCallback(() => {
+        const analyser = analyserRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!analyser || !canvas || !ctx) {
+            return;
+        }
+        const buffer = new Uint8Array(analyser.frequencyBinCount);
+        const accent = getComputedStyle(document.documentElement).getPropertyValue('--theme-primary').trim() || '#b3382e';
+        const render = () => {
+            rafRef.current = requestAnimationFrame(render);
+            analyser.getByteTimeDomainData(buffer);
+            const { height, width } = canvas;
+            ctx.clearRect(0, 0, width, height);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = accent;
+            ctx.beginPath();
+            const slice = width / buffer.length;
+            for (let i = 0; i < buffer.length; i++) {
+                const y = (buffer[i] / 128) * (height / 2);
+                i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * slice, y);
+            }
+            ctx.stroke();
+        };
+        render();
+    }, []);
     const stopEverything = () => {
+        if (rafRef.current !== null) {
+            cancelAnimationFrame(rafRef.current);
+            rafRef.current = null;
+        }
+        analyserRef.current = null;
         if (tickRef.current) {
             clearInterval(tickRef.current);
             tickRef.current = null;
@@ -87,6 +141,11 @@ export function RecorderView() {
                     context.createMediaStreamSource(display).connect(destination);
                 }
             }
+            // Tap the mixed signal for the live waveform (analyser only; no playback).
+            const analyser = context.createAnalyser();
+            analyser.fftSize = 1024;
+            destination.connect(analyser);
+            analyserRef.current = analyser;
             const recorder = new MediaRecorder(destination.stream, { mimeType: 'audio/webm;codecs=opus' });
             recorder.ondataavailable = event => {
                 if (event.data.size) {
@@ -99,6 +158,7 @@ export function RecorderView() {
             setElapsed(0);
             tickRef.current = setInterval(() => setElapsed(count => count + 1), 1000);
             setState('recording');
+            requestAnimationFrame(() => drawWave());
         }
         catch (err) {
             stopEverything();
@@ -216,9 +276,9 @@ export function RecorderView() {
     }, [transcripts]);
     const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
     const seconds = String(elapsed % 60).padStart(2, '0');
-    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: [_jsxs("header", { className: "px-6 pb-2 pt-5", children: [_jsx("h1", { className: "text-lg font-semibold", children: "Recorder" }), _jsxs("p", { className: "text-xs text-muted-foreground", children: ["Records your mic", withSystemAudio ? ' + this computer’s audio (the lecture/Zoom)' : ' only', " \u2014 locally, to your own files. You start it, you see it, you keep it."] })] }), _jsxs("section", { className: "mx-6 mt-3 flex flex-col items-center gap-4 rounded-lg border border-border bg-card px-6 py-8", children: [state === 'recording' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "flex items-center gap-3", children: [_jsxs("span", { className: "relative flex size-4", children: [_jsx("span", { className: "absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" }), _jsx("span", { className: "relative inline-flex size-4 rounded-full bg-primary" })] }), _jsxs("span", { className: "text-2xl font-semibold tabular-nums", children: [minutes, ":", seconds] })] }), _jsx("p", { className: "text-xs font-medium uppercase tracking-widest text-primary", children: "Recording \u2014 visible, on purpose" }), _jsx(Button, { onClick: stop, size: "lg", variant: "secondary", children: "Stop & save" })] })) : (_jsxs(_Fragment, { children: [_jsx(Button, { disabled: state === 'saving', onClick: () => void start(), size: "lg", children: state === 'saving' ? 'Saving…' : 'Start recording' }), _jsxs("label", { className: "flex cursor-pointer items-center gap-2 text-xs text-muted-foreground", children: [_jsx("input", { checked: withSystemAudio, className: "accent-(--theme-primary)", onChange: event => setWithSystemAudio(event.target.checked), type: "checkbox" }), "Also capture this computer\u2019s audio (lecture, Zoom) \u2014 macOS will ask once"] })] })), error && _jsx("p", { className: "max-w-md text-center text-xs text-destructive", children: error })] }), _jsxs("section", { className: "px-6 pb-8 pt-5", children: [_jsx("h2", { className: "pb-2 text-sm font-medium", children: "Saved recordings" }), recordings.length ? (_jsx("ul", { className: "flex flex-col gap-1.5", children: recordings.map(file => {
+    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: [_jsxs("header", { className: "px-6 pb-2 pt-5", children: [_jsx("h1", { className: "text-lg font-semibold", children: "Recorder" }), _jsxs("p", { className: "text-xs text-muted-foreground", children: ["Records your mic", withSystemAudio ? ' + this computer’s audio (the lecture/Zoom)' : ' only', " \u2014 locally, to your own files. You start it, you see it, you keep it."] })] }), _jsxs("section", { className: "mx-6 mt-3 flex flex-col items-center gap-4 rounded-lg border border-border bg-card px-6 py-8", children: [state === 'recording' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "flex items-center gap-3", children: [_jsxs("span", { className: "relative flex size-3", children: [_jsx("span", { className: "absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" }), _jsx("span", { className: "relative inline-flex size-3 rounded-full bg-primary" })] }), _jsx("span", { className: "text-xs font-medium uppercase tracking-widest text-primary", children: "On air \u2014 visible, on purpose" })] }), _jsx("canvas", { className: "h-16 w-full max-w-xl", height: 64, ref: canvasRef, width: 640 }), _jsxs("span", { className: "text-2xl font-semibold tabular-nums", children: [minutes, ":", seconds] }), _jsx(Button, { onClick: stop, size: "lg", variant: "secondary", children: "Stop & save" })] })) : (_jsxs(_Fragment, { children: [_jsx(Button, { disabled: state === 'saving', onClick: () => void start(), size: "lg", children: state === 'saving' ? 'Saving…' : 'Start recording' }), _jsxs("label", { className: "flex cursor-pointer items-center gap-2 text-xs text-muted-foreground", children: [_jsx("input", { checked: withSystemAudio, className: "accent-(--theme-primary)", onChange: event => setWithSystemAudio(event.target.checked), type: "checkbox" }), "Also capture this computer\u2019s audio (lecture, Zoom) \u2014 macOS will ask once"] }), _jsx("span", { className: "rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground", children: "\uD83D\uDD12 Nothing joins your call \u2014 capture happens on this device only" })] })), error && _jsx("p", { className: "max-w-md text-center text-xs text-destructive", children: error })] }), _jsxs("section", { className: "px-6 pb-8 pt-5", children: [_jsx("h2", { className: "pb-2 text-sm font-medium", children: "Saved recordings" }), recordings.length ? (_jsx("ul", { className: "flex flex-col gap-1.5", children: recordings.map(file => {
                             const status = transcribingStatus[file.path];
                             const transcript = transcripts[file.path];
-                            return (_jsxs("li", { className: "flex flex-col gap-2 rounded-md border border-border px-3 py-2", children: [_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx("span", { className: "truncate text-sm", children: file.name }), _jsxs("div", { className: "flex shrink-0 items-center gap-2", children: [_jsx(Button, { disabled: Boolean(status), onClick: () => void transcribe(file), size: "sm", variant: "outline", children: status ?? (transcript ? 'Re-transcribe' : 'Transcribe') }), _jsx(Button, { onClick: () => void play(file), size: "sm", variant: "outline", children: playing?.path === file.path ? 'Hide' : 'Play' })] })] }), transcript && (_jsxs("div", { className: "rounded-md bg-muted/40 p-3", children: [_jsx("p", { className: "whitespace-pre-wrap text-xs leading-relaxed text-foreground", children: transcript }), _jsxs("div", { className: "mt-2 flex flex-wrap items-center gap-2", children: [_jsx(Button, { disabled: savedNote[file.path], onClick: () => void saveTranscriptNote(file), size: "sm", variant: "secondary", children: savedNote[file.path] ? 'Saved to Library ✓' : 'Save as note' }), _jsx(Button, { onClick: () => draftFlashcards(file), size: "sm", variant: "secondary", children: "Draft flashcards" }), (corrections[file.path] ?? 0) > 0 && (_jsxs("span", { className: "text-[10px] text-muted-foreground", children: [corrections[file.path], " pharm term", corrections[file.path] === 1 ? '' : 's', " auto-corrected"] }))] })] }))] }, file.path));
+                            return (_jsxs("li", { className: "flex flex-col gap-2 rounded-md border border-border px-3 py-2", children: [_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-2", children: [_jsx("span", { className: "text-base", children: "\uD83C\uDF99\uFE0F" }), _jsxs("div", { className: "min-w-0", children: [_jsx("div", { className: "truncate text-sm", children: recordingLabel(file.name) }), status && _jsx("div", { className: "text-[11px] text-primary", children: status })] })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2", children: [_jsx(Button, { disabled: Boolean(status), onClick: () => void transcribe(file), size: "sm", variant: "outline", children: status ? '…' : transcript ? 'Re-transcribe' : 'Transcribe' }), _jsx(Button, { onClick: () => void play(file), size: "sm", variant: "outline", children: playing?.path === file.path ? 'Hide' : 'Play' })] })] }), transcript && (_jsxs("div", { className: "rounded-md bg-muted/40 p-3", children: [_jsx("p", { className: "whitespace-pre-wrap text-xs leading-relaxed text-foreground", children: transcript }), _jsxs("div", { className: "mt-2 flex flex-wrap items-center gap-2", children: [_jsx(Button, { disabled: savedNote[file.path], onClick: () => void saveTranscriptNote(file), size: "sm", variant: "secondary", children: savedNote[file.path] ? 'Saved to Library ✓' : 'Save as note' }), _jsx(Button, { onClick: () => draftFlashcards(file), size: "sm", variant: "secondary", children: "Draft flashcards" }), (corrections[file.path] ?? 0) > 0 && (_jsxs("span", { className: "text-[10px] text-muted-foreground", children: [corrections[file.path], " pharm term", corrections[file.path] === 1 ? '' : 's', " auto-corrected"] }))] })] }))] }, file.path));
                         }) })) : (_jsx(EmptyState, { className: cn('min-h-28'), description: "Recordings save to Documents / Nemesis Recordings as ordinary audio files.", title: "No recordings yet" })), playing && _jsx("audio", { autoPlay: true, className: "mt-3 w-full", controls: true, src: playing.src }), _jsx("p", { className: "pt-4 text-[11px] leading-relaxed text-muted-foreground", children: "Recording other people may require their consent where you live \u2014 check your school\u2019s policy. Nemesis never records on its own and never hides the indicator. Transcription runs on your device (the first run downloads a small model); the text is a draft \u2014 review it before you rely on it." })] })] }));
 }

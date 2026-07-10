@@ -20,6 +20,28 @@ import { transcribeAudio } from './transcribe'
 
 const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
 
+/** "lecture-2026-07-09T20-28-01.webm" → "Jul 9, 2026 · 8:28 PM"; else the raw name. */
+function recordingLabel(name: string): string {
+  const match = name.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/)
+
+  if (match) {
+    const [, y, mo, d, h, mi] = match
+    const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi))
+
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleString(undefined, {
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      })
+    }
+  }
+
+  return name
+}
+
 interface RecordingFile {
   name: string
   path: string
@@ -44,6 +66,9 @@ export function RecorderView() {
   const streamsRef = useRef<MediaStream[]>([])
   const chunksRef = useRef<Blob[]>([])
   const tickRef = useRef<null | ReturnType<typeof setInterval>>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const refreshList = useCallback(async () => {
     try {
@@ -65,7 +90,49 @@ export function RecorderView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Live waveform: draw the ACTUAL captured signal (mic + system mix) — honest, since it
+  // reflects real audio, unlike faking live transcript text.
+  const drawWave = useCallback(() => {
+    const analyser = analyserRef.current
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+
+    if (!analyser || !canvas || !ctx) {
+      return
+    }
+
+    const buffer = new Uint8Array(analyser.frequencyBinCount)
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--theme-primary').trim() || '#b3382e'
+
+    const render = () => {
+      rafRef.current = requestAnimationFrame(render)
+      analyser.getByteTimeDomainData(buffer)
+      const { height, width } = canvas
+      ctx.clearRect(0, 0, width, height)
+      ctx.lineWidth = 2
+      ctx.strokeStyle = accent
+      ctx.beginPath()
+      const slice = width / buffer.length
+
+      for (let i = 0; i < buffer.length; i++) {
+        const y = (buffer[i] / 128) * (height / 2)
+        i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * slice, y)
+      }
+
+      ctx.stroke()
+    }
+
+    render()
+  }, [])
+
   const stopEverything = () => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+
+    analyserRef.current = null
+
     if (tickRef.current) {
       clearInterval(tickRef.current)
       tickRef.current = null
@@ -110,6 +177,12 @@ export function RecorderView() {
         }
       }
 
+      // Tap the mixed signal for the live waveform (analyser only; no playback).
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 1024
+      destination.connect(analyser)
+      analyserRef.current = analyser
+
       const recorder = new MediaRecorder(destination.stream, { mimeType: 'audio/webm;codecs=opus' })
       recorder.ondataavailable = event => {
         if (event.data.size) {
@@ -123,6 +196,7 @@ export function RecorderView() {
       setElapsed(0)
       tickRef.current = setInterval(() => setElapsed(count => count + 1), 1000)
       setState('recording')
+      requestAnimationFrame(() => drawWave())
     } catch (err) {
       stopEverything()
       setState('idle')
@@ -290,15 +364,16 @@ export function RecorderView() {
         {state === 'recording' ? (
           <>
             <div className="flex items-center gap-3">
-              <span className="relative flex size-4">
+              <span className="relative flex size-3">
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
-                <span className="relative inline-flex size-4 rounded-full bg-primary" />
+                <span className="relative inline-flex size-3 rounded-full bg-primary" />
               </span>
-              <span className="text-2xl font-semibold tabular-nums">
-                {minutes}:{seconds}
-              </span>
+              <span className="text-xs font-medium uppercase tracking-widest text-primary">On air — visible, on purpose</span>
             </div>
-            <p className="text-xs font-medium uppercase tracking-widest text-primary">Recording — visible, on purpose</p>
+            <canvas className="h-16 w-full max-w-xl" height={64} ref={canvasRef} width={640} />
+            <span className="text-2xl font-semibold tabular-nums">
+              {minutes}:{seconds}
+            </span>
             <Button onClick={stop} size="lg" variant="secondary">
               Stop &amp; save
             </Button>
@@ -317,6 +392,9 @@ export function RecorderView() {
               />
               Also capture this computer&rsquo;s audio (lecture, Zoom) — macOS will ask once
             </label>
+            <span className="rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
+              🔒 Nothing joins your call — capture happens on this device only
+            </span>
           </>
         )}
         {error && <p className="max-w-md text-center text-xs text-destructive">{error}</p>}
@@ -333,7 +411,13 @@ export function RecorderView() {
               return (
                 <li className="flex flex-col gap-2 rounded-md border border-border px-3 py-2" key={file.path}>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="truncate text-sm">{file.name}</span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="text-base">🎙️</span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm">{recordingLabel(file.name)}</div>
+                        {status && <div className="text-[11px] text-primary">{status}</div>}
+                      </div>
+                    </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <Button
                         disabled={Boolean(status)}
@@ -341,7 +425,7 @@ export function RecorderView() {
                         size="sm"
                         variant="outline"
                       >
-                        {status ?? (transcript ? 'Re-transcribe' : 'Transcribe')}
+                        {status ? '…' : transcript ? 'Re-transcribe' : 'Transcribe'}
                       </Button>
                       <Button onClick={() => void play(file)} size="sm" variant="outline">
                         {playing?.path === file.path ? 'Hide' : 'Play'}
