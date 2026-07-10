@@ -156,34 +156,34 @@ export function PdfViewer({ path }: PdfViewerProps) {
 
   if (error) {
     return (
-      <div className="grid h-full place-items-center rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+      <div className="grid h-full place-items-center rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-6 text-center text-sm text-muted-foreground">
         {error}
       </div>
     )
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-(--ui-bg-secondary,var(--color-muted))">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-card/70 px-3 py-1.5 backdrop-blur">
-        <span className="text-xs tabular-nums text-muted-foreground">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-secondary,var(--color-muted)) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-3 py-2">
+        <span className="text-[0.6875rem] font-medium tabular-nums text-muted-foreground">
           {doc ? `Page ${currentPage} / ${doc.numPages}` : 'Opening…'}
         </span>
         <div className="flex items-center gap-1">
-          <Button aria-label="Zoom out" className="h-6 w-6 p-0" onClick={() => step(-1)} size="sm" variant="ghost">
+          <Button aria-label="Zoom out" onClick={() => step(-1)} size="icon-xs" variant="ghost">
             −
           </Button>
-          <span className="w-12 text-center text-xs tabular-nums text-muted-foreground">{Math.round(scale * 100)}%</span>
-          <Button aria-label="Zoom in" className="h-6 w-6 p-0" onClick={() => step(1)} size="sm" variant="ghost">
+          <span className="w-12 text-center text-[0.6875rem] font-medium tabular-nums text-muted-foreground">{Math.round(scale * 100)}%</span>
+          <Button aria-label="Zoom in" onClick={() => step(1)} size="icon-xs" variant="ghost">
             +
           </Button>
-          <Button className="h-6 px-2 text-xs" onClick={() => setZoom('fit')} size="sm" variant={zoom === 'fit' ? 'secondary' : 'ghost'}>
+          <Button onClick={() => setZoom('fit')} size="xs" variant={zoom === 'fit' ? 'secondary' : 'ghost'}>
             Fit
           </Button>
         </div>
       </div>
       <div className="flex min-h-0 flex-1">
         {doc && baseSize && doc.numPages > 1 && (
-          <div className="w-[6.5rem] shrink-0 overflow-y-auto border-r border-border px-2 py-2" ref={railRef}>
+          <div className="w-[6.5rem] shrink-0 overflow-y-auto border-r border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2 py-2" ref={railRef}>
             {Array.from({ length: doc.numPages }, (_, i) => (
               <PdfThumb
                 active={currentPage === i + 1}

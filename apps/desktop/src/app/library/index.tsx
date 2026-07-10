@@ -2,13 +2,26 @@
 // Markdown, a prose-styled CodeMirror editor (middle, de-code-ified via .nemesis-prose-editor
 // CSS), and a Links/Backlinks rail. Non-markdown files (PDF/images inline; slides/docs open
 // externally) preview in place. Autosaves 800ms after typing.
-import { IconFileText, IconFileTypePdf, IconPaperclip, IconPhoto, IconPresentation, IconX } from '@tabler/icons-react'
+import {
+  IconChevronRight,
+  IconFilePlus,
+  IconFileText,
+  IconFileTypePdf,
+  IconFolder,
+  IconFolderOpen,
+  IconFolderPlus,
+  IconPaperclip,
+  IconPhoto,
+  IconPresentation,
+  IconX
+} from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
+import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 import { NoteEditor } from './note-editor'
@@ -35,6 +48,10 @@ function tabKey(tab: TabItem): string {
 
 function tabLabel(tab: TabItem): string {
   return tab.kind === 'note' ? tab.note.title : tab.file.name
+}
+
+function countWords(value: string): number {
+  return value.trim().match(/\S+/g)?.length ?? 0
 }
 
 interface TreeNode {
@@ -292,24 +309,47 @@ export function LibraryView() {
         target => !contents.notes.some(note => note.title.toLowerCase() === target.toLowerCase())
       )
     : []
+  const noteCount = contents.notes.length
+  const fileCount = contents.files.length
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 bg-(--ui-editor-surface-background)">
       {/* Folder tree */}
-      <aside className="flex w-64 shrink-0 flex-col border-r border-border">
-        <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-5">
-          <h1 className="text-lg font-semibold">Library</h1>
-          <div className="flex gap-1">
-            <Button className="h-7 px-2 text-xs" onClick={() => { setCreating('note'); setDraft('') }} size="sm" variant="outline">
-              + Note
-            </Button>
-            <Button className="h-7 px-2 text-xs" onClick={() => { setCreating('folder'); setDraft('') }} size="sm" variant="outline">
-              + Folder
-            </Button>
+      <aside className="flex w-64 shrink-0 flex-col border-r border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)">
+        <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-5">
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold tracking-tight">Library</h1>
+            <p className="mt-0.5 text-[0.65rem] font-medium tabular-nums text-(--ui-text-tertiary)">
+              {noteCount} note{noteCount === 1 ? '' : 's'} · {fileCount} file{fileCount === 1 ? '' : 's'}
+            </p>
+          </div>
+          <div className="flex gap-0.5">
+            <Tip label="New note">
+              <Button
+                aria-label="New note"
+                className="transition-transform duration-200 ease-out active:scale-[0.98]"
+                onClick={() => { setCreating('note'); setDraft('') }}
+                size="icon-xs"
+                variant="ghost"
+              >
+                <IconFilePlus />
+              </Button>
+            </Tip>
+            <Tip label="New folder">
+              <Button
+                aria-label="New folder"
+                className="transition-transform duration-200 ease-out active:scale-[0.98]"
+                onClick={() => { setCreating('folder'); setDraft('') }}
+                size="icon-xs"
+                variant="ghost"
+              >
+                <IconFolderPlus />
+              </Button>
+            </Tip>
           </div>
         </div>
         {creating && (
-          <div className="px-3 pb-2">
+          <div className="mx-3 mb-2 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-2 shadow-sm">
             <Input
               autoFocus
               onChange={event => setDraft(event.target.value)}
@@ -320,10 +360,10 @@ export function LibraryView() {
               placeholder={creating === 'folder' ? 'Folder name' : 'Note title'}
               value={draft}
             />
-            {targetFolder && <p className="px-1 pt-1 text-[10px] text-muted-foreground">in {targetFolder}</p>}
+            {targetFolder && <p className="px-1 pt-1.5 text-[10px] text-muted-foreground">in {targetFolder}</p>}
           </div>
         )}
-        <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+        <nav className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
           <TreeLevel
             collapsed={collapsed}
             depth={0}
@@ -343,24 +383,32 @@ export function LibraryView() {
       </aside>
 
       {/* Editor / preview */}
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)">
         {tabs.length > 0 && (
-          <div className="flex shrink-0 items-end gap-0.5 overflow-x-auto border-b border-border px-2 pt-2">
+          <div
+            className="flex h-(--titlebar-height) shrink-0 overflow-x-auto overflow-y-hidden border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="tablist"
+          >
             {tabs.map((tab, i) => (
               <div
                 className={cn(
-                  'group/tab flex max-w-[13rem] shrink-0 cursor-pointer items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1.5 text-xs transition-colors',
+                  'group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out',
                   i === activeTab
-                    ? 'border-border bg-card text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                    ? 'bg-(--ui-bg-editor) text-foreground'
+                    : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
                 )}
                 key={tabKey(tab)}
                 onClick={() => setActiveTab(i)}
+                role="tab"
               >
-                <span className="truncate">{tabLabel(tab)}</span>
+                {i === activeTab && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-(--theme-primary)" />}
+                <span className="flex min-w-0 items-center gap-1.5 py-2 pl-3 pr-8">
+                  {tab.kind === 'note' ? <IconFileText className="shrink-0 opacity-60" size={13} /> : <FileGlyph kind={tab.file.kind} />}
+                  <span className="truncate">{tabLabel(tab)}</span>
+                </span>
                 <button
                   aria-label="Close tab"
-                  className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover/tab:opacity-100"
+                  className="absolute right-1.5 grid size-5 place-items-center rounded opacity-0 transition-[opacity,color] duration-200 ease-out hover:bg-(--chrome-action-hover) group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
                   onClick={event => {
                     event.stopPropagation()
                     closeTab(i)
@@ -375,11 +423,29 @@ export function LibraryView() {
         )}
         {selection?.kind === 'note' ? (
           <>
-            <div className="flex items-center justify-between px-5 pb-1 pt-5">
-              <h2 className="truncate text-base font-medium">{selection.note.title}</h2>
-              <span className="text-xs text-muted-foreground">{saving ? 'Saving…' : 'Saved to disk'}</span>
+            <div className="shrink-0 border-b border-(--ui-stroke-quaternary) px-7 pb-4 pt-6">
+              <div className="flex items-end justify-between gap-6">
+                <div className="min-w-0">
+                  <div className="mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
+                    <span>Library</span>
+                    {selection.note.folder.split('/').filter(Boolean).map((part, index) => (
+                      <span className="contents" key={`${part}-${index}`}>
+                        <IconChevronRight className="shrink-0 opacity-50" size={11} />
+                        <span className="truncate">{part}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <h2 className="truncate text-2xl font-semibold tracking-[-0.025em]">{selection.note.title}</h2>
+                </div>
+                <div className="flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)">
+                  <span className="tabular-nums">{countWords(selection.note.content)} words</span>
+                  <span className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 font-medium">
+                    {saving ? 'Saving…' : 'Saved to disk'}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-hidden px-6 pb-3">
+            <div className="min-h-0 flex-1 overflow-hidden px-7 pb-3">
               <NoteEditor
                 initialValue={selection.note.content}
                 key={selection.note.path}
@@ -397,7 +463,7 @@ export function LibraryView() {
 
       {/* Links rail (notes only) */}
       {activeNote && (
-        <aside className="hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border px-4 pb-4 pt-5 lg:flex">
+        <aside className="hidden w-64 shrink-0 flex-col gap-3 overflow-y-auto border-l border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-3 pb-4 pt-4 lg:flex">
           <LinkGroup
             emptyLabel="Write [[Note title]] to connect ideas."
             onOpen={title => {
@@ -417,11 +483,14 @@ export function LibraryView() {
             titles={incoming}
           />
           {unresolved.length > 0 && (
-            <div>
-              <h3 className="pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Unresolved</h3>
+            <div className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Unresolved</h3>
+                <span className="text-[0.65rem] tabular-nums text-(--ui-text-quaternary)">{unresolved.length}</span>
+              </div>
               <div className="flex flex-wrap gap-1.5">
                 {unresolved.map(target => (
-                  <span className="rounded-md border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground" key={target}>
+                  <span className="rounded-full border border-dashed border-(--ui-stroke-secondary) px-2.5 py-1 text-[0.6875rem] text-muted-foreground" key={target}>
                     {target}
                   </span>
                 ))}
@@ -448,7 +517,7 @@ function FileGlyph({ kind }: { kind: VaultFile['kind'] }) {
               ? IconFileText
               : IconPaperclip
 
-  return <Icon className="-mt-px mr-1.5 inline shrink-0 opacity-70" size={14} />
+  return <Icon className="shrink-0 opacity-60" size={14} />
 }
 
 function TreeLevel({
@@ -466,10 +535,8 @@ function TreeLevel({
   onToggle: (path: string) => void
   selection: Selection
 }) {
-  const pad = { paddingLeft: `${depth * 12 + 8}px` }
-
   return (
-    <>
+    <div className={cn('space-y-0.5', depth > 0 && 'ml-3 border-l border-(--ui-stroke-quaternary) pl-1.5')}>
       {node.folders
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -477,14 +544,21 @@ function TreeLevel({
           const isCollapsed = collapsed.has(folder.path)
 
           return (
-            <div key={folder.path}>
+            <div className="pb-0.5" key={folder.path}>
               <button
-                className="flex w-full items-center gap-1 rounded-md py-1 pr-2 text-left text-sm text-foreground hover:bg-accent"
+                className="group/folder flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[0.68rem] font-semibold uppercase tracking-[0.075em] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]"
                 onClick={() => onToggle(folder.path)}
-                style={pad}
                 type="button"
               >
-                <span className={cn('inline-block transition-transform', !isCollapsed && 'rotate-90')}>▸</span>
+                <IconChevronRight
+                  className={cn('shrink-0 transition-transform duration-200 ease-out', !isCollapsed && 'rotate-90')}
+                  size={12}
+                />
+                {isCollapsed ? (
+                  <IconFolder className="shrink-0 text-(--ui-text-tertiary) group-hover/folder:text-(--theme-primary)" size={14} />
+                ) : (
+                  <IconFolderOpen className="shrink-0 text-(--theme-primary)" size={14} />
+                )}
                 <span className="truncate">{folder.name}</span>
               </button>
               {!isCollapsed && (
@@ -506,15 +580,15 @@ function TreeLevel({
         .map(note => (
           <button
             className={cn(
-              'block w-full truncate rounded-md py-1.5 pr-2 text-left text-sm hover:bg-accent',
-              selection?.kind === 'note' && selection.note.path === note.path && 'bg-accent text-accent-foreground'
+              'relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]',
+              selection?.kind === 'note' && selection.note.path === note.path && 'font-semibold text-foreground before:bg-(--theme-primary)'
             )}
             key={note.path}
             onClick={() => onSelect({ kind: 'note', note })}
-            style={pad}
             type="button"
           >
-            {note.title}
+            <IconFileText className="shrink-0 opacity-55" size={14} />
+            <span className="truncate">{note.title}</span>
           </button>
         ))}
       {node.files
@@ -523,19 +597,18 @@ function TreeLevel({
         .map(file => (
           <button
             className={cn(
-              'block w-full truncate rounded-md py-1.5 pr-2 text-left text-sm text-muted-foreground hover:bg-accent',
-              selection?.kind === 'file' && selection.file.path === file.path && 'bg-accent text-accent-foreground'
+              'relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-tertiary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]',
+              selection?.kind === 'file' && selection.file.path === file.path && 'font-semibold text-foreground before:bg-(--theme-primary)'
             )}
             key={file.path}
             onClick={() => onSelect({ file, kind: 'file' })}
-            style={pad}
             type="button"
           >
             <FileGlyph kind={file.kind} />
-            {file.name}
+            <span className="truncate">{file.name}</span>
           </button>
         ))}
-    </>
+    </div>
   )
 }
 
@@ -549,9 +622,14 @@ function FilePreview({ file }: { file: VaultFile }) {
   const reveal = () => void window.hermesDesktop?.revealPath?.(file.path)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between gap-2 px-5 pb-2 pt-5">
-        <h2 className="truncate text-base font-medium">{file.name}</h2>
+    <div className="flex min-h-0 flex-1 flex-col bg-(--ui-bg-editor)">
+      <div className="flex items-end justify-between gap-4 border-b border-(--ui-stroke-quaternary) px-6 pb-4 pt-6">
+        <div className="min-w-0">
+          <p className="mb-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
+            {file.folder || 'Library'} · {file.kind}
+          </p>
+          <h2 className="truncate text-xl font-semibold tracking-tight">{file.name}</h2>
+        </div>
         <div className="flex gap-2">
           <Button onClick={openExternal} size="sm" variant="outline">
             Open in default app
@@ -605,13 +683,18 @@ function LinkGroup({
   titles: string[]
 }) {
   return (
-    <div>
-      <h3 className="pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</h3>
+    <div className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{title}</h3>
+        <span className="rounded-full bg-(--ui-bg-quaternary) px-1.5 py-0.5 text-[0.625rem] font-medium tabular-nums text-(--ui-text-tertiary)">
+          {titles.length}
+        </span>
+      </div>
       {titles.length ? (
         <div className="flex flex-wrap gap-1.5">
           {titles.map(target => (
             <button
-              className="rounded-md border border-border px-2 py-0.5 text-xs hover:bg-accent"
+              className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2.5 py-1 text-[0.6875rem] text-(--ui-text-secondary) transition-[transform,color,border-color,background-color] duration-200 ease-out hover:border-(--theme-primary)/40 hover:bg-(--ui-bg-primary) hover:text-foreground active:scale-[0.98]"
               key={target}
               onClick={() => onOpen(target)}
               type="button"
@@ -621,7 +704,10 @@ function LinkGroup({
           ))}
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">{emptyLabel}</p>
+        <div className="rounded-lg border border-dashed border-(--ui-stroke-tertiary) px-3 py-3">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">None yet</p>
+          <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">{emptyLabel}</p>
+        </div>
       )}
     </div>
   )

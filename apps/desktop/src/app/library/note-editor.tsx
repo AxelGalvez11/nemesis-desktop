@@ -241,61 +241,71 @@ const noteTheme = EditorView.theme({
   '&': {
     backgroundColor: 'transparent',
     fontFamily: 'var(--dt-font-sans, ui-sans-serif, system-ui, sans-serif)',
-    fontSize: '0.95rem',
+    color: 'var(--ui-text-primary)',
+    fontSize: '1rem',
     height: '100%'
   },
   '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.75', overflow: 'auto' },
+  '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.8', overflow: 'auto' },
   '.cm-content': {
-    caretColor: 'var(--theme-primary, #b3382e)',
+    caretColor: 'var(--theme-primary)',
     margin: '0 auto',
-    maxWidth: '44rem',
-    padding: '0.75rem 0 35vh',
+    maxWidth: '46rem',
+    padding: '1.5rem 0 35vh',
     width: '100%'
   },
-  '.cm-line': { padding: '0 2px' },
-  '.cm-cursor': { borderLeftColor: 'var(--theme-primary, #b3382e)', borderLeftWidth: '2px' },
+  '.cm-line': { padding: '0 0.25rem' },
+  '.cm-cursor': { borderLeftColor: 'var(--theme-primary)', borderLeftWidth: '2px' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-    backgroundColor: 'color-mix(in srgb, var(--theme-primary, #b3382e) 20%, transparent)'
+    backgroundColor: 'color-mix(in srgb, var(--theme-primary) 18%, transparent)'
   },
-  '.cm-np-h': { fontWeight: '650', letterSpacing: '-0.01em' },
-  '.cm-np-h1': { fontSize: '1.6em', lineHeight: '1.35', paddingTop: '0.4em' },
-  '.cm-np-h2': { fontSize: '1.35em', lineHeight: '1.35', paddingTop: '0.35em' },
-  '.cm-np-h3': { fontSize: '1.18em', paddingTop: '0.3em' },
-  '.cm-np-h4, .cm-np-h5, .cm-np-h6': { fontSize: '1.05em' },
-  '.cm-np-strong': { fontWeight: '650' },
+  '.cm-np-h': { color: 'var(--ui-text-primary)', fontWeight: '700', letterSpacing: '-0.025em' },
+  '.cm-np-h1': { fontSize: '1.85em', lineHeight: '1.25', paddingBottom: '0.12em', paddingTop: '0.7em' },
+  '.cm-np-h2': { fontSize: '1.45em', lineHeight: '1.3', paddingBottom: '0.1em', paddingTop: '0.65em' },
+  '.cm-np-h3': { fontSize: '1.2em', lineHeight: '1.4', paddingTop: '0.5em' },
+  '.cm-np-h4, .cm-np-h5, .cm-np-h6': {
+    fontSize: '0.88em',
+    letterSpacing: '0.07em',
+    paddingTop: '0.45em',
+    textTransform: 'uppercase'
+  },
+  '.cm-np-strong': { fontWeight: '700' },
   '.cm-np-em': { fontStyle: 'italic' },
   '.cm-np-code': {
-    backgroundColor: 'color-mix(in srgb, currentColor 9%, transparent)',
-    borderRadius: '4px',
+    backgroundColor: 'var(--ui-bg-quaternary)',
+    border: '1px solid var(--ui-stroke-quaternary)',
+    borderRadius: '5px',
     fontFamily: 'var(--dt-font-mono, ui-monospace, monospace)',
-    fontSize: '0.9em',
-    padding: '0.08em 0.3em'
+    fontSize: '0.88em',
+    padding: '0.1em 0.34em'
   },
   '.cm-np-quote': {
-    borderLeft: '3px solid color-mix(in srgb, currentColor 25%, transparent)',
-    color: 'color-mix(in srgb, currentColor 78%, transparent)',
-    paddingLeft: '0.75rem'
+    backgroundColor: 'var(--ui-bg-quaternary)',
+    borderLeft: '3px solid var(--theme-primary)',
+    color: 'var(--ui-text-secondary)',
+    padding: '0.14em 0.75rem'
   },
   '.cm-np-bullet': {
-    color: 'var(--theme-primary, #b3382e)',
+    color: 'var(--theme-primary)',
     display: 'inline-block',
     fontWeight: '700',
     width: '1ch'
   },
   '.cm-np-wikilink': {
-    color: 'var(--theme-primary, #b3382e)',
+    color: 'var(--theme-primary)',
     cursor: 'pointer',
-    textDecorationColor: 'color-mix(in srgb, var(--theme-primary, #b3382e) 45%, transparent)',
+    fontWeight: '600',
+    textDecorationColor: 'color-mix(in srgb, var(--theme-primary) 40%, transparent)',
     textDecorationLine: 'underline',
     textUnderlineOffset: '3px'
   },
-  '.cm-np-wikilink:hover': { textDecorationColor: 'var(--theme-primary, #b3382e)' },
-  '.cm-np-wikilink-src': { color: 'var(--theme-primary, #b3382e)' },
-  '.cm-np-link': { color: 'var(--theme-primary, #b3382e)' },
+  '.cm-np-wikilink:hover': { textDecorationColor: 'var(--theme-primary)' },
+  '.cm-np-wikilink-src': { color: 'var(--theme-primary)' },
+  '.cm-np-link': { color: 'var(--theme-primary)', textUnderlineOffset: '3px' },
   '.cm-np-hr': {
-    borderTop: '1px solid color-mix(in srgb, currentColor 25%, transparent)',
+    borderTop: '1px solid var(--ui-stroke-secondary)',
     display: 'inline-block',
+    margin: '0.75em 0',
     verticalAlign: 'middle',
     width: '100%'
   }

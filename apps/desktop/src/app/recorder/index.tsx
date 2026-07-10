@@ -10,7 +10,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
-import { EmptyState } from '@/components/ui/empty-state'
+import { Codicon } from '@/components/ui/codicon'
+import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { setComposerDraft } from '@/store/composer'
 
@@ -205,7 +206,9 @@ export function RecorderView() {
     }
 
     const buffer = new Uint8Array(analyser.frequencyBinCount)
-    const accent = getComputedStyle(document.documentElement).getPropertyValue('--theme-primary').trim() || '#b3382e'
+    const rootStyle = getComputedStyle(document.documentElement)
+    const accent =
+      rootStyle.getPropertyValue('--theme-primary').trim() || rootStyle.getPropertyValue('--ui-text-primary').trim()
 
     const render = () => {
       rafRef.current = requestAnimationFrame(render)
@@ -688,78 +691,80 @@ export function RecorderView() {
   // that listens while you write). Idle = the start card + saved recordings.
   if (state === 'recording') {
     return (
-      <div className="flex h-full min-h-0 flex-col px-5 pb-4 pt-4">
-        <div className="flex shrink-0 flex-wrap items-center gap-3 pb-3">
+      <div className="flex h-full min-h-0 flex-col bg-(--ui-editor-surface-background) px-5 pb-5 pt-4">
+        <div className="mb-4 flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-4 py-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
           <span className="relative flex size-3 shrink-0">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
-            <span className="relative inline-flex size-3 rounded-full bg-primary" />
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-(--theme-primary) opacity-50" />
+            <span className="relative inline-flex size-3 rounded-full bg-(--theme-primary)" />
           </span>
-          <span className="shrink-0 text-[10px] font-medium uppercase tracking-widest text-primary">On air</span>
+          <span className="shrink-0 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">On air</span>
           <input
             aria-label="Lecture title"
-            className="min-w-40 flex-1 border-none bg-transparent text-lg font-semibold outline-none placeholder:text-muted-foreground/50"
+            className="min-w-40 flex-1 border-none bg-transparent text-lg font-semibold tracking-tight outline-none placeholder:text-muted-foreground/50"
             onChange={event => setTitle(event.target.value)}
             placeholder="Lecture title"
             value={title}
           />
-          <span className="shrink-0 text-sm tabular-nums text-muted-foreground">
+          <span className="shrink-0 rounded-full bg-(--ui-bg-quaternary) px-3 py-1 text-sm font-semibold tabular-nums text-(--ui-text-secondary)">
             {minutes}:{seconds}
           </span>
-          <Button onClick={stop} size="sm" variant="secondary">
+          <Button className="transition-transform duration-200 ease-out active:scale-[0.98]" onClick={stop} size="sm" variant="destructive">
             Stop &amp; save
           </Button>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
-          {/* Notepad — type while it listens */}
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
-            <div className="shrink-0 border-b border-border px-4 py-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-                My notes — type while it listens
-              </span>
-            </div>
-            <div className="min-h-0 flex-1 overflow-hidden px-4">
-              <NoteEditor initialValue="" onChange={onNotesChange} onOpenWikilink={() => {}} />
-            </div>
-          </div>
-
-          {/* Sidecar: waveform, live transcript, live insights */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(19rem,0.82fr)_minmax(0,1.18fr)]">
+          {/* Live capture: waveform, transcript, and insights */}
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-            <canvas className="h-12 w-full shrink-0 rounded-md border border-border bg-card" height={48} ref={canvasRef} width={340} />
+            <div className="shrink-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Audio signal</span>
+                <span className="text-[0.65rem] text-(--ui-text-quaternary)">Mic{withSystemAudio ? ' + system' : ''}</span>
+              </div>
+              <canvas className="h-16 w-full rounded-xl bg-(--ui-bg-quaternary)" height={64} ref={canvasRef} width={420} />
+            </div>
+
             {liveCaptions ? (
               <>
-                <div className="flex min-h-24 shrink-0 flex-col rounded-md border border-border bg-card px-3 py-2">
-                  <div className="flex items-center justify-between pb-1">
-                    <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                <div className="flex min-h-40 shrink-0 flex-col rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
                       Live transcript
                     </span>
-                    <span className="text-[10px] text-muted-foreground">{liveStatus}</span>
+                    <span className="truncate text-[0.65rem] text-muted-foreground">{liveStatus}</span>
                   </div>
-                  <div className="max-h-64 overflow-y-auto text-[13px] leading-relaxed" ref={liveScrollRef}>
+                  <div className="max-h-72 space-y-2 overflow-y-auto text-[13px] leading-relaxed" ref={liveScrollRef}>
                     {liveSegments.length ? (
-                      liveSegments.join(' ')
+                      liveSegments.map((segment, index) => (
+                        <p className="animate-in fade-in-0 border-l border-(--ui-stroke-quaternary) pl-3 duration-200 ease-out" key={`${index}-${segment.slice(0, 18)}`}>
+                          {segment}
+                        </p>
+                      ))
                     ) : (
-                      <span className="text-muted-foreground">Listening for speech…</span>
+                      <div>
+                        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">Listening</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Speech will appear here as the lecture continues.</p>
+                      </div>
                     )}
                   </div>
                 </div>
                 {insights.length > 0 && (
-                  <div className="shrink-0 rounded-md border border-border bg-card px-3 py-2">
-                    <div className="flex items-center justify-between pb-1.5">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-primary">
-                        <IconSparkles size={11} />
-                        Drugs just mentioned
+                  <div className="shrink-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+                    <div className="mb-2.5 flex items-center justify-between gap-3">
+                      <span className="inline-flex items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
+                        <IconSparkles size={12} />
+                        Mentioned
                       </span>
-                      <span className="text-[10px] text-muted-foreground">tap to queue</span>
+                      <span className="text-[0.65rem] text-muted-foreground">Tap to queue</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {insights.map(insight => (
                         <button
                           className={cn(
-                            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
+                            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-[transform,color,border-color,background-color] duration-200 ease-out active:scale-[0.98]',
                             insight.queued
-                              ? 'border-(--theme-primary) text-foreground'
-                              : 'border-border text-muted-foreground hover:text-foreground'
+                              ? 'border-(--theme-primary)/45 bg-(--ui-bg-primary) text-foreground'
+                              : 'border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) text-muted-foreground hover:border-(--theme-primary)/35 hover:text-foreground'
                           )}
                           key={insight.term}
                           onClick={() => toggleQueued(insight.term)}
@@ -767,7 +772,7 @@ export function RecorderView() {
                         >
                           {insight.queued && <IconCheck size={11} />}
                           {insight.term}
-                          <span className="text-[9px] opacity-60">{insight.at}</span>
+                          <span className="text-[9px] tabular-nums opacity-60">{insight.at}</span>
                         </button>
                       ))}
                     </div>
@@ -775,14 +780,27 @@ export function RecorderView() {
                 )}
               </>
             ) : (
-              <p className="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                Live transcript is off — the audio still records and you can transcribe it after.
-              </p>
+              <div className="rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4">
+                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">Live transcript off</p>
+                <p className="mt-1 text-xs text-muted-foreground">Audio is still recording and can be transcribed later.</p>
+              </div>
             )}
-            <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
               <IconLock size={12} />
               On this device only — nothing joins your call
             </span>
+          </div>
+
+          {/* Notepad — type while it listens */}
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+            <div className="shrink-0 border-b border-(--ui-stroke-tertiary) px-5 py-3">
+              <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+                My notes · type while it listens
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden px-5">
+              <NoteEditor initialValue="" onChange={onNotesChange} onOpenWikilink={() => {}} />
+            </div>
           </div>
         </div>
         {error && <p className="pt-2 text-center text-xs text-destructive">{error}</p>}
@@ -791,109 +809,167 @@ export function RecorderView() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
-      <header className="px-6 pb-2 pt-5">
-        <h1 className="text-lg font-semibold">Recorder</h1>
-        <p className="text-xs text-muted-foreground">
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background)">
+      <header className="px-6 pb-2 pt-6">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Capture desk</p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em]">Recorder</h1>
+        <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
           Records your mic{withSystemAudio ? ' + this computer’s audio (the lecture/Zoom)' : ' only'} — locally, to
           your own files. You start it, you see it, you keep it. While it records, you get a notepad, a live
           transcript, and the drugs mentioned — as they happen.
         </p>
       </header>
 
-      <section className="mx-6 mt-3 flex flex-col items-center gap-4 rounded-lg border border-border bg-card px-6 py-8">
-        {(
-          <>
-            <Button disabled={state === 'saving'} onClick={() => void start()} size="lg">
-              {state === 'saving' ? 'Saving…' : 'Start recording'}
-            </Button>
-            {state === 'saving' && liveStatus && <p className="text-xs text-muted-foreground">{liveStatus}</p>}
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+      <section className="mx-6 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+        <div className="grid items-stretch lg:grid-cols-[minmax(0,0.9fr)_minmax(22rem,1.1fr)]">
+          <div className="flex items-center gap-5 border-b border-(--ui-stroke-tertiary) p-6 lg:border-b-0 lg:border-r">
+            <div className="grid size-24 shrink-0 place-items-center rounded-full border border-(--theme-primary)/25 bg-(--ui-bg-primary) shadow-[inset_0_0_0_7px_var(--ui-bg-elevated)]">
+              <Button
+                aria-label="Start recording"
+                className="size-20 rounded-full shadow-lg transition-[transform,opacity] duration-200 ease-out active:scale-[0.96]"
+                disabled={state === 'saving'}
+                onClick={() => void start()}
+                size="icon-lg"
+              >
+                <IconMicrophone className="size-7" />
+              </Button>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
+                {state === 'saving' ? 'Finishing capture' : 'Ready to record'}
+              </p>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight">
+                {state === 'saving' ? 'Saving your lecture' : 'Capture the lecture, keep the context'}
+              </h2>
+              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+                {state === 'saving'
+                  ? (liveStatus || 'Writing audio and notes to disk…')
+                  : 'One click opens a live notepad, waveform, transcript, and pharmacology mentions.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col justify-center gap-2 p-4">
+            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
               <input
                 checked={withSystemAudio}
-                className="accent-(--theme-primary)"
+                className="peer sr-only"
                 onChange={event => setWithSystemAudio(event.target.checked)}
                 type="checkbox"
               />
-              Also capture this computer&rsquo;s audio (lecture, Zoom) — macOS will ask once
+              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" />
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold">Computer audio</span>
+                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">Capture the lecture or Zoom audio · macOS asks once</span>
+              </span>
             </label>
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
               <input
                 checked={liveCaptions}
-                className="accent-(--theme-primary)"
+                className="peer sr-only"
                 onChange={event => setLiveCaptions(event.target.checked)}
                 type="checkbox"
               />
-              Live transcript while recording — auto-saves a lecture note to the Library
+              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" />
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold">Live transcript</span>
+                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">Auto-save a lecture note to the Library</span>
+              </span>
             </label>
-            {lectureNote && (
-              <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-xs">
-                <span className="inline-flex items-center gap-1">
-                  Lecture note saved to Library → {LECTURE_FOLDER} <IconCheck className="text-primary" size={12} />
-                </span>
-                <Button
-                  className="h-6 px-2 text-xs"
-                  onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`)}
-                  size="sm"
-                  variant="outline"
-                >
-                  Open note
-                </Button>
-                <Button className="h-6 px-2 text-xs" onClick={enhanceNote} size="sm" variant="secondary">
-                  <IconSparkles size={12} />
-                  Enhance with Nemesis
-                </Button>
-                {insights.some(insight => insight.queued) && (
-                  <Button className="h-6 px-2 text-xs" onClick={askQueued} size="sm" variant="outline">
-                    Ask about {insights.filter(insight => insight.queued).length} queued drug
-                    {insights.filter(insight => insight.queued).length === 1 ? '' : 's'}
-                  </Button>
-                )}
-              </div>
-            )}
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
+            <span className="mx-3 mt-1 inline-flex items-center gap-1.5 self-start rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
               <IconLock size={12} />
-              Nothing joins your call — capture &amp; transcription happen on this device only
+              Nothing joins your call · processed on this device
             </span>
-          </>
+          </div>
+        </div>
+
+        {lectureNote && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-5 py-3 text-xs">
+            <span className="mr-auto inline-flex items-center gap-1.5 font-medium">
+              <IconCheck className="text-(--theme-primary)" size={13} />
+              Lecture note saved to Library → {LECTURE_FOLDER}
+            </span>
+            <Button onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`)} size="xs" variant="outline">
+              Open note
+            </Button>
+            <Button onClick={enhanceNote} size="xs" variant="secondary">
+              <IconSparkles size={12} />
+              Enhance with Nemesis
+            </Button>
+            {insights.some(insight => insight.queued) && (
+              <Button onClick={askQueued} size="xs" variant="outline">
+                Ask about {insights.filter(insight => insight.queued).length} queued drug
+                {insights.filter(insight => insight.queued).length === 1 ? '' : 's'}
+              </Button>
+            )}
+          </div>
         )}
-        {error && <p className="max-w-md text-center text-xs text-destructive">{error}</p>}
+        {error && <p className="border-t border-(--ui-stroke-tertiary) px-5 py-3 text-xs text-destructive">{error}</p>}
       </section>
 
-      <section className="px-6 pb-8 pt-5">
-        <h2 className="pb-2 text-sm font-medium">Saved recordings</h2>
+      <section className="px-6 pb-8 pt-7">
+        <div className="mb-3 flex items-end justify-between gap-3">
+          <div>
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Archive</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight">Saved recordings</h2>
+          </div>
+          <span className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 text-[0.6875rem] font-medium tabular-nums text-muted-foreground">
+            {recordings.length} recording{recordings.length === 1 ? '' : 's'}
+          </span>
+        </div>
         {recordings.length ? (
-          <ul className="flex flex-col gap-1.5">
+          <ul className="flex flex-col gap-2">
             {recordings.map(file => {
               const status = transcribingStatus[file.path]
               const transcript = transcripts[file.path]
 
               return (
-                <li className="flex flex-col gap-2 rounded-md border border-border px-3 py-2" key={file.path}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <IconMicrophone className="shrink-0 text-muted-foreground" size={16} />
+                <li className="group flex flex-col gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 transition-[transform,border-color] duration-200 ease-out hover:border-(--theme-primary)/25 active:scale-[0.995]" key={file.path}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-(--ui-stroke-quaternary) bg-(--ui-bg-quaternary) text-(--theme-primary)">
+                        <IconMicrophone size={17} />
+                      </div>
                       <div className="min-w-0">
-                        <div className="truncate text-sm">{recordingLabel(file.name)}</div>
-                        {status && <div className="text-[11px] text-primary">{status}</div>}
+                        <div className="truncate text-sm font-semibold">Lecture recording</div>
+                        <div className="truncate text-[0.6875rem] tabular-nums text-muted-foreground">{recordingLabel(file.name)}</div>
+                        {status && (
+                          <div className="mt-1 inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-(--theme-primary)">
+                            <span className="size-1.5 animate-pulse rounded-full bg-(--theme-primary)" />
+                            {status}
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Button
-                        disabled={Boolean(status)}
-                        onClick={() => void transcribe(file)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {status ? '…' : transcript ? 'Re-transcribe' : 'Transcribe'}
-                      </Button>
-                      <Button onClick={() => void play(file)} size="sm" variant="outline">
-                        {playing?.path === file.path ? 'Hide' : 'Play'}
-                      </Button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Tip label={transcript ? 'Re-transcribe' : 'Transcribe'}>
+                        <Button
+                          aria-label={transcript ? 'Re-transcribe' : 'Transcribe'}
+                          className="transition-transform duration-200 ease-out active:scale-[0.98]"
+                          disabled={Boolean(status)}
+                          onClick={() => void transcribe(file)}
+                          size="icon-sm"
+                          variant="outline"
+                        >
+                          <Codicon name="sparkle" />
+                        </Button>
+                      </Tip>
+                      <Tip label={playing?.path === file.path ? 'Hide player' : 'Play'}>
+                        <Button
+                          aria-label={playing?.path === file.path ? 'Hide player' : 'Play'}
+                          className="transition-transform duration-200 ease-out active:scale-[0.98]"
+                          onClick={() => void play(file)}
+                          size="icon-sm"
+                          variant="outline"
+                        >
+                          <Codicon name={playing?.path === file.path ? 'debug-pause' : 'play'} />
+                        </Button>
+                      </Tip>
                     </div>
                   </div>
                   {transcript && (
-                    <div className="rounded-md bg-muted/40 p-3">
+                    <div className="rounded-xl border border-(--ui-stroke-quaternary) bg-(--ui-bg-quaternary) p-3">
+                      <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Transcript</p>
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{transcript}</p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Button
@@ -920,18 +996,31 @@ export function RecorderView() {
             })}
           </ul>
         ) : (
-          <EmptyState
-            className={cn('min-h-28')}
-            description="Recordings save to Documents / Nemesis Recordings as ordinary audio files."
-            title="No recordings yet"
-          />
+          <div className="rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-7">
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">Nothing captured</p>
+            <p className="mt-1 text-xs text-muted-foreground">Recordings save to Documents / Nemesis Recordings as ordinary audio files.</p>
+          </div>
         )}
         {playing && <audio autoPlay className="mt-3 w-full" controls src={playing.src} />}
-        <p className="pt-4 text-[11px] leading-relaxed text-muted-foreground">
-          Recording other people may require their consent where you live — check your school&rsquo;s policy. Nemesis
-          never records on its own and never hides the indicator. Transcription runs on your device (the first run
-          downloads a small model); the text is a draft — review it before you rely on it.
-        </p>
+        <div className="flex items-center gap-1.5 pt-4 text-[0.6875rem] text-muted-foreground">
+          <IconLock size={11} />
+          <span>Local by design ·</span>
+          <Tip
+            className="max-w-sm whitespace-normal text-left leading-relaxed"
+            label={
+              <span>
+                Recording other people may require their consent where you live — check your school&rsquo;s policy.
+                Nemesis never records on its own and never hides the indicator. Transcription runs on your device
+                (the first run downloads a small model); the text is a draft — review it before you rely on it.
+              </span>
+            }
+            side="top"
+          >
+            <button className="underline decoration-current/30 underline-offset-2 hover:text-foreground" type="button">
+              Consent &amp; transcription details
+            </button>
+          </Tip>
+        </div>
       </section>
     </div>
   )
