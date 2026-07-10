@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { BootFailureOverlay } from '@/components/boot-failure-overlay';
 import { DesktopInstallOverlay } from '@/components/desktop-install-overlay';
+import { NemesisAccountGate } from '@/components/nemesis-account-gate';
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay';
 import { DesktopOnboardingOverlay } from '@/components/onboarding';
 import { Pane, PaneMain } from '@/components/pane-shell';
@@ -762,7 +763,7 @@ export function DesktopController() {
     // (incl. a snapshotted cwd) independent of the session, so switching sessions
     // never rebuilds or closes them; toggling the pane never rebuilds the shells.
     const mainOverlays = _jsx(PersistentTerminal, { onAddSelectionToChat: composer.addTerminalSelectionAttachment });
-    const overlays = (_jsxs(_Fragment, { children: [_jsx(RemoteDisplayBanner, {}), !isSecondaryWindow() && _jsx(DesktopInstallOverlay, {}), !isSecondaryWindow() && (_jsx(DesktopOnboardingOverlay, { enabled: gatewayState === 'open', onCompleted: () => {
+    const overlays = (_jsxs(_Fragment, { children: [_jsx(RemoteDisplayBanner, {}), !isSecondaryWindow() && _jsx(DesktopInstallOverlay, {}), !isSecondaryWindow() && _jsx(NemesisAccountGate, {}), !isSecondaryWindow() && (_jsx(DesktopOnboardingOverlay, { enabled: gatewayState === 'open', onCompleted: () => {
                     void refreshHermesConfig();
                     void refreshCurrentModel();
                     void queryClient.invalidateQueries({ queryKey: ['model-options'] });
