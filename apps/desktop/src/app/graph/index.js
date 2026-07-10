@@ -36,28 +36,34 @@ export function GraphView() {
                     id: note.title
                 }));
                 const links = [...index.links.entries()].flatMap(([source, targets]) => targets.map(target => ({ source, target })));
-                const styles = getComputedStyle(document.documentElement);
-                const background = styles.getPropertyValue('--dt-background').trim() || '#0e0e0e';
-                const accent = styles.getPropertyValue('--theme-midground').trim() || '#b3382e';
+                const accent = getComputedStyle(document.documentElement).getPropertyValue('--theme-midground').trim() || '#b3382e';
+                // A graph is a viz surface: keep it dark for node contrast even in light mode.
                 const instance = new ForceGraph3D(host)
-                    .graphData({ links, nodes })
-                    .backgroundColor(background)
-                    .nodeLabel((node) => `<div style="font: 12px sans-serif">${node.id}</div>`)
-                    .nodeColor((node) => (node.degree >= 2 ? accent : '#9a9a9a'))
-                    .nodeVal((node) => 1 + node.degree)
-                    .linkColor(() => '#3f3f3f')
-                    .linkOpacity(0.55)
-                    .onNodeClick((node) => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(node.id)}`));
+                    .backgroundColor('#0e0e0e')
+                    .width(host.clientWidth || host.offsetWidth || 800)
+                    .height(host.clientHeight || host.offsetHeight || 600)
+                    .nodeLabel((node) => `<div style="font: 12px sans-serif; color:#eee">${node.id}</div>`)
+                    .nodeRelSize(6)
+                    .nodeColor((node) => (node.degree >= 2 ? accent : '#c8c8c8'))
+                    .nodeVal((node) => 2 + node.degree * 2)
+                    .nodeOpacity(0.95)
+                    .linkColor(() => '#4a4a4a')
+                    .linkWidth(0.5)
+                    .linkOpacity(0.6)
+                    .onNodeClick((node) => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(node.id)}`))
+                    .graphData({ links, nodes });
+                // Frame the whole graph once the force sim settles (and again as a fallback —
+                // the container can report 0px at construction inside the flex layout).
+                instance.onEngineStop(() => instance.zoomToFit(400, 60));
+                window.setTimeout(() => instance.zoomToFit(600, 60), 1400);
                 const controls = instance.controls();
                 controls.autoRotate = true;
-                controls.autoRotateSpeed = 0.55;
-                const fit = () => {
-                    instance.width(host.clientWidth);
-                    instance.height(host.clientHeight);
-                };
-                observer = new ResizeObserver(fit);
+                controls.autoRotateSpeed = 0.6;
+                observer = new ResizeObserver(() => {
+                    instance.width(host.clientWidth || 800);
+                    instance.height(host.clientHeight || 600);
+                });
                 observer.observe(host);
-                fit();
                 graph = instance;
                 setNoteCount(notes.length);
                 setStatus('ready');
