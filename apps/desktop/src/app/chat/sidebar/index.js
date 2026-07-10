@@ -22,7 +22,7 @@ import { $dismissedAutoProjectIds, $panesFlipped, $pinnedSessionIds, $sidebarAge
 import { $newChatProfile, $profiles, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile';
 import { $activeProjectId, $projects, $projectScope, $projectTree, $projectTreeLoading, $removedSessionIds, $reposScanning, ALL_PROJECTS, enterProject, exitProjectScope, fetchProjectSessions, openProjectCreate, refreshProjects, refreshProjectTree, refreshWorktrees, scanAndRecordRepos } from '@/store/projects';
 import { $cronSessions, $currentCwd, $gatewayState, $messagingPlatformTotals, $messagingSessions, $messagingTruncated, $selectedStoredSessionId, $sessionProfileTotals, $sessions, $sessionsLoading, $sessionsTotal, $workingSessionIds, sessionPinId, setCurrentCwd } from '@/store/session';
-import { ARTIFACTS_ROUTE, MESSAGING_ROUTE, SKILLS_ROUTE } from '../../routes';
+import { ARTIFACTS_ROUTE, MESSAGING_ROUTE, SKILLS_ROUTE, STUDY_ROUTE } from '../../routes';
 import { countLabel } from './chrome';
 import { SidebarCronJobsSection } from './cron-jobs-section';
 import { SidebarLoadMoreRow } from './load-more-row';
@@ -52,7 +52,8 @@ const SIDEBAR_NAV = [
         route: SKILLS_ROUTE
     },
     { id: 'messaging', label: '', icon: props => _jsx(Codicon, { name: "comment", ...props }), route: MESSAGING_ROUTE },
-    { id: 'artifacts', label: '', icon: props => _jsx(Codicon, { name: "files", ...props }), route: ARTIFACTS_ROUTE }
+    { id: 'artifacts', label: '', icon: props => _jsx(Codicon, { name: "files", ...props }), route: ARTIFACTS_ROUTE },
+    { id: 'study', label: 'Study', icon: props => _jsx(Codicon, { name: "mortar-board", ...props }), route: STUDY_ROUTE }
 ];
 // Two modes via the `compact` height variant (styles.css):
 //   tall    → each section is shrink-0, capped, its own scroller; Sessions is flex-1.

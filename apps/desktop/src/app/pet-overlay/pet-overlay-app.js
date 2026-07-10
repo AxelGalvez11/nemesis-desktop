@@ -314,7 +314,7 @@ export function PetOverlayApp() {
                     flexDirection: 'column',
                     position: 'relative',
                     touchAction: 'none'
-                }, children: [_jsx("div", { style: { marginBottom: 4 }, children: _jsx(PetBubble, {}) }), _jsxs("div", { style: { lineHeight: 0, position: 'relative' }, children: [_jsx(PetSprite, { info: info }), unread && (_jsx("button", { "aria-label": "Open in Hermes", onClick: openApp, onPointerDown: e => e.stopPropagation(), onPointerUp: e => e.stopPropagation(), style: {
+                }, children: [_jsx("div", { style: { marginBottom: 4 }, children: _jsx(PetBubble, {}) }), _jsxs("div", { style: { lineHeight: 0, position: 'relative' }, children: [_jsx(PetSprite, { info: info }), unread && (_jsx("button", { "aria-label": "Open in Nemesis", onClick: openApp, onPointerDown: e => e.stopPropagation(), onPointerUp: e => e.stopPropagation(), style: {
                                     alignItems: 'center',
                                     background: 'var(--ui-bg-elevated)',
                                     border: '1px solid var(--ui-stroke-secondary)',
@@ -330,5 +330,5 @@ export function PetOverlayApp() {
                                     right: 0,
                                     top: 0,
                                     width: 24
-                                }, title: "Open in Hermes", type: "button", children: _jsx(Mail, { style: { height: 13, width: 13 } }) }))] })] })] }));
+                                }, title: "Open in Nemesis", type: "button", children: _jsx(Mail, { style: { height: 13, width: 13 } }) }))] })] })] }));
 }
