@@ -10,6 +10,7 @@ import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overla
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { Pane, PaneMain } from '@/components/pane-shell'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
+import { useExportsPreviewWatcher } from '@/hooks/use-exports-preview-watcher'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { isFocusWithin } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
@@ -186,6 +187,9 @@ export function DesktopController() {
   const queryClient = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
+
+  // Deliverables written into Library/Exports auto-open in the preview rail.
+  useExportsPreviewWatcher()
 
   const busyRef = useRef(false)
   const creatingSessionRef = useRef(false)

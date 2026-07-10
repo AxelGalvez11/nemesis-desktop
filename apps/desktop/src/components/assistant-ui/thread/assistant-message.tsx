@@ -77,7 +77,10 @@ export const AssistantMessage: FC<{
   )
 
   const previewTargets = useMemo(() => {
-    if (!completedText || !/(https?:\/\/|file:\/\/)/i.test(completedText)) {
+    // The cheap pre-test must also admit `#preview/<path>` tokens (deliverable
+    // files carry a bare encoded path — no protocol), or extractPreviewTargets
+    // never runs for them and the rail silently stays shut.
+    if (!completedText || !/(https?:\/\/|file:\/\/|#preview[:/])/i.test(completedText)) {
       return []
     }
 
