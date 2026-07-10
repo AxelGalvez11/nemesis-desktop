@@ -8,9 +8,11 @@ import { GlyphSpinner } from '@/components/ui/glyph-spinner';
 import { Tip } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
 import { ChevronDown } from '@/lib/icons';
-import { formatModelStatusLabel } from '@/lib/model-status-label';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
+import { formatModelStatusLabel, reasoningEffortLabel } from '@/lib/model-status-label';
 import { cn } from '@/lib/utils';
 import { $currentFastMode, $currentModel, $currentProvider, $currentReasoningEffort, setModelPickerOpen } from '@/store/session';
+import { StudentModelMenu } from './student-model-menu';
 const PILL = cn('h-(--composer-control-size) max-w-40 shrink-0 gap-1 rounded-md px-2 text-xs font-normal', 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground');
 /**
  * Composer model selector — the relocated status-bar pill. Reuses the live
@@ -24,6 +26,11 @@ export function ModelPill({ compact = false, disabled, model }) {
     const fastMode = useStore($currentFastMode);
     const reasoningEffort = useStore($currentReasoningEffort);
     const [open, setOpen] = useState(false);
+    // Student build: no provider/model names ever — just the answer mode.
+    if (NEMESIS_STUDENT_BUILD) {
+        const modeLabel = fastMode ? 'Fast' : `Thinking${reasoningEffort ? ` · ${reasoningEffortLabel(reasoningEffort)}` : ''}`;
+        return (_jsxs(DropdownMenu, { onOpenChange: setOpen, open: open, children: [_jsx(Tip, { label: "Answer mode", side: "top", children: _jsx(DropdownMenuTrigger, { asChild: true, children: _jsx(Button, { "aria-label": "Answer mode", className: compact ? cn(PILL, 'w-auto') : PILL, disabled: disabled, type: "button", variant: "ghost", children: compact ? _jsx(ChevronDown, { className: "size-3.5 shrink-0 opacity-70" }) : (_jsxs(_Fragment, { children: [_jsx("span", { className: "truncate", children: modeLabel }), _jsx(ChevronDown, { className: "size-2.5 shrink-0 opacity-50" })] })) }) }) }), _jsx(DropdownMenuContent, { align: "end", className: "p-0", side: "top", sideOffset: 8, children: _jsx(StudentModelMenu, {}) })] }));
+    }
     // The model resolves a beat after the gateway/session comes up. Rather than
     // flash a literal "No model", show a quiet loader (inherits the pill text
     // color at half opacity) until a model lands.

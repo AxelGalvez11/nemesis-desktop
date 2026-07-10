@@ -3,7 +3,7 @@ import { useCallback, useMemo } from 'react'
 
 import type { CommandCenterSection } from '@/app/command-center'
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
-import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis'
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
 import { Codicon } from '@/components/ui/codicon'
@@ -429,12 +429,12 @@ export function useStatusbarItems({
   )
 
   const leftStatusbarItems = useMemo(
-    () => [...coreLeftStatusbarItems, ...extraLeftItems],
+    () => [...coreLeftStatusbarItems, ...extraLeftItems].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)),
     [coreLeftStatusbarItems, extraLeftItems]
   )
 
   const statusbarItems = useMemo(
-    () => [...extraRightItems, ...coreRightStatusbarItems],
+    () => [...extraRightItems, ...coreRightStatusbarItems].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)),
     [coreRightStatusbarItems, extraRightItems]
   )
 

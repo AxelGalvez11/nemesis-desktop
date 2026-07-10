@@ -2,7 +2,7 @@ import { jsx as _jsx } from "react/jsx-runtime";
 import { useStore } from '@nanostores/react';
 import { useCallback, useMemo } from 'react';
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store';
-import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis';
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel';
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel';
 import { Codicon } from '@/components/ui/codicon';
@@ -304,7 +304,7 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
         turnStartedAt,
         yoloActive
     ]);
-    const leftStatusbarItems = useMemo(() => [...coreLeftStatusbarItems, ...extraLeftItems], [coreLeftStatusbarItems, extraLeftItems]);
-    const statusbarItems = useMemo(() => [...extraRightItems, ...coreRightStatusbarItems], [coreRightStatusbarItems, extraRightItems]);
+    const leftStatusbarItems = useMemo(() => [...coreLeftStatusbarItems, ...extraLeftItems].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)), [coreLeftStatusbarItems, extraLeftItems]);
+    const statusbarItems = useMemo(() => [...extraRightItems, ...coreRightStatusbarItems].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)), [coreRightStatusbarItems, extraRightItems]);
     return { leftStatusbarItems, statusbarItems };
 }

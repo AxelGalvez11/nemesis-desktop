@@ -8,7 +8,8 @@ import { GlyphSpinner } from '@/components/ui/glyph-spinner'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { ChevronDown } from '@/lib/icons'
-import { formatModelStatusLabel } from '@/lib/model-status-label'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
+import { formatModelStatusLabel, reasoningEffortLabel } from '@/lib/model-status-label'
 import { cn } from '@/lib/utils'
 import {
   $currentFastMode,
@@ -18,6 +19,7 @@ import {
   setModelPickerOpen
 } from '@/store/session'
 
+import { StudentModelMenu } from './student-model-menu'
 import type { ChatBarState } from './types'
 
 const PILL = cn(
@@ -45,6 +47,31 @@ export function ModelPill({
   const fastMode = useStore($currentFastMode)
   const reasoningEffort = useStore($currentReasoningEffort)
   const [open, setOpen] = useState(false)
+
+  // Student build: no provider/model names ever — just the answer mode.
+  if (NEMESIS_STUDENT_BUILD) {
+    const modeLabel = fastMode ? 'Fast' : `Thinking${reasoningEffort ? ` · ${reasoningEffortLabel(reasoningEffort)}` : ''}`
+
+    return (
+      <DropdownMenu onOpenChange={setOpen} open={open}>
+        <Tip label="Answer mode" side="top">
+          <DropdownMenuTrigger asChild>
+            <Button aria-label="Answer mode" className={compact ? cn(PILL, 'w-auto') : PILL} disabled={disabled} type="button" variant="ghost">
+              {compact ? <ChevronDown className="size-3.5 shrink-0 opacity-70" /> : (
+                <>
+                  <span className="truncate">{modeLabel}</span>
+                  <ChevronDown className="size-2.5 shrink-0 opacity-50" />
+                </>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+        </Tip>
+        <DropdownMenuContent align="end" className="p-0" side="top" sideOffset={8}>
+          <StudentModelMenu />
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
 
   // The model resolves a beat after the gateway/session comes up. Rather than
   // flash a literal "No model", show a quiet loader (inherits the pill text

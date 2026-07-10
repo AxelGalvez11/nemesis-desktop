@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HUD_HEADING, HUD_ITEM, HUD_POSITION, HUD_SURFACE, HUD_TEXT } from '@/app/floating-hud';
 import { setTerminalTakeover } from '@/app/right-sidebar/store';
-import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_PALETTE } from '@/nemesis';
+import { NEMESIS_STUDENT_BUILD, studentHidesPaletteId } from '@/nemesis';
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { KbdCombo } from '@/components/ui/kbd';
 import { getHermesConfigRecord, listAllProfileSessions } from '@/hermes';
@@ -308,9 +308,11 @@ export function CommandPalette() {
                         label: t.starmap.title,
                         run: go(STARMAP_ROUTE)
                     }
-                ].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_PALETTE.has(item.id))
+                ].filter(item => !studentHidesPaletteId(item.id))
             },
-            ...branchGroup,
+            // Git branch actions + the whole Command Center group (system/usage/gateway) are
+            // developer surfaces — omit them entirely from the student palette.
+            ...(NEMESIS_STUDENT_BUILD ? [] : branchGroup),
             {
                 heading: cc.commandCenter,
                 items: [
@@ -628,7 +630,18 @@ export function CommandPalette() {
     }), [availableThemes, resolvedMode, setMode, setTheme, t, themeName]);
     const activePage = page ? subPages[page] : null;
     const unrankedGroups = activePage ? activePage.groups : groups;
-    const visibleGroups = useMemo(() => rankGroups(unrankedGroups, search), [unrankedGroups, search]);
+    const visibleGroups = useMemo(() => {
+        const ranked = rankGroups(unrankedGroups, search);
+        if (!NEMESIS_STUDENT_BUILD) {
+            return ranked;
+        }
+        // Student build: strip developer palette entries (command-center, gateway, cron,
+        // agents, profiles, starmap, terminal, capabilities, messaging) and drop any group
+        // left empty as a result.
+        return ranked
+            .map(group => ({ ...group, items: group.items.filter(item => !studentHidesPaletteId(item.id)) }))
+            .filter(group => group.items.length > 0);
+    }, [unrankedGroups, search]);
     const placeholder = activePage ? activePage.placeholder : t.commandCenter.searchPlaceholder;
     const handleSelect = (item) => {
         if (item.to) {

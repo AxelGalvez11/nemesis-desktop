@@ -17,3 +17,26 @@ export const STUDENT_SETTINGS_KEEP = new Set([
     'sessions',
     'about'
 ]);
+/** Status-bar items hidden for students — build/version hashes, gateway health, token/
+ *  context meters, the YOLO toggle, command-center, agents, cron: infrastructure, not study. */
+export const STUDENT_HIDDEN_STATUSBAR = new Set([
+    'version-client',
+    'version-backend',
+    'gateway-health',
+    'context-usage',
+    'yolo',
+    'command-center',
+    'agents',
+    'cron',
+    'terminal'
+]);
+/** ⌘K palette entries hidden for students, beyond STUDENT_HIDDEN_PALETTE — the whole
+ *  command-center / gateway / dev-nav surface. Matched by id prefix OR exact id. */
+export const STUDENT_HIDDEN_PALETTE_PREFIXES = ['cc-', 'nav-cron', 'nav-profiles', 'nav-agents', 'nav-starmap'];
+/** True when this palette item id should be hidden in the student build. */
+export function studentHidesPaletteId(id) {
+    if (!NEMESIS_STUDENT_BUILD || !id) {
+        return false;
+    }
+    return STUDENT_HIDDEN_PALETTE.has(id) || STUDENT_HIDDEN_PALETTE_PREFIXES.some(prefix => id.startsWith(prefix));
+}
