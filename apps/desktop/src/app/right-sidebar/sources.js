@@ -18,33 +18,33 @@ function cleanUrl(raw) {
 function badgeFor(hostname) {
     const host = hostname.replace(/^www\./, '');
     if (host.includes('pubmed.ncbi')) {
-        return '📄 PubMed';
+        return 'PubMed';
     }
     if (host.includes('ncbi.nlm.nih.gov') || host.includes('pmc.ncbi')) {
-        return '📄 NCBI';
+        return 'NCBI';
     }
     if (host.endsWith('fda.gov')) {
-        return '💊 FDA';
+        return 'FDA';
     }
     if (host.includes('clinicaltrials.gov')) {
-        return '🧪 Trial';
+        return 'Trial';
     }
     if (host === 'doi.org') {
-        return '🔗 DOI';
+        return 'DOI';
     }
     if (host.endsWith('who.int')) {
-        return '🌍 WHO';
+        return 'WHO';
     }
     if (host.endsWith('cdc.gov')) {
-        return '🏛️ CDC';
+        return 'CDC';
     }
     if (host.endsWith('nih.gov')) {
-        return '🏥 NIH';
+        return 'NIH';
     }
     if (host.includes('cochrane')) {
-        return '📚 Cochrane';
+        return 'Cochrane';
     }
-    return '🌐 Web';
+    return 'Web';
 }
 // Tool traffic only counts when it hits a known evidence host — the agent consulting
 // PubMed/FDA/ClinicalTrials is a source; a random search-result URL is noise.
@@ -53,9 +53,28 @@ function isEvidenceHost(hostname) {
     const host = hostname.replace(/^www\./, '');
     return EVIDENCE_HOSTS.some(candidate => host === candidate || host.endsWith(`.${candidate}`));
 }
-/** Pull every citation out of the assistant's messages (plus evidence-host URLs from the
- *  agent's tool traffic), deduped, in reading order. Pure. */
-export function extractSources(messages) {
+/** Text-level citations: markdown links, bare URLs, PMIDs, NCT ids, DOIs. */
+function harvestText(text, sink) {
+    // Markdown links first (they carry real titles), then scan the remainder so the
+    // same URL isn't double-counted as a bare match.
+    for (const match of text.matchAll(MD_LINK)) {
+        sink.push(match[2], match[1]);
+    }
+    const stripped = text.replace(MD_LINK, ' ');
+    for (const match of stripped.matchAll(BARE_URL)) {
+        sink.push(match[0]);
+    }
+    for (const match of stripped.matchAll(PMID_RE)) {
+        sink.push(`https://pubmed.ncbi.nlm.nih.gov/${match[1]}/`, `PMID ${match[1]}`);
+    }
+    for (const match of stripped.matchAll(NCT_RE)) {
+        sink.push(`https://clinicaltrials.gov/study/${match[0].toUpperCase()}`, match[0].toUpperCase());
+    }
+    for (const match of stripped.matchAll(DOI_RE)) {
+        sink.push(`https://doi.org/${cleanUrl(match[0])}`, `DOI ${cleanUrl(match[0])}`);
+    }
+}
+function makeSink() {
     const seen = new Set();
     const out = [];
     const push = (rawUrl, title) => {
@@ -88,6 +107,18 @@ export function extractSources(messages) {
             : `${domain}${parsed.pathname.length > 1 ? decodeURIComponent(parsed.pathname).slice(0, 60) : ''}`;
         out.push({ badge: badgeFor(parsed.hostname), domain, title: (title || fallback).trim(), url });
     };
+    return { out, sink: { push } };
+}
+/** Citations named in a single blob of answer text. Pure — feeds the inline pills. */
+export function sourcesFromText(text) {
+    const { out, sink } = makeSink();
+    harvestText(text, sink);
+    return out.slice(0, 24);
+}
+/** Pull every citation out of the assistant's messages (plus evidence-host URLs from the
+ *  agent's tool traffic), deduped, in reading order. Pure. */
+export function extractSources(messages) {
+    const { out, sink } = makeSink();
     for (const message of messages) {
         // Deep-scan every message's raw payload — tool calls and their results ride INSIDE
         // the assistant message in this app — keeping only evidence-host URLs (a PubMed/FDA/
@@ -104,7 +135,7 @@ export function extractSources(messages) {
                 const candidate = cleanUrl(match[0].replace(/\\+$/, ''));
                 try {
                     if (isEvidenceHost(new URL(candidate).hostname)) {
-                        push(candidate);
+                        sink.push(candidate);
                     }
                 }
                 catch {
@@ -122,26 +153,8 @@ export function extractSources(messages) {
         catch {
             continue;
         }
-        if (!text) {
-            continue;
-        }
-        // Markdown links first (they carry real titles), then scan the remainder so the
-        // same URL isn't double-counted as a bare match.
-        for (const match of text.matchAll(MD_LINK)) {
-            push(match[2], match[1]);
-        }
-        const stripped = text.replace(MD_LINK, ' ');
-        for (const match of stripped.matchAll(BARE_URL)) {
-            push(match[0]);
-        }
-        for (const match of stripped.matchAll(PMID_RE)) {
-            push(`https://pubmed.ncbi.nlm.nih.gov/${match[1]}/`, `PMID ${match[1]}`);
-        }
-        for (const match of stripped.matchAll(NCT_RE)) {
-            push(`https://clinicaltrials.gov/study/${match[0].toUpperCase()}`, match[0].toUpperCase());
-        }
-        for (const match of stripped.matchAll(DOI_RE)) {
-            push(`https://doi.org/${cleanUrl(match[0])}`, `DOI ${cleanUrl(match[0])}`);
+        if (text) {
+            harvestText(text, sink);
         }
     }
     return out.slice(0, 100);
@@ -152,5 +165,5 @@ export function SourcesTab() {
     const openExternal = (url) => {
         void window.hermesDesktop?.openExternal?.(url);
     };
-    return (_jsx("div", { className: "flex min-h-0 flex-1 flex-col pt-1", children: sources.length === 0 ? (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 text-center", children: [_jsx("div", { className: "text-[0.7rem] font-semibold uppercase tracking-[0.07em] text-muted-foreground/75", children: "No sources yet" }), _jsx("div", { className: "text-[0.68rem] leading-relaxed text-muted-foreground/65", children: "Ask a research question \u2014 every paper, label, and trial the agent cites lands here." })] })) : (_jsx("div", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: _jsx("div", { className: "flex flex-wrap gap-1.5", children: sources.map(source => (_jsxs("button", { className: "inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-foreground/85 transition-colors hover:border-(--theme-primary) hover:text-foreground", onClick: () => openExternal(source.url), title: `${source.title}\n${source.url}`, type: "button", children: [_jsx("span", { children: source.badge }), _jsx("span", { className: "max-w-[9.5rem] truncate text-muted-foreground", children: source.title })] }, source.url))) }) })) }));
+    return (_jsx("div", { className: "flex min-h-0 flex-1 flex-col pt-1", children: sources.length === 0 ? (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 text-center", children: [_jsx("div", { className: "text-[0.7rem] font-semibold uppercase tracking-[0.07em] text-muted-foreground/75", children: "No sources yet" }), _jsx("div", { className: "text-[0.68rem] leading-relaxed text-muted-foreground/65", children: "Ask a research question \u2014 every paper, label, and trial the agent cites lands here." })] })) : (_jsx("div", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: _jsx("div", { className: "flex flex-wrap gap-1.5", children: sources.map(source => (_jsxs("button", { className: "inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-foreground/85 transition-colors hover:border-(--theme-primary) hover:text-foreground", onClick: () => openExternal(source.url), title: `${source.title}\n${source.url}`, type: "button", children: [_jsx("span", { className: "font-semibold uppercase tracking-wide text-[10px] text-(--theme-primary)", children: source.badge }), _jsx("span", { className: "max-w-[9.5rem] truncate text-muted-foreground", children: source.title })] }, source.url))) }) })) }));
 }

@@ -2,6 +2,7 @@
 // Markdown, a prose-styled CodeMirror editor (middle, de-code-ified via .nemesis-prose-editor
 // CSS), and a Links/Backlinks rail. Non-markdown files (PDF/images inline; slides/docs open
 // externally) preview in place. Autosaves 800ms after typing.
+import { IconFileText, IconFileTypePdf, IconPaperclip, IconPhoto, IconPresentation, IconX } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -26,6 +27,15 @@ import {
 } from './vault'
 
 type Selection = { kind: 'note'; note: VaultNote } | { kind: 'file'; file: VaultFile } | null
+type TabItem = NonNullable<Selection>
+
+function tabKey(tab: TabItem): string {
+  return tab.kind === 'note' ? tab.note.path : tab.file.path
+}
+
+function tabLabel(tab: TabItem): string {
+  return tab.kind === 'note' ? tab.note.title : tab.file.name
+}
 
 interface TreeNode {
   name: string
@@ -77,7 +87,9 @@ function buildTree(contents: VaultContents): TreeNode {
 export function LibraryView() {
   const [contents, setContents] = useState<VaultContents | null>(null)
   const [error, setError] = useState<null | string>(null)
-  const [selection, setSelection] = useState<Selection>(null)
+  // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
+  const [tabs, setTabs] = useState<TabItem[]>([])
+  const [activeTab, setActiveTab] = useState(0)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState<null | 'folder' | 'note'>(null)
   const [draft, setDraft] = useState('')
@@ -108,12 +120,34 @@ export function LibraryView() {
     }
   }, [])
 
+  const openSelection = useCallback((next: TabItem) => {
+    const key = tabKey(next)
+    setTabs(current => {
+      const existing = current.findIndex(tab => tabKey(tab) === key)
+
+      if (existing >= 0) {
+        setActiveTab(existing)
+
+        return current
+      }
+
+      setActiveTab(current.length)
+
+      return [...current, next]
+    })
+  }, [])
+
+  const closeTab = useCallback((index: number) => {
+    setTabs(current => current.filter((_, i) => i !== index))
+    setActiveTab(current => (index < current ? current - 1 : Math.max(0, Math.min(current, tabs.length - 2))))
+  }, [tabs.length])
+
   useEffect(() => {
     void (async () => {
       const loaded = await refresh()
 
-      if (loaded && !selection && loaded.notes[0]) {
-        setSelection({ kind: 'note', note: loaded.notes[0] })
+      if (loaded && tabs.length === 0 && loaded.notes[0]) {
+        openSelection({ kind: 'note', note: loaded.notes[0] })
       }
     })()
 
@@ -137,7 +171,7 @@ export function LibraryView() {
       const note = contents.notes.find(n => n.title === requested)
 
       if (note) {
-        setSelection({ kind: 'note', note })
+        openSelection({ kind: 'note', note })
       }
     }
 
@@ -145,7 +179,25 @@ export function LibraryView() {
       setCreating('note')
       setDraft('')
     }
-  }, [contents, searchParams])
+  }, [contents, openSelection, searchParams])
+
+  // Tabs hold snapshots; always render the freshest note object from `contents`
+  // so switching back to a tab shows the edits made since it was opened.
+  const selection: Selection = useMemo(() => {
+    const tab = tabs[activeTab]
+
+    if (!tab) {
+      return null
+    }
+
+    if (tab.kind === 'note' && contents) {
+      const fresh = contents.notes.find(note => note.path === tab.note.path)
+
+      return { kind: 'note', note: fresh ?? tab.note }
+    }
+
+    return tab
+  }, [activeTab, contents, tabs])
 
   const activeNote = selection?.kind === 'note' ? selection.note : null
 
@@ -182,7 +234,7 @@ export function LibraryView() {
       const existing = loaded.notes.find(n => n.title.toLowerCase() === target.toLowerCase())
 
       if (existing) {
-        setSelection({ kind: 'note', note: existing })
+        openSelection({ kind: 'note', note: existing })
 
         return
       }
@@ -192,10 +244,10 @@ export function LibraryView() {
       const created = after?.notes.find(n => n.title.toLowerCase() === target.toLowerCase())
 
       if (created) {
-        setSelection({ kind: 'note', note: created })
+        openSelection({ kind: 'note', note: created })
       }
     },
-    [contents, refresh]
+    [contents, openSelection, refresh]
   )
 
   const submitCreate = useCallback(async () => {
@@ -220,10 +272,10 @@ export function LibraryView() {
       const note = loaded.notes.find(n => n.title === name && n.folder === targetFolder)
 
       if (note) {
-        setSelection({ kind: 'note', note })
+        openSelection({ kind: 'note', note })
       }
     }
-  }, [creating, draft, refresh, targetFolder])
+  }, [creating, draft, openSelection, refresh, targetFolder])
 
   if (error) {
     return <EmptyState className="h-full" description={`${error} (${VAULT_DIR})`} title="Library unavailable" />
@@ -276,7 +328,7 @@ export function LibraryView() {
             collapsed={collapsed}
             depth={0}
             node={tree}
-            onSelect={setSelection}
+            onSelect={next => next && openSelection(next)}
             onToggle={path =>
               setCollapsed(current => {
                 const next = new Set(current)
@@ -292,6 +344,35 @@ export function LibraryView() {
 
       {/* Editor / preview */}
       <main className="flex min-w-0 flex-1 flex-col">
+        {tabs.length > 0 && (
+          <div className="flex shrink-0 items-end gap-0.5 overflow-x-auto border-b border-border px-2 pt-2">
+            {tabs.map((tab, i) => (
+              <div
+                className={cn(
+                  'group/tab flex max-w-[13rem] shrink-0 cursor-pointer items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1.5 text-xs transition-colors',
+                  i === activeTab
+                    ? 'border-border bg-card text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                )}
+                key={tabKey(tab)}
+                onClick={() => setActiveTab(i)}
+              >
+                <span className="truncate">{tabLabel(tab)}</span>
+                <button
+                  aria-label="Close tab"
+                  className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover/tab:opacity-100"
+                  onClick={event => {
+                    event.stopPropagation()
+                    closeTab(i)
+                  }}
+                  type="button"
+                >
+                  <IconX size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {selection?.kind === 'note' ? (
           <>
             <div className="flex items-center justify-between px-5 pb-1 pt-5">
@@ -321,7 +402,7 @@ export function LibraryView() {
             emptyLabel="Write [[Note title]] to connect ideas."
             onOpen={title => {
               const note = contents.notes.find(n => n.title === title)
-              if (note) setSelection({ kind: 'note', note })
+              if (note) openSelection({ kind: 'note', note })
             }}
             title="Links"
             titles={outgoing}
@@ -330,7 +411,7 @@ export function LibraryView() {
             emptyLabel="Nothing links here yet."
             onOpen={title => {
               const note = contents.notes.find(n => n.title === title)
-              if (note) setSelection({ kind: 'note', note })
+              if (note) openSelection({ kind: 'note', note })
             }}
             title="Backlinks"
             titles={incoming}
@@ -353,7 +434,20 @@ export function LibraryView() {
   )
 }
 
-const FILE_ICON: Record<VaultFile['kind'], string> = { doc: '📄', image: '🖼', other: '📎', pdf: '📕', slides: '📊' }
+function FileGlyph({ kind }: { kind: VaultFile['kind'] }) {
+  const Icon =
+    kind === 'pdf'
+      ? IconFileTypePdf
+      : kind === 'slides'
+        ? IconPresentation
+        : kind === 'image'
+          ? IconPhoto
+          : kind === 'doc'
+            ? IconFileText
+            : IconPaperclip
+
+  return <Icon className="-mt-px mr-1.5 inline shrink-0 opacity-70" size={14} />
+}
 
 function TreeLevel({
   collapsed,
@@ -435,7 +529,8 @@ function TreeLevel({
             style={pad}
             type="button"
           >
-            {FILE_ICON[file.kind]} {file.name}
+            <FileGlyph kind={file.kind} />
+            {file.name}
           </button>
         ))}
     </>
@@ -479,7 +574,7 @@ function FilePreview({ file }: { file: VaultFile }) {
                 ? 'PowerPoint/Keynote files open in their own app — click “Open in default app”.'
                 : 'This file type opens in its own app — click “Open in default app”.'
             }
-            title={`${FILE_ICON[file.kind]} ${file.name}`}
+            title={file.name}
           />
         )}
       </div>

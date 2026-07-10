@@ -1,10 +1,16 @@
 import { readDesktopFileDataUrl } from '@/lib/desktop-fs'
 import { filePathFromMediaPath, isRemoteGateway, mediaExternalUrl } from '@/lib/media'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import type { SessionInfo, SessionMessage } from '@/types/hermes'
 
 export type ArtifactKind = 'image' | 'file' | 'link'
 export type ArtifactFilter = 'all' | ArtifactKind
-export const ARTIFACT_FILTERS: readonly ArtifactFilter[] = ['all', 'image', 'file', 'link']
+// Student build: Artifacts = things the agent MADE (files, images). Web links —
+// including every cited source URL — live in the chat's Sources rail instead, so
+// they don't double-report here as "artifacts".
+export const ARTIFACT_FILTERS: readonly ArtifactFilter[] = NEMESIS_STUDENT_BUILD
+  ? ['all', 'image', 'file']
+  : ['all', 'image', 'file', 'link']
 
 export interface ArtifactRecord {
   id: string
@@ -256,6 +262,11 @@ export function collectArtifactsForSession(session: SessionInfo, messages: Sessi
       const value = normalizeValue(candidate)
 
       if (!value || !looksLikeArtifact(value)) {
+        return
+      }
+
+      // Student build: skip plain web links entirely (see ARTIFACT_FILTERS note).
+      if (NEMESIS_STUDENT_BUILD && artifactKind(value) === 'link' && /^https?:\/\//.test(value)) {
         return
       }
 

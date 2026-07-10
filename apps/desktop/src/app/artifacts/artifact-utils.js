@@ -1,6 +1,12 @@
 import { readDesktopFileDataUrl } from '@/lib/desktop-fs';
 import { filePathFromMediaPath, isRemoteGateway, mediaExternalUrl } from '@/lib/media';
-export const ARTIFACT_FILTERS = ['all', 'image', 'file', 'link'];
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
+// Student build: Artifacts = things the agent MADE (files, images). Web links —
+// including every cited source URL — live in the chat's Sources rail instead, so
+// they don't double-report here as "artifacts".
+export const ARTIFACT_FILTERS = NEMESIS_STUDENT_BUILD
+    ? ['all', 'image', 'file']
+    : ['all', 'image', 'file', 'link'];
 const MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 const URL_RE = /https?:\/\/[^\s<>"')]+/g;
@@ -182,6 +188,10 @@ export function collectArtifactsForSession(session, messages) {
         collectArtifactsFromMessage(message, candidate => {
             const value = normalizeValue(candidate);
             if (!value || !looksLikeArtifact(value)) {
+                return;
+            }
+            // Student build: skip plain web links entirely (see ARTIFACT_FILTERS note).
+            if (NEMESIS_STUDENT_BUILD && artifactKind(value) === 'link' && /^https?:\/\//.test(value)) {
                 return;
             }
             const key = `${session.id}:${value}`;

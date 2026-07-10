@@ -5,6 +5,7 @@
 // ~/Documents/Nemesis Recordings — and, while recording, streams ~8s chunks of the live
 // mix through the local Whisper model so the transcript scrolls in as the lecture happens.
 // On stop, the transcript auto-saves as a Library note (Lectures folder).
+import { IconLock, IconMicrophone } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -697,8 +698,9 @@ export function RecorderView() {
                 </Button>
               </div>
             )}
-            <span className="rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
-              🔒 Nothing joins your call — capture &amp; transcription happen on this device only
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
+              <IconLock size={12} />
+              Nothing joins your call — capture &amp; transcription happen on this device only
             </span>
           </>
         )}
@@ -717,7 +719,7 @@ export function RecorderView() {
                 <li className="flex flex-col gap-2 rounded-md border border-border px-3 py-2" key={file.path}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="text-base">🎙️</span>
+                      <IconMicrophone className="shrink-0 text-muted-foreground" size={16} />
                       <div className="min-w-0">
                         <div className="truncate text-sm">{recordingLabel(file.name)}</div>
                         {status && <div className="text-[11px] text-primary">{status}</div>}

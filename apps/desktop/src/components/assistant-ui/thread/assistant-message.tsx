@@ -15,6 +15,7 @@ import {
   pickPrimaryPreviewTarget
 } from '@/components/assistant-ui/thread/content'
 import { MESSAGE_PARTS_COMPONENTS } from '@/components/assistant-ui/thread/message-parts'
+import { MessageSources } from '@/components/assistant-ui/thread/message-sources'
 import { StreamStallIndicator } from '@/components/assistant-ui/thread/status'
 import { formatMessageTimestamp } from '@/components/assistant-ui/thread/timestamp'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
@@ -31,6 +32,7 @@ import {
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { GitBranchIcon, Loader2Icon, Volume2Icon, VolumeXIcon, XIcon } from '@/lib/icons'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { extractPreviewTargets } from '@/lib/preview-targets'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
 import { cn } from '@/lib/utils'
@@ -111,6 +113,9 @@ export const AssistantMessage: FC<{
             ))}
           </div>
         )}
+        {/* Per-answer citation pills (student build). completedText is '' while the
+            turn streams, so this never renders (or re-renders) mid-stream. */}
+        <MessageSources text={completedText} />
         <MessagePrimitive.Error>
           <ErrorPrimitive.Root
             className="mt-1.5 flex items-start gap-1.5 text-[0.78rem] leading-5 text-[color-mix(in_srgb,var(--dt-destructive)_78%,var(--ui-text-secondary))]"
@@ -172,9 +177,10 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText,
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" onCloseAutoFocus={e => e.preventDefault()} sideOffset={6}>
             <MessageTimestamp />
+            {/* Same fork-the-conversation feature; students get plain words, not git ones. */}
             <DropdownMenuItem onSelect={() => onBranchInNewChat?.(messageId)}>
-              <GitBranchIcon />
-              {copy.branchNewChat}
+              {NEMESIS_STUDENT_BUILD ? <Codicon name="comment-discussion" /> : <GitBranchIcon />}
+              {NEMESIS_STUDENT_BUILD ? 'Continue in a new chat' : copy.branchNewChat}
             </DropdownMenuItem>
             <ReadAloudItem getText={getMessageText} messageId={messageId} />
           </DropdownMenuContent>

@@ -2,7 +2,7 @@
 // note). Interaction model deliberately mirrors what health-science students already have
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
-import { IconLayoutGrid, IconList } from '@tabler/icons-react'
+import { IconLayoutGrid, IconList, IconPlayerPause } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -626,7 +626,9 @@ function CardBrowser({
                   onClick={() => setEditing(card)}
                 >
                   <td className="max-w-xs truncate px-3 py-2">
-                    {card.suspended && <span className="mr-1 text-xs text-muted-foreground">⏸</span>}
+                    {card.suspended && (
+                      <IconPlayerPause className="-mt-px mr-1 inline text-muted-foreground" size={12} />
+                    )}
                     {card.front}
                   </td>
                   <td className="hidden max-w-xs truncate px-3 py-2 text-muted-foreground md:table-cell">{card.back}</td>

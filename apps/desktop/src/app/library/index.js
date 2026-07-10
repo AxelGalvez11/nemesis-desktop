@@ -3,6 +3,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 // Markdown, a prose-styled CodeMirror editor (middle, de-code-ified via .nemesis-prose-editor
 // CSS), and a Links/Backlinks rail. Non-markdown files (PDF/images inline; slides/docs open
 // externally) preview in place. Autosaves 800ms after typing.
+import { IconFileText, IconFileTypePdf, IconPaperclip, IconPhoto, IconPresentation, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,12 @@ import { cn } from '@/lib/utils';
 import { NoteEditor } from './note-editor';
 import { PdfViewer } from './pdf-viewer';
 import { buildIndex, createFolder, extractWikilinks, loadVaultContents, saveNote, SEED_NOTES, VAULT_DIR } from './vault';
+function tabKey(tab) {
+    return tab.kind === 'note' ? tab.note.path : tab.file.path;
+}
+function tabLabel(tab) {
+    return tab.kind === 'note' ? tab.note.title : tab.file.name;
+}
 function buildTree(contents) {
     const root = { files: [], folders: [], name: '', notes: [], path: '' };
     const nodeFor = (folder) => {
@@ -46,7 +53,9 @@ function buildTree(contents) {
 export function LibraryView() {
     const [contents, setContents] = useState(null);
     const [error, setError] = useState(null);
-    const [selection, setSelection] = useState(null);
+    // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
+    const [tabs, setTabs] = useState([]);
+    const [activeTab, setActiveTab] = useState(0);
     const [collapsed, setCollapsed] = useState(new Set());
     const [creating, setCreating] = useState(null);
     const [draft, setDraft] = useState('');
@@ -71,11 +80,27 @@ export function LibraryView() {
             return null;
         }
     }, []);
+    const openSelection = useCallback((next) => {
+        const key = tabKey(next);
+        setTabs(current => {
+            const existing = current.findIndex(tab => tabKey(tab) === key);
+            if (existing >= 0) {
+                setActiveTab(existing);
+                return current;
+            }
+            setActiveTab(current.length);
+            return [...current, next];
+        });
+    }, []);
+    const closeTab = useCallback((index) => {
+        setTabs(current => current.filter((_, i) => i !== index));
+        setActiveTab(current => (index < current ? current - 1 : Math.max(0, Math.min(current, tabs.length - 2))));
+    }, [tabs.length]);
     useEffect(() => {
         void (async () => {
             const loaded = await refresh();
-            if (loaded && !selection && loaded.notes[0]) {
-                setSelection({ kind: 'note', note: loaded.notes[0] });
+            if (loaded && tabs.length === 0 && loaded.notes[0]) {
+                openSelection({ kind: 'note', note: loaded.notes[0] });
             }
         })();
         return () => {
@@ -94,14 +119,27 @@ export function LibraryView() {
         if (requested && contents) {
             const note = contents.notes.find(n => n.title === requested);
             if (note) {
-                setSelection({ kind: 'note', note });
+                openSelection({ kind: 'note', note });
             }
         }
         if (searchParams.get('create') === 'note') {
             setCreating('note');
             setDraft('');
         }
-    }, [contents, searchParams]);
+    }, [contents, openSelection, searchParams]);
+    // Tabs hold snapshots; always render the freshest note object from `contents`
+    // so switching back to a tab shows the edits made since it was opened.
+    const selection = useMemo(() => {
+        const tab = tabs[activeTab];
+        if (!tab) {
+            return null;
+        }
+        if (tab.kind === 'note' && contents) {
+            const fresh = contents.notes.find(note => note.path === tab.note.path);
+            return { kind: 'note', note: fresh ?? tab.note };
+        }
+        return tab;
+    }, [activeTab, contents, tabs]);
     const activeNote = selection?.kind === 'note' ? selection.note : null;
     const scheduleSave = useCallback((note, content) => {
         setContents(current => current
@@ -125,16 +163,16 @@ export function LibraryView() {
         }
         const existing = loaded.notes.find(n => n.title.toLowerCase() === target.toLowerCase());
         if (existing) {
-            setSelection({ kind: 'note', note: existing });
+            openSelection({ kind: 'note', note: existing });
             return;
         }
         await saveNote(target, `# ${target}\n\n`);
         const after = await refresh();
         const created = after?.notes.find(n => n.title.toLowerCase() === target.toLowerCase());
         if (created) {
-            setSelection({ kind: 'note', note: created });
+            openSelection({ kind: 'note', note: created });
         }
-    }, [contents, refresh]);
+    }, [contents, openSelection, refresh]);
     const submitCreate = useCallback(async () => {
         const name = draft.trim();
         if (!name) {
@@ -153,10 +191,10 @@ export function LibraryView() {
         if (mode === 'note' && loaded) {
             const note = loaded.notes.find(n => n.title === name && n.folder === targetFolder);
             if (note) {
-                setSelection({ kind: 'note', note });
+                openSelection({ kind: 'note', note });
             }
         }
-    }, [creating, draft, refresh, targetFolder]);
+    }, [creating, draft, openSelection, refresh, targetFolder]);
     if (error) {
         return _jsx(EmptyState, { className: "h-full", description: `${error} (${VAULT_DIR})`, title: "Library unavailable" });
     }
@@ -173,21 +211,37 @@ export function LibraryView() {
                                         void submitCreate();
                                     if (event.key === 'Escape')
                                         setCreating(null);
-                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2 pb-4", children: _jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onSelect: setSelection, onToggle: path => setCollapsed(current => {
+                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2 pb-4", children: _jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
                                 const next = new Set(current);
                                 next.has(path) ? next.delete(path) : next.add(path);
                                 return next;
-                            }), selection: selection }) })] }), _jsx("main", { className: "flex min-w-0 flex-1 flex-col", children: selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "flex items-center justify-between px-5 pb-1 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: selection.note.title }), _jsx("span", { className: "text-xs text-muted-foreground", children: saving ? 'Saving…' : 'Saved to disk' })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-6 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target) }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx(EmptyState, { className: "flex-1", description: "Pick a note on the left, or create one.", title: "No note open" })) }), activeNote && (_jsxs("aside", { className: "hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border px-4 pb-4 pt-5 lg:flex", children: [_jsx(LinkGroup, { emptyLabel: "Write [[Note title]] to connect ideas.", onOpen: title => {
+                            }), selection: selection }) })] }), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col", children: [tabs.length > 0 && (_jsx("div", { className: "flex shrink-0 items-end gap-0.5 overflow-x-auto border-b border-border px-2 pt-2", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab flex max-w-[13rem] shrink-0 cursor-pointer items-center gap-1 rounded-t-md border border-b-0 px-2.5 py-1.5 text-xs transition-colors', i === activeTab
+                                ? 'border-border bg-card text-foreground'
+                                : 'border-transparent text-muted-foreground hover:text-foreground'), onClick: () => setActiveTab(i), children: [_jsx("span", { className: "truncate", children: tabLabel(tab) }), _jsx("button", { "aria-label": "Close tab", className: "rounded p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover/tab:opacity-100", onClick: event => {
+                                        event.stopPropagation();
+                                        closeTab(i);
+                                    }, type: "button", children: _jsx(IconX, { size: 11 }) })] }, tabKey(tab)))) })), selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "flex items-center justify-between px-5 pb-1 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: selection.note.title }), _jsx("span", { className: "text-xs text-muted-foreground", children: saving ? 'Saving…' : 'Saved to disk' })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-6 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target) }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx(EmptyState, { className: "flex-1", description: "Pick a note on the left, or create one.", title: "No note open" }))] }), activeNote && (_jsxs("aside", { className: "hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border px-4 pb-4 pt-5 lg:flex", children: [_jsx(LinkGroup, { emptyLabel: "Write [[Note title]] to connect ideas.", onOpen: title => {
                             const note = contents.notes.find(n => n.title === title);
                             if (note)
-                                setSelection({ kind: 'note', note });
+                                openSelection({ kind: 'note', note });
                         }, title: "Links", titles: outgoing }), _jsx(LinkGroup, { emptyLabel: "Nothing links here yet.", onOpen: title => {
                             const note = contents.notes.find(n => n.title === title);
                             if (note)
-                                setSelection({ kind: 'note', note });
+                                openSelection({ kind: 'note', note });
                         }, title: "Backlinks", titles: incoming }), unresolved.length > 0 && (_jsxs("div", { children: [_jsx("h3", { className: "pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground", children: "Unresolved" }), _jsx("div", { className: "flex flex-wrap gap-1.5", children: unresolved.map(target => (_jsx("span", { className: "rounded-md border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground", children: target }, target))) })] }))] }))] }));
 }
-const FILE_ICON = { doc: '📄', image: '🖼', other: '📎', pdf: '📕', slides: '📊' };
+function FileGlyph({ kind }) {
+    const Icon = kind === 'pdf'
+        ? IconFileTypePdf
+        : kind === 'slides'
+            ? IconPresentation
+            : kind === 'image'
+                ? IconPhoto
+                : kind === 'doc'
+                    ? IconFileText
+                    : IconPaperclip;
+    return _jsx(Icon, { className: "-mt-px mr-1.5 inline shrink-0 opacity-70", size: 14 });
+}
 function TreeLevel({ collapsed, depth, node, onSelect, onToggle, selection }) {
     const pad = { paddingLeft: `${depth * 12 + 8}px` };
     return (_jsxs(_Fragment, { children: [node.folders
@@ -202,7 +256,7 @@ function TreeLevel({ collapsed, depth, node, onSelect, onToggle, selection }) {
                 .map(note => (_jsx("button", { className: cn('block w-full truncate rounded-md py-1.5 pr-2 text-left text-sm hover:bg-accent', selection?.kind === 'note' && selection.note.path === note.path && 'bg-accent text-accent-foreground'), onClick: () => onSelect({ kind: 'note', note }), style: pad, type: "button", children: note.title }, note.path))), node.files
                 .slice()
                 .sort((a, b) => a.name.localeCompare(b.name))
-                .map(file => (_jsxs("button", { className: cn('block w-full truncate rounded-md py-1.5 pr-2 text-left text-sm text-muted-foreground hover:bg-accent', selection?.kind === 'file' && selection.file.path === file.path && 'bg-accent text-accent-foreground'), onClick: () => onSelect({ file, kind: 'file' }), style: pad, type: "button", children: [FILE_ICON[file.kind], " ", file.name] }, file.path)))] }));
+                .map(file => (_jsxs("button", { className: cn('block w-full truncate rounded-md py-1.5 pr-2 text-left text-sm text-muted-foreground hover:bg-accent', selection?.kind === 'file' && selection.file.path === file.path && 'bg-accent text-accent-foreground'), onClick: () => onSelect({ file, kind: 'file' }), style: pad, type: "button", children: [_jsx(FileGlyph, { kind: file.kind }), file.name] }, file.path)))] }));
 }
 function fileUrl(path) {
     return `file://${encodeURI(path).replace(/#/g, '%23')}`;
@@ -213,7 +267,7 @@ function FilePreview({ file }) {
     const reveal = () => void window.hermesDesktop?.revealPath?.(file.path);
     return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between gap-2 px-5 pb-2 pt-5", children: [_jsx("h2", { className: "truncate text-base font-medium", children: file.name }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: openExternal, size: "sm", variant: "outline", children: "Open in default app" }), _jsx(Button, { onClick: reveal, size: "sm", variant: "outline", children: "Reveal" })] })] }), _jsx("div", { className: "min-h-0 flex-1 px-5 pb-5", children: file.kind === 'pdf' ? (_jsx(PdfViewer, { path: file.path })) : file.kind === 'image' ? (_jsx("div", { className: "grid h-full place-items-center rounded-lg border border-border bg-card p-4", children: _jsx("img", { alt: file.name, className: "max-h-full max-w-full object-contain", src: url }) })) : (_jsx(EmptyState, { className: "h-full", description: file.kind === 'slides'
                         ? 'PowerPoint/Keynote files open in their own app — click “Open in default app”.'
-                        : 'This file type opens in its own app — click “Open in default app”.', title: `${FILE_ICON[file.kind]} ${file.name}` })) })] }));
+                        : 'This file type opens in its own app — click “Open in default app”.', title: file.name })) })] }));
 }
 function LinkGroup({ emptyLabel, onOpen, title, titles }) {
     return (_jsxs("div", { children: [_jsx("h3", { className: "pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground", children: title }), titles.length ? (_jsx("div", { className: "flex flex-wrap gap-1.5", children: titles.map(target => (_jsx("button", { className: "rounded-md border border-border px-2 py-0.5 text-xs hover:bg-accent", onClick: () => onOpen(target), type: "button", children: target }, target))) })) : (_jsx("p", { className: "text-xs text-muted-foreground", children: emptyLabel }))] }));

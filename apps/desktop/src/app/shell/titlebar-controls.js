@@ -7,6 +7,7 @@ import { Tip } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
 import { triggerHaptic } from '@/lib/haptics';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics';
 import { toggleKeybindPanel } from '@/store/keybinds';
 import { $fileBrowserOpen, $panesFlipped, $sidebarOpen, toggleFileBrowserOpen, togglePanesFlipped, toggleSidebarOpen } from '@/store/layout';
@@ -48,6 +49,8 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings })
             }
         },
         {
+            // Layout-flipping is a power-user affordance; students get a stable layout.
+            hidden: NEMESIS_STUDENT_BUILD,
             icon: _jsx(Codicon, { name: "arrow-swap" }),
             id: 'flip-panes',
             label: t.titlebar.swapSidebarSides,

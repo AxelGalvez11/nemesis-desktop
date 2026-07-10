@@ -487,7 +487,7 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
   },
   stt: {
     enabled: 'Enable local or provider-backed speech transcription.',
-    echoTranscripts: 'Post the raw 🎙️ transcript of voice messages back to the chat.',
+    echoTranscripts: 'Post the raw transcript of voice messages back to the chat.',
     elevenlabs: {
       languageCode: 'Optional ISO-639-3 language code. Blank lets ElevenLabs auto-detect.'
     }
