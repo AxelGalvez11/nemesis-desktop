@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils'
 import { setComposerDraft } from '@/store/composer'
 
+import { NoteEditor } from '../library/note-editor'
 import { createFolder, saveNote } from '../library/vault'
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes'
 import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
@@ -129,6 +130,15 @@ export function RecorderView() {
   // Live insights: drugs the lecture just touched (lexicon spotting, fully on-device).
   // Tapping queues them; after Stop, one click asks Nemesis about the whole queue.
   const [insights, setInsights] = useState<{ term: string; at: string; queued: boolean }[]>([])
+  // Hyprnote-style notepad: the student TYPES while it listens; typed notes and the
+  // transcript both land in the saved note (separate sections).
+  const [title, setTitle] = useState('')
+  const titleRef = useRef('')
+  titleRef.current = title
+  const notesRef = useRef('')
+  const onNotesChange = useCallback((value: string) => {
+    notesRef.current = value
+  }, [])
   const [recordings, setRecordings] = useState<RecordingFile[]>([])
   const [playing, setPlaying] = useState<null | { path: string; src: string }>(null)
   const [transcripts, setTranscripts] = useState<Record<string, string>>({})
@@ -245,6 +255,23 @@ export function RecorderView() {
       current.map(insight => (insight.term === term ? { ...insight, queued: !insight.queued } : insight))
     )
   }, [])
+
+  // Granola/Hyprnote's signature move: after the lecture, the agent merges rough notes +
+  // transcript into a clean study note — and since Nemesis has file tools over the vault,
+  // it updates the SAME Library file in place.
+  const enhanceNote = useCallback(() => {
+    if (!lectureNote) {
+      return
+    }
+
+    setComposerDraft(
+      `Open my lecture note "${lectureNote}.md" in ~/Documents/Nemesis Library/${LECTURE_FOLDER}/ and rewrite it into a clean, structured study note. ` +
+        'Merge the "My notes" section with the "Transcript" section: keep my wording where it is good, fix transcription garbles against pharmacology vocabulary, ' +
+        'organize with headings and bullets, and keep the header lines about the recording date and audio file. Update that same file with the result. ' +
+        'At the end add a "Flashcard candidates" section with 5 exam-style Q&A pairs from this lecture. Tell me when the file is updated.'
+    )
+    navigate(NEW_CHAT_ROUTE)
+  }, [lectureNote, navigate])
 
   const askQueued = useCallback(() => {
     const queued = insights.filter(insight => insight.queued).map(insight => insight.term)
@@ -393,6 +420,8 @@ export function RecorderView() {
     setLiveStatus('')
     setLectureNote(null)
     setInsights([])
+    notesRef.current = ''
+    setTitle(lectureNoteTitle(new Date()))
 
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -525,20 +554,22 @@ export function RecorderView() {
       await write(`${RECORDINGS_DIR}/${fileName}`, btoa(base64))
       await refreshList()
 
-      // Let in-flight transcription finish (bounded), then auto-save the lecture note.
+      // Let in-flight transcription finish (bounded), then auto-save the lecture note:
+      // the student's typed notes and the transcript, as separate sections.
       setLiveStatus('Finishing transcript…')
       await drainLive(sampleRateRef.current)
       const transcript = liveSegmentsRef.current.join(' ').replace(/\s+/g, ' ').trim()
+      const typedNotes = notesRef.current.trim()
 
-      if (transcript) {
-        const title = lectureNoteTitle(at)
+      if (transcript || typedNotes) {
+        const noteTitle = titleRef.current.trim() || lectureNoteTitle(at)
         await createFolder(LECTURE_FOLDER)
         await saveNote(
-          title,
-          `# ${title}\n\n*Auto-transcribed on this device while recording — a draft; review before relying on it.*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n${transcript}\n`,
+          noteTitle,
+          `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`,
           LECTURE_FOLDER
         )
-        setLectureNote(title)
+        setLectureNote(noteTitle)
       }
 
       setLiveStatus('')
@@ -653,82 +684,125 @@ export function RecorderView() {
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const seconds = String(elapsed % 60).padStart(2, '0')
 
+  // Recording = a full-page notepad workspace (Hyprnote/Granola pattern: an AI notepad
+  // that listens while you write). Idle = the start card + saved recordings.
+  if (state === 'recording') {
+    return (
+      <div className="flex h-full min-h-0 flex-col px-5 pb-4 pt-4">
+        <div className="flex shrink-0 flex-wrap items-center gap-3 pb-3">
+          <span className="relative flex size-3 shrink-0">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
+            <span className="relative inline-flex size-3 rounded-full bg-primary" />
+          </span>
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-widest text-primary">On air</span>
+          <input
+            aria-label="Lecture title"
+            className="min-w-40 flex-1 border-none bg-transparent text-lg font-semibold outline-none placeholder:text-muted-foreground/50"
+            onChange={event => setTitle(event.target.value)}
+            placeholder="Lecture title"
+            value={title}
+          />
+          <span className="shrink-0 text-sm tabular-nums text-muted-foreground">
+            {minutes}:{seconds}
+          </span>
+          <Button onClick={stop} size="sm" variant="secondary">
+            Stop &amp; save
+          </Button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {/* Notepad — type while it listens */}
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+            <div className="shrink-0 border-b border-border px-4 py-1.5">
+              <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                My notes — type while it listens
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden px-4">
+              <NoteEditor initialValue="" onChange={onNotesChange} onOpenWikilink={() => {}} />
+            </div>
+          </div>
+
+          {/* Sidecar: waveform, live transcript, live insights */}
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+            <canvas className="h-12 w-full shrink-0 rounded-md border border-border bg-card" height={48} ref={canvasRef} width={340} />
+            {liveCaptions ? (
+              <>
+                <div className="flex min-h-24 shrink-0 flex-col rounded-md border border-border bg-card px-3 py-2">
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                      Live transcript
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{liveStatus}</span>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto text-[13px] leading-relaxed" ref={liveScrollRef}>
+                    {liveSegments.length ? (
+                      liveSegments.join(' ')
+                    ) : (
+                      <span className="text-muted-foreground">Listening for speech…</span>
+                    )}
+                  </div>
+                </div>
+                {insights.length > 0 && (
+                  <div className="shrink-0 rounded-md border border-border bg-card px-3 py-2">
+                    <div className="flex items-center justify-between pb-1.5">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-primary">
+                        <IconSparkles size={11} />
+                        Drugs just mentioned
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">tap to queue</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {insights.map(insight => (
+                        <button
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
+                            insight.queued
+                              ? 'border-(--theme-primary) text-foreground'
+                              : 'border-border text-muted-foreground hover:text-foreground'
+                          )}
+                          key={insight.term}
+                          onClick={() => toggleQueued(insight.term)}
+                          type="button"
+                        >
+                          {insight.queued && <IconCheck size={11} />}
+                          {insight.term}
+                          <span className="text-[9px] opacity-60">{insight.at}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+                Live transcript is off — the audio still records and you can transcribe it after.
+              </p>
+            )}
+            <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
+              <IconLock size={12} />
+              On this device only — nothing joins your call
+            </span>
+          </div>
+        </div>
+        {error && <p className="pt-2 text-center text-xs text-destructive">{error}</p>}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       <header className="px-6 pb-2 pt-5">
         <h1 className="text-lg font-semibold">Recorder</h1>
         <p className="text-xs text-muted-foreground">
           Records your mic{withSystemAudio ? ' + this computer’s audio (the lecture/Zoom)' : ' only'} — locally, to
-          your own files. You start it, you see it, you keep it.
+          your own files. You start it, you see it, you keep it. While it records, you get a notepad, a live
+          transcript, and the drugs mentioned — as they happen.
         </p>
       </header>
 
       <section className="mx-6 mt-3 flex flex-col items-center gap-4 rounded-lg border border-border bg-card px-6 py-8">
-        {state === 'recording' ? (
-          <>
-            <div className="flex items-center gap-3">
-              <span className="relative flex size-3">
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
-                <span className="relative inline-flex size-3 rounded-full bg-primary" />
-              </span>
-              <span className="text-xs font-medium uppercase tracking-widest text-primary">On air — visible, on purpose</span>
-            </div>
-            <canvas className="h-16 w-full max-w-xl" height={64} ref={canvasRef} width={640} />
-            <span className="text-2xl font-semibold tabular-nums">
-              {minutes}:{seconds}
-            </span>
-            {liveCaptions && (
-              <div className="w-full max-w-xl rounded-md border border-border bg-muted/30 px-3 py-2 text-left">
-                <div className="flex items-center justify-between pb-1">
-                  <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-                    Live transcript — on this device
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">{liveStatus}</span>
-                </div>
-                <div className="max-h-36 overflow-y-auto text-sm leading-relaxed" ref={liveScrollRef}>
-                  {liveSegments.length ? (
-                    liveSegments.join(' ')
-                  ) : (
-                    <span className="text-muted-foreground">Listening for speech…</span>
-                  )}
-                </div>
-              </div>
-            )}
-            {liveCaptions && insights.length > 0 && (
-              <div className="w-full max-w-xl rounded-md border border-border bg-muted/30 px-3 py-2 text-left">
-                <div className="flex items-center justify-between pb-1.5">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-primary">
-                    <IconSparkles size={11} />
-                    Live insights — drugs just mentioned
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">tap to queue for Nemesis</span>
-                </div>
-                <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
-                  {insights.map(insight => (
-                    <button
-                      className={cn(
-                        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors',
-                        insight.queued
-                          ? 'border-(--theme-primary) text-foreground'
-                          : 'border-border text-muted-foreground hover:text-foreground'
-                      )}
-                      key={insight.term}
-                      onClick={() => toggleQueued(insight.term)}
-                      type="button"
-                    >
-                      {insight.queued && <IconCheck size={11} />}
-                      {insight.term}
-                      <span className="text-[9px] opacity-60">{insight.at}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <Button onClick={stop} size="lg" variant="secondary">
-              Stop &amp; save
-            </Button>
-          </>
-        ) : (
+        {(
           <>
             <Button disabled={state === 'saving'} onClick={() => void start()} size="lg">
               {state === 'saving' ? 'Saving…' : 'Start recording'}
@@ -765,9 +839,12 @@ export function RecorderView() {
                 >
                   Open note
                 </Button>
+                <Button className="h-6 px-2 text-xs" onClick={enhanceNote} size="sm" variant="secondary">
+                  <IconSparkles size={12} />
+                  Enhance with Nemesis
+                </Button>
                 {insights.some(insight => insight.queued) && (
-                  <Button className="h-6 px-2 text-xs" onClick={askQueued} size="sm" variant="secondary">
-                    <IconSparkles size={12} />
+                  <Button className="h-6 px-2 text-xs" onClick={askQueued} size="sm" variant="outline">
                     Ask about {insights.filter(insight => insight.queued).length} queued drug
                     {insights.filter(insight => insight.queued).length === 1 ? '' : 's'}
                   </Button>
