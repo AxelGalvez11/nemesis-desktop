@@ -1,6 +1,7 @@
-// Library — the notes vault page. Plain Obsidian-compatible Markdown on disk, edited with
-// the SAME CodeMirror editor the app already ships (language auto-detected from the .md
-// path), plus a wikilink/backlink rail computed by vault.ts. Autosaves 800ms after typing.
+// Library — the notes vault page. A folder tree (left) over recursive Obsidian-compatible
+// Markdown, a prose-styled CodeMirror editor (middle, de-code-ified via .nemesis-prose-editor
+// CSS), and a Links/Backlinks rail. Non-markdown files (PDF/images inline; slides/docs open
+// externally) preview in place. Autosaves 800ms after typing.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -10,199 +11,442 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-import { buildIndex, extractWikilinks, loadVault, saveNote, SEED_NOTES, VAULT_DIR, type VaultNote } from './vault'
+import {
+  buildIndex,
+  createFolder,
+  extractWikilinks,
+  loadVaultContents,
+  saveNote,
+  SEED_NOTES,
+  VAULT_DIR,
+  type VaultContents,
+  type VaultFile,
+  type VaultNote
+} from './vault'
+
+type Selection = { kind: 'note'; note: VaultNote } | { kind: 'file'; file: VaultFile } | null
+
+interface TreeNode {
+  name: string
+  path: string
+  folders: TreeNode[]
+  notes: VaultNote[]
+  files: VaultFile[]
+}
+
+function buildTree(contents: VaultContents): TreeNode {
+  const root: TreeNode = { files: [], folders: [], name: '', notes: [], path: '' }
+  const nodeFor = (folder: string): TreeNode => {
+    if (!folder) {
+      return root
+    }
+
+    let node = root
+
+    for (const part of folder.split('/')) {
+      const next = node.folders.find(child => child.name === part)
+
+      if (next) {
+        node = next
+      } else {
+        const created: TreeNode = { files: [], folders: [], name: part, notes: [], path: node.path ? `${node.path}/${part}` : part }
+        node.folders.push(created)
+        node = created
+      }
+    }
+
+    return node
+  }
+
+  for (const folder of contents.folders) {
+    nodeFor(folder)
+  }
+
+  for (const note of contents.notes) {
+    nodeFor(note.folder).notes.push(note)
+  }
+
+  for (const file of contents.files) {
+    nodeFor(file.folder).files.push(file)
+  }
+
+  return root
+}
 
 export function LibraryView() {
-  const [notes, setNotes] = useState<VaultNote[] | null>(null)
+  const [contents, setContents] = useState<VaultContents | null>(null)
   const [error, setError] = useState<null | string>(null)
-  const [activeTitle, setActiveTitle] = useState<null | string>(null)
-  const [draftTitle, setDraftTitle] = useState('')
-  const [creating, setCreating] = useState(false)
+  const [selection, setSelection] = useState<Selection>(null)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [creating, setCreating] = useState<null | 'folder' | 'note'>(null)
+  const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
-  const saveTimer = useRef<null | ReturnType<typeof setTimeout>>(null)
   const [searchParams] = useSearchParams()
-
-  // Deep link from the Graph page: /library?note=Title opens that note.
-  useEffect(() => {
-    const requested = searchParams.get('note')
-
-    if (requested && notes?.some(note => note.title === requested)) {
-      setActiveTitle(requested)
-    }
-  }, [notes, searchParams])
+  const saveTimer = useRef<null | ReturnType<typeof setTimeout>>(null)
 
   const refresh = useCallback(async () => {
     try {
-      let loaded = await loadVault()
+      let loaded = await loadVaultContents()
 
-      if (!loaded.length) {
-        // First run: seed the vault so Library + Graph demonstrate themselves.
+      if (!loaded.notes.length && !loaded.files.length) {
         for (const seed of SEED_NOTES) {
           await saveNote(seed.title, seed.content)
         }
 
-        loaded = await loadVault()
+        loaded = await loadVaultContents()
       }
 
-      setNotes(loaded)
+      setContents(loaded)
       setError(null)
-      setActiveTitle(current => current ?? loaded[0]?.title ?? null)
+
+      return loaded
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not open the Library folder.')
+
+      return null
     }
   }, [])
 
   useEffect(() => {
-    void refresh()
+    void (async () => {
+      const loaded = await refresh()
+
+      if (loaded && !selection && loaded.notes[0]) {
+        setSelection({ kind: 'note', note: loaded.notes[0] })
+      }
+    })()
 
     return () => {
       if (saveTimer.current) {
         clearTimeout(saveTimer.current)
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh])
 
-  const index = useMemo(() => (notes ? buildIndex(notes) : null), [notes])
-  const active = notes?.find(note => note.title === activeTitle) ?? null
+  const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents])
+  const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents])
 
-  const scheduleSave = useCallback(
-    (title: string, content: string) => {
-      // Keep the in-memory copy current so links/backlinks track while typing.
-      setNotes(current =>
-        current ? current.map(note => (note.title === title ? { ...note, content } : note)) : current
-      )
+  // Deep link from the Graph page: /library?note=Title
+  useEffect(() => {
+    const requested = searchParams.get('note')
 
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current)
+    if (requested && contents) {
+      const note = contents.notes.find(n => n.title === requested)
+
+      if (note) {
+        setSelection({ kind: 'note', note })
       }
+    }
+  }, [contents, searchParams])
 
-      saveTimer.current = setTimeout(() => {
-        setSaving(true)
-        void saveNote(title, content).finally(() => setSaving(false))
-      }, 800)
-    },
-    []
-  )
+  const activeNote = selection?.kind === 'note' ? selection.note : null
 
-  const createNote = useCallback(async () => {
-    const title = draftTitle.trim()
+  const scheduleSave = useCallback((note: VaultNote, content: string) => {
+    setContents(current =>
+      current
+        ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) }
+        : current
+    )
 
-    if (!title) {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+    }
+
+    saveTimer.current = setTimeout(() => {
+      setSaving(true)
+      void saveNote(note.title, content, note.folder).finally(() => setSaving(false))
+    }, 800)
+  }, [])
+
+  const targetFolder =
+    selection?.kind === 'note' ? selection.note.folder : selection?.kind === 'file' ? selection.file.folder : ''
+
+  const submitCreate = useCallback(async () => {
+    const name = draft.trim()
+
+    if (!name) {
       return
     }
 
-    await saveNote(title, `# ${title}\n\n`)
-    setDraftTitle('')
-    setCreating(false)
-    await refresh()
-    setActiveTitle(title)
-  }, [draftTitle, refresh])
+    if (creating === 'folder') {
+      await createFolder(targetFolder ? `${targetFolder}/${name}` : name)
+    } else {
+      await saveNote(name, `# ${name}\n\n`, targetFolder)
+    }
+
+    setDraft('')
+    const mode = creating
+    setCreating(null)
+    const loaded = await refresh()
+
+    if (mode === 'note' && loaded) {
+      const note = loaded.notes.find(n => n.title === name && n.folder === targetFolder)
+
+      if (note) {
+        setSelection({ kind: 'note', note })
+      }
+    }
+  }, [creating, draft, refresh, targetFolder])
 
   if (error) {
     return <EmptyState className="h-full" description={`${error} (${VAULT_DIR})`} title="Library unavailable" />
   }
 
-  if (!notes) {
+  if (!contents || !tree) {
     return <EmptyState className="h-full" description="Opening your vault…" title="Library" />
   }
 
-  const outgoing = active && index ? (index.links.get(active.title) ?? []) : []
-  const incoming = active && index ? (index.backlinks.get(active.title) ?? []) : []
-  const unresolved = active
-    ? extractWikilinks(active.content).filter(
-        target => !notes.some(note => note.title.toLowerCase() === target.toLowerCase())
+  const outgoing = activeNote && index ? (index.links.get(activeNote.title) ?? []) : []
+  const incoming = activeNote && index ? (index.backlinks.get(activeNote.title) ?? []) : []
+  const unresolved = activeNote
+    ? extractWikilinks(activeNote.content).filter(
+        target => !contents.notes.some(note => note.title.toLowerCase() === target.toLowerCase())
       )
     : []
 
   return (
     <div className="flex h-full min-h-0">
-      {/* Note list */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-border">
+      {/* Folder tree */}
+      <aside className="flex w-64 shrink-0 flex-col border-r border-border">
         <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-5">
           <h1 className="text-lg font-semibold">Library</h1>
-          <Button onClick={() => setCreating(open => !open)} size="sm" variant="outline">
-            New
-          </Button>
+          <div className="flex gap-1">
+            <Button className="h-7 px-2 text-xs" onClick={() => { setCreating('note'); setDraft('') }} size="sm" variant="outline">
+              + Note
+            </Button>
+            <Button className="h-7 px-2 text-xs" onClick={() => { setCreating('folder'); setDraft('') }} size="sm" variant="outline">
+              + Folder
+            </Button>
+          </div>
         </div>
-        <p className="px-4 pb-2 text-xs text-muted-foreground">
-          {notes.length} notes · your own Markdown files
-        </p>
         {creating && (
-          <div className="flex gap-1 px-3 pb-2">
+          <div className="px-3 pb-2">
             <Input
               autoFocus
-              onChange={event => setDraftTitle(event.target.value)}
+              onChange={event => setDraft(event.target.value)}
               onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  void createNote()
-                }
+                if (event.key === 'Enter') void submitCreate()
+                if (event.key === 'Escape') setCreating(null)
               }}
-              placeholder="Note title"
-              value={draftTitle}
+              placeholder={creating === 'folder' ? 'Folder name' : 'Note title'}
+              value={draft}
             />
+            {targetFolder && <p className="px-1 pt-1 text-[10px] text-muted-foreground">in {targetFolder}</p>}
           </div>
         )}
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-          {notes.map(note => (
-            <button
-              className={cn(
-                'block w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent',
-                note.title === activeTitle && 'bg-accent text-accent-foreground'
-              )}
-              key={note.path}
-              onClick={() => setActiveTitle(note.title)}
-              type="button"
-            >
-              {note.title}
-            </button>
-          ))}
+          <TreeLevel
+            collapsed={collapsed}
+            depth={0}
+            node={tree}
+            onSelect={setSelection}
+            onToggle={path =>
+              setCollapsed(current => {
+                const next = new Set(current)
+                next.has(path) ? next.delete(path) : next.add(path)
+
+                return next
+              })
+            }
+            selection={selection}
+          />
         </nav>
       </aside>
 
-      {/* Editor */}
+      {/* Editor / preview */}
       <main className="flex min-w-0 flex-1 flex-col">
-        {active ? (
+        {selection?.kind === 'note' ? (
           <>
             <div className="flex items-center justify-between px-5 pb-1 pt-5">
-              <h2 className="truncate text-base font-medium">{active.title}</h2>
+              <h2 className="truncate text-base font-medium">{selection.note.title}</h2>
               <span className="text-xs text-muted-foreground">{saving ? 'Saving…' : 'Saved to disk'}</span>
             </div>
-            <div className="min-h-0 flex-1 px-3 pb-3">
+            <div className="nemesis-prose-editor min-h-0 flex-1 px-6 pb-3">
               <CodeEditor
-                filePath={active.path}
-                initialValue={active.content}
-                key={active.path}
-                onChange={value => scheduleSave(active.title, value)}
+                filePath={selection.note.path}
+                initialValue={selection.note.content}
+                key={selection.note.path}
+                onChange={value => scheduleSave(selection.note, value)}
               />
             </div>
           </>
+        ) : selection?.kind === 'file' ? (
+          <FilePreview file={selection.file} />
         ) : (
           <EmptyState className="flex-1" description="Pick a note on the left, or create one." title="No note open" />
         )}
       </main>
 
-      {/* Links rail */}
-      <aside className="hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border px-4 pb-4 pt-5 lg:flex">
-        <LinkGroup
-          emptyLabel="No links yet — write [[Note title]] to connect ideas."
-          onOpen={setActiveTitle}
-          title="Links"
-          titles={outgoing}
-        />
-        <LinkGroup emptyLabel="Nothing links here yet." onOpen={setActiveTitle} title="Backlinks" titles={incoming} />
-        {unresolved.length > 0 && (
-          <div>
-            <h3 className="pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Unresolved</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {unresolved.map(target => (
-                <span className="rounded-md border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground" key={target}>
-                  {target}
-                </span>
-              ))}
+      {/* Links rail (notes only) */}
+      {activeNote && (
+        <aside className="hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-l border-border px-4 pb-4 pt-5 lg:flex">
+          <LinkGroup
+            emptyLabel="Write [[Note title]] to connect ideas."
+            onOpen={title => {
+              const note = contents.notes.find(n => n.title === title)
+              if (note) setSelection({ kind: 'note', note })
+            }}
+            title="Links"
+            titles={outgoing}
+          />
+          <LinkGroup
+            emptyLabel="Nothing links here yet."
+            onOpen={title => {
+              const note = contents.notes.find(n => n.title === title)
+              if (note) setSelection({ kind: 'note', note })
+            }}
+            title="Backlinks"
+            titles={incoming}
+          />
+          {unresolved.length > 0 && (
+            <div>
+              <h3 className="pb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Unresolved</h3>
+              <div className="flex flex-wrap gap-1.5">
+                {unresolved.map(target => (
+                  <span className="rounded-md border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground" key={target}>
+                    {target}
+                  </span>
+                ))}
+              </div>
             </div>
+          )}
+        </aside>
+      )}
+    </div>
+  )
+}
+
+const FILE_ICON: Record<VaultFile['kind'], string> = { doc: '📄', image: '🖼', other: '📎', pdf: '📕', slides: '📊' }
+
+function TreeLevel({
+  collapsed,
+  depth,
+  node,
+  onSelect,
+  onToggle,
+  selection
+}: {
+  collapsed: Set<string>
+  depth: number
+  node: TreeNode
+  onSelect: (selection: Selection) => void
+  onToggle: (path: string) => void
+  selection: Selection
+}) {
+  const pad = { paddingLeft: `${depth * 12 + 8}px` }
+
+  return (
+    <>
+      {node.folders
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(folder => {
+          const isCollapsed = collapsed.has(folder.path)
+
+          return (
+            <div key={folder.path}>
+              <button
+                className="flex w-full items-center gap-1 rounded-md py-1 pr-2 text-left text-sm text-foreground hover:bg-accent"
+                onClick={() => onToggle(folder.path)}
+                style={pad}
+                type="button"
+              >
+                <span className={cn('inline-block transition-transform', !isCollapsed && 'rotate-90')}>▸</span>
+                <span className="truncate">{folder.name}</span>
+              </button>
+              {!isCollapsed && (
+                <TreeLevel
+                  collapsed={collapsed}
+                  depth={depth + 1}
+                  node={folder}
+                  onSelect={onSelect}
+                  onToggle={onToggle}
+                  selection={selection}
+                />
+              )}
+            </div>
+          )
+        })}
+      {node.notes
+        .slice()
+        .sort((a, b) => a.title.localeCompare(b.title))
+        .map(note => (
+          <button
+            className={cn(
+              'block w-full truncate rounded-md py-1.5 pr-2 text-left text-sm hover:bg-accent',
+              selection?.kind === 'note' && selection.note.path === note.path && 'bg-accent text-accent-foreground'
+            )}
+            key={note.path}
+            onClick={() => onSelect({ kind: 'note', note })}
+            style={pad}
+            type="button"
+          >
+            {note.title}
+          </button>
+        ))}
+      {node.files
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(file => (
+          <button
+            className={cn(
+              'block w-full truncate rounded-md py-1.5 pr-2 text-left text-sm text-muted-foreground hover:bg-accent',
+              selection?.kind === 'file' && selection.file.path === file.path && 'bg-accent text-accent-foreground'
+            )}
+            key={file.path}
+            onClick={() => onSelect({ file, kind: 'file' })}
+            style={pad}
+            type="button"
+          >
+            {FILE_ICON[file.kind]} {file.name}
+          </button>
+        ))}
+    </>
+  )
+}
+
+function fileUrl(path: string): string {
+  return `file://${encodeURI(path).replace(/#/g, '%23')}`
+}
+
+function FilePreview({ file }: { file: VaultFile }) {
+  const url = fileUrl(file.path)
+  const openExternal = () => void window.hermesDesktop?.openExternal?.(url)
+  const reveal = () => void window.hermesDesktop?.revealPath?.(file.path)
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-2 px-5 pb-2 pt-5">
+        <h2 className="truncate text-base font-medium">{file.name}</h2>
+        <div className="flex gap-2">
+          <Button onClick={openExternal} size="sm" variant="outline">
+            Open in default app
+          </Button>
+          <Button onClick={reveal} size="sm" variant="outline">
+            Reveal
+          </Button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 px-5 pb-5">
+        {file.kind === 'pdf' ? (
+          <iframe className="h-full w-full rounded-lg border border-border bg-white" src={url} title={file.name} />
+        ) : file.kind === 'image' ? (
+          <div className="grid h-full place-items-center rounded-lg border border-border bg-card p-4">
+            <img alt={file.name} className="max-h-full max-w-full object-contain" src={url} />
           </div>
+        ) : (
+          <EmptyState
+            className="h-full"
+            description={
+              file.kind === 'slides'
+                ? 'PowerPoint/Keynote files open in their own app — click “Open in default app”.'
+                : 'This file type opens in its own app — click “Open in default app”.'
+            }
+            title={`${FILE_ICON[file.kind]} ${file.name}`}
+          />
         )}
-      </aside>
+      </div>
     </div>
   )
 }

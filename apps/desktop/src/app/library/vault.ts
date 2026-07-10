@@ -11,6 +11,35 @@ export interface VaultNote {
   title: string
   path: string
   content: string
+  /** Folder relative to the vault root ('' = root). */
+  folder: string
+}
+
+export type VaultFileKind = 'pdf' | 'slides' | 'doc' | 'image' | 'other'
+
+export interface VaultFile {
+  name: string
+  path: string
+  folder: string
+  kind: VaultFileKind
+}
+
+export interface VaultContents {
+  notes: VaultNote[]
+  files: VaultFile[]
+  /** All folder paths present (relative to root), for the tree. */
+  folders: string[]
+}
+
+function fileKind(name: string): null | VaultFileKind {
+  const ext = name.toLowerCase().split('.').pop() ?? ''
+
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'pptx' || ext === 'ppt' || ext === 'key') return 'slides'
+  if (ext === 'docx' || ext === 'doc' || ext === 'pages') return 'doc'
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) return 'image'
+
+  return null
 }
 
 export interface VaultIndex {
@@ -73,31 +102,77 @@ function bridge() {
   }
 }
 
-export async function loadVault(): Promise<VaultNote[]> {
-  const api = bridge()
-  const dir = await api.readDir(VAULT_DIR)
+const MAX_DEPTH = 5
+
+async function walk(
+  api: ReturnType<typeof bridge>,
+  dirPath: string,
+  rel: string,
+  depth: number,
+  out: VaultContents
+): Promise<void> {
+  if (depth > MAX_DEPTH) {
+    return
+  }
+
+  const dir = await api.readDir(dirPath)
 
   if (dir.error) {
-    throw new Error(dir.error)
+    return
   }
 
-  const files = dir.entries.filter(entry => !entry.isDirectory && entry.name.toLowerCase().endsWith('.md'))
-  const notes: VaultNote[] = []
+  for (const entry of dir.entries) {
+    const folderRel = rel ? `${rel}/${entry.name}` : entry.name
 
-  for (const file of files) {
-    const read = await api.readFileText(file.path)
-    notes.push({ content: read.text ?? '', path: file.path, title: file.name.replace(/\.md$/i, '') })
+    if (entry.isDirectory) {
+      out.folders.push(folderRel)
+      await walk(api, entry.path, folderRel, depth + 1, out)
+    } else if (entry.name.toLowerCase().endsWith('.md')) {
+      const read = await api.readFileText(entry.path)
+      out.notes.push({ content: read.text ?? '', folder: rel, path: entry.path, title: entry.name.replace(/\.md$/i, '') })
+    } else {
+      const kind = fileKind(entry.name)
+
+      if (kind) {
+        out.files.push({ folder: rel, kind, name: entry.name, path: entry.path })
+      }
+    }
   }
-
-  return notes.sort((a, b) => a.title.localeCompare(b.title))
 }
 
-export async function saveNote(title: string, content: string): Promise<string> {
+/** Recursively load notes, previewable files, and folders from the vault. */
+export async function loadVaultContents(): Promise<VaultContents> {
+  const api = bridge()
+  const out: VaultContents = { files: [], folders: [], notes: [] }
+  await walk(api, VAULT_DIR, '', 0, out)
+  out.notes.sort((a, b) => a.title.localeCompare(b.title))
+
+  return out
+}
+
+/** Notes-only (recursive) — the Graph page and backlink index consume this. */
+export async function loadVault(): Promise<VaultNote[]> {
+  return (await loadVaultContents()).notes
+}
+
+export async function saveNote(title: string, content: string, folder = ''): Promise<string> {
   const api = bridge()
   const safe = title.replace(/[/\\:]/g, '-').trim() || 'Untitled'
-  const result = await api.writeTextFile(`${VAULT_DIR}/${safe}.md`, content)
+  const prefix = folder ? `${VAULT_DIR}/${folder}` : VAULT_DIR
+  const result = await api.writeTextFile(`${prefix}/${safe}.md`, content)
 
   return result.path
+}
+
+/** Create a folder in the vault (via the mkdir IPC). Returns silently if unsupported. */
+export async function createFolder(folder: string): Promise<void> {
+  const safe = folder.replace(/[\\:]/g, '-').replace(/^\/+|\/+$/g, '').trim()
+
+  if (!safe) {
+    return
+  }
+
+  await window.hermesDesktop?.makeDir?.(`${VAULT_DIR}/${safe}`)
 }
 
 /** First-run seed: linked pharm notes so the Library (and Graph) teach themselves. */

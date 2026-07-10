@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   renamePath: (targetPath, newName) => ipcRenderer.invoke('hermes:fs:rename', targetPath, newName),
   writeTextFile: (filePath, content) => ipcRenderer.invoke('hermes:fs:writeText', filePath, content),
   writeBinaryFile: (filePath, base64) => ipcRenderer.invoke('hermes:fs:writeBinary', filePath, base64),
+  makeDir: dirPath => ipcRenderer.invoke('hermes:fs:mkdir', dirPath),
   trashPath: targetPath => ipcRenderer.invoke('hermes:fs:trash', targetPath),
   git: {
     worktreeList: repoPath => ipcRenderer.invoke('hermes:git:worktreeList', repoPath),

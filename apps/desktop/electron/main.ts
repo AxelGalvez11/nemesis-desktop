@@ -7975,6 +7975,21 @@ ipcMain.handle('hermes:fs:writeBinary', async (_event, filePath, base64) => {
   return { path: resolved }
 })
 
+// Nemesis Library: create a folder inside the vault (hardened path). Parent must
+// resolve inside the same fenced roots as writeText.
+ipcMain.handle('hermes:fs:mkdir', async (_event, dirPath) => {
+  const raw = String(dirPath || '').trim()
+
+  if (!raw) {
+    throw new Error('Invalid path')
+  }
+
+  const resolved = resolveRequestedPathForIpc(expandUserPath(raw), { purpose: 'Create folder' })
+  await fs.promises.mkdir(resolved, { recursive: true })
+
+  return { path: resolved }
+})
+
 ipcMain.handle('hermes:fs:writeText', async (_event, filePath, content) => {
   const raw = String(filePath || '').trim()
 

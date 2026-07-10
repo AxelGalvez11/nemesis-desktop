@@ -1827,3 +1827,29 @@ text-* variant utilities. */ .btn-arc {
     opacity: 0.4;
   }
 }
+
+/* Nemesis Library: make the CodeMirror note editor read like a note app, not a code
+   editor — proportional font, comfortable line-height, centered prose column, and no
+   line-number gutter. CSS-only (stable structural CM classes), so the shared CodeEditor
+   component stays unforked/upstream-syncable. */
+.nemesis-prose-editor .cm-gutters {
+  display: none !important;
+}
+.nemesis-prose-editor .cm-content {
+  font-family: var(--dt-font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-size: 1.05rem;
+  line-height: 1.75;
+  max-width: 44rem;
+  margin-inline: auto;
+  padding-block: 1.25rem;
+}
+.nemesis-prose-editor .cm-line {
+  padding-inline: 0;
+}
+.nemesis-prose-editor .cm-activeLine,
+.nemesis-prose-editor .cm-activeLineGutter {
+  background: transparent !important;
+}
+.nemesis-prose-editor .cm-editor.cm-focused {
+  outline: none !important;
+}

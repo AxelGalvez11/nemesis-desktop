@@ -29,7 +29,10 @@ function chatWindowWebPreferences(preloadPath: string) {
     sandbox: true,
     nodeIntegration: false,
     devTools: true,
-    backgroundThrottling: false
+    backgroundThrottling: false,
+    // Enables Chromium's built-in PDF viewer so the Library can show PDFs inline
+    // via an <iframe src="file://…pdf">. Off by default in Electron.
+    plugins: true
   }
 }
 
