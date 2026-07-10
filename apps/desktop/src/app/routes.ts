@@ -7,6 +7,7 @@ export const MESSAGING_ROUTE = '/messaging'
 export const ARTIFACTS_ROUTE = '/artifacts'
 export const STUDY_ROUTE = '/study'
 export const LIBRARY_ROUTE = '/library'
+export const GRAPH_ROUTE = '/graph'
 export const CRON_ROUTE = '/cron'
 export const PROFILES_ROUTE = '/profiles'
 export const AGENTS_ROUTE = '/agents'
@@ -18,6 +19,7 @@ export type AppView =
   | 'chat'
   | 'command-center'
   | 'cron'
+  | 'graph'
   | 'library'
   | 'messaging'
   | 'profiles'
@@ -31,6 +33,7 @@ export type AppRouteId =
   | 'artifacts'
   | 'command-center'
   | 'cron'
+  | 'graph'
   | 'library'
   | 'messaging'
   | 'new'
@@ -55,6 +58,7 @@ export const APP_ROUTES = [
   { id: 'artifacts', path: ARTIFACTS_ROUTE, view: 'artifacts' },
   { id: 'study', path: STUDY_ROUTE, view: 'study' },
   { id: 'library', path: LIBRARY_ROUTE, view: 'library' },
+  { id: 'graph', path: GRAPH_ROUTE, view: 'graph' },
   { id: 'cron', path: CRON_ROUTE, view: 'cron' },
   { id: 'profiles', path: PROFILES_ROUTE, view: 'profiles' },
   { id: 'agents', path: AGENTS_ROUTE, view: 'agents' },

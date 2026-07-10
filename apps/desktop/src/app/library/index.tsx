@@ -2,6 +2,7 @@
 // the SAME CodeMirror editor the app already ships (language auto-detected from the .md
 // path), plus a wikilink/backlink rail computed by vault.ts. Autosaves 800ms after typing.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { CodeEditor } from '@/components/chat/code-editor'
 import { Button } from '@/components/ui/button'
@@ -19,6 +20,16 @@ export function LibraryView() {
   const [creating, setCreating] = useState(false)
   const [saving, setSaving] = useState(false)
   const saveTimer = useRef<null | ReturnType<typeof setTimeout>>(null)
+  const [searchParams] = useSearchParams()
+
+  // Deep link from the Graph page: /library?note=Title opens that note.
+  useEffect(() => {
+    const requested = searchParams.get('note')
+
+    if (requested && notes?.some(note => note.title === requested)) {
+      setActiveTitle(requested)
+    }
+  }, [notes, searchParams])
 
   const refresh = useCallback(async () => {
     try {

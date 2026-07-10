@@ -138,6 +138,7 @@ const SettingsView = lazy(async () => ({ default: (await import('./settings')).S
 const SkillsView = lazy(async () => ({ default: (await import('./skills')).SkillsView }))
 const StudyView = lazy(async () => ({ default: (await import('./study')).StudyView }))
 const LibraryView = lazy(async () => ({ default: (await import('./library')).LibraryView }))
+const GraphView = lazy(async () => ({ default: (await import('./graph')).GraphView }))
 
 // Latest cron-job sessions surfaced in the collapsed "Cron jobs" section. The
 // Cron sessions are written by a background scheduler tick (the desktop
@@ -1354,6 +1355,14 @@ export function DesktopController() {
               </Suspense>
             }
             path="library"
+          />
+          <Route
+            element={
+              <Suspense fallback={null}>
+                <GraphView />
+              </Suspense>
+            }
+            path="graph"
           />
           <Route element={null} path="cron" />
           <Route element={null} path="profiles" />
