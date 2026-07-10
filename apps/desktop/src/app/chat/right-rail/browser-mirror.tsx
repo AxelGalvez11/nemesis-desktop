@@ -57,8 +57,10 @@ export function BrowserMirror() {
 
   const imgRef = useRef<HTMLImageElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
+  const surfaceRef = useRef<HTMLDivElement | null>(null)
   // Page CSS size of the last frame — the input coordinate space.
   const frameSizeRef = useRef({ height: 0, width: 0 })
+  const lastViewportRef = useRef({ height: 0, width: 0 })
   const activeIdRef = useRef('')
   activeIdRef.current = activeId
 
@@ -68,16 +70,50 @@ export function BrowserMirror() {
       .catch(() => undefined)
   }, [])
 
-  const attach = useCallback(async (targetId: string) => {
-    setActiveId(targetId)
+  // Match the PAGE's viewport to the mirror surface so sites lay out at the
+  // panel's exact shape and frames fill it edge-to-edge (no letterboxing).
+  const syncViewport = useCallback(() => {
+    const box = surfaceRef.current?.getBoundingClientRect()
 
-    if (imgRef.current) {
-      imgRef.current.removeAttribute('src')
+    if (!box || box.width < 80 || box.height < 80) {
+      return
     }
 
-    const ok = await api()?.attach(targetId)
-    setStatus(ok ? 'live' : 'offline')
-  }, [])
+    const width = Math.round(box.width)
+    const height = Math.round(box.height)
+    const last = lastViewportRef.current
+
+    if (Math.abs(width - last.width) < 4 && Math.abs(height - last.height) < 4) {
+      return
+    }
+
+    lastViewportRef.current = { height, width }
+    exec({
+      method: 'Emulation.setDeviceMetricsOverride',
+      params: { deviceScaleFactor: 1, height, mobile: false, width }
+    })
+  }, [exec])
+
+  const attach = useCallback(
+    async (targetId: string) => {
+      setActiveId(targetId)
+
+      if (imgRef.current) {
+        imgRef.current.removeAttribute('src')
+      }
+
+      const ok = await api()?.attach(targetId)
+      setStatus(ok ? 'live' : 'offline')
+
+      if (ok) {
+        // Fresh session on a (possibly) new target — re-assert the panel-shaped
+        // viewport before the first frames arrive.
+        lastViewportRef.current = { height: 0, width: 0 }
+        syncViewport()
+      }
+    },
+    [syncViewport]
+  )
 
   const refreshTabs = useCallback(async (): Promise<BrowserTab[]> => {
     const result = await api()?.list()
@@ -158,12 +194,30 @@ export function BrowserMirror() {
       }
     })
 
+    // Keep the page viewport glued to the panel shape while the user resizes.
+    let resizeTimer = 0
+    const observer = new ResizeObserver(() => {
+      window.clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(syncViewport, 250)
+    })
+
+    if (surfaceRef.current) {
+      observer.observe(surfaceRef.current)
+    }
+
     return () => {
       stopped = true
       window.clearInterval(timer)
+      window.clearTimeout(resizeTimer)
+      observer.disconnect()
       offFrame?.()
       offEvent?.()
-      void api()?.detach()
+      // Leave the real window usable: drop the panel-shaped viewport before
+      // letting go of the CDP session.
+      void api()
+        ?.exec({ method: 'Emulation.clearDeviceMetricsOverride', params: {} })
+        .catch(() => undefined)
+        .finally(() => void api()?.detach())
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -398,7 +452,7 @@ export function BrowserMirror() {
       </div>
 
       {/* Mirror surface */}
-      <div className="relative min-h-0 flex-1 bg-black/90">
+      <div className="relative min-h-0 flex-1 bg-black/90" ref={surfaceRef}>
         {status === 'offline' ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <Codicon className="text-(--ui-text-quaternary)" name="globe" size="1.6rem" />

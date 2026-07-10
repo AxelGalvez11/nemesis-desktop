@@ -23,8 +23,11 @@ const HTTP_TIMEOUT_MS = 2_500
 const SPAWN_WAIT_MS = 12_000
 
 // Only these CDP methods may be forwarded from the renderer — the mirror needs
-// input + navigation, nothing else (no Runtime.evaluate from the renderer).
+// input + navigation + viewport-matching, nothing else (no Runtime.evaluate
+// from the renderer).
 const ALLOWED_FORWARD_METHODS = new Set([
+  'Emulation.clearDeviceMetricsOverride',
+  'Emulation.setDeviceMetricsOverride',
   'Input.dispatchKeyEvent',
   'Input.dispatchMouseEvent',
   'Input.insertText',
