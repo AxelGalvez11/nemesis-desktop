@@ -21,6 +21,12 @@ const PROFILE_DIR = path.join(os.homedir(), '.hermes', 'browser_auth', 'school-p
 const START_URL = 'https://www.google.com'
 const HTTP_TIMEOUT_MS = 2_500
 const SPAWN_WAIT_MS = 12_000
+// Headless Chromium blocks file downloads by default — a click on a Blackboard
+// slide/PDF or an Outlook attachment would silently no-op. We set download
+// behavior at BROWSER scope (applies to the agent's own CDP session too, not
+// just the mirror) so captured files land here; the school-portal skill moves
+// them into Library/School/<Course>.
+const DOWNLOAD_DIR = path.join(os.homedir(), 'Downloads')
 
 // Only these CDP methods may be forwarded from the renderer — the mirror needs
 // input + navigation + viewport-matching, nothing else (no Runtime.evaluate
@@ -100,8 +106,70 @@ async function isRunning(): Promise<boolean> {
   }
 }
 
+// One long-lived browser-scope CDP connection whose only job is to keep
+// download-to-disk enabled. Held open because the behavior can reset when the
+// setting client disconnects; re-armed by ensureBrowser().
+let downloadWs: WebSocket | null = null
+
+async function enableDownloads(): Promise<void> {
+  if (downloadWs && downloadWs.readyState === WebSocket.OPEN) {
+    return
+  }
+
+  let version: unknown
+
+  try {
+    version = await httpJson(`${ORIGIN}/json/version`)
+  } catch {
+    return
+  }
+
+  const wsUrl =
+    version && typeof version === 'object' ? (version as Record<string, unknown>).webSocketDebuggerUrl : null
+
+  if (typeof wsUrl !== 'string') {
+    return
+  }
+
+  try {
+    fs.mkdirSync(DOWNLOAD_DIR, { recursive: true })
+  } catch {
+    // Downloads dir almost always exists; ignore.
+  }
+
+  const ws = new WebSocket(wsUrl)
+
+  const opened = await new Promise<boolean>(resolve => {
+    ws.onopen = () => resolve(true)
+    ws.onerror = () => resolve(false)
+    setTimeout(() => resolve(false), HTTP_TIMEOUT_MS)
+  })
+
+  if (!opened) {
+    return
+  }
+
+  downloadWs = ws
+  ws.onclose = () => {
+    if (downloadWs === ws) {
+      downloadWs = null
+    }
+  }
+  // 'allow' keeps the site's suggested filename (the skill's move step needs a
+  // human name, not a GUID). Browser scope → covers the agent's download clicks.
+  ws.send(
+    JSON.stringify({
+      id: 1,
+      method: 'Browser.setDownloadBehavior',
+      params: { behavior: 'allow', downloadPath: DOWNLOAD_DIR, eventsEnabled: true }
+    })
+  )
+}
+
 async function ensureBrowser(): Promise<{ ok: boolean; reason?: string }> {
   if (await isRunning()) {
+    await enableDownloads()
+
     return { ok: true }
   }
 
@@ -141,6 +209,8 @@ async function ensureBrowser(): Promise<{ ok: boolean; reason?: string }> {
 
   while (Date.now() < deadline) {
     if (await isRunning()) {
+      await enableDownloads()
+
       return { ok: true }
     }
 
