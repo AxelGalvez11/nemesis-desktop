@@ -82,8 +82,15 @@ export function BrowserMirror() {
         return
       }
 
-      const width = Math.round(box.width)
-      const height = Math.round(box.height)
+      // Headless Page.startScreencast captures at the CSS viewport WIDTH and
+      // ignores deviceScaleFactor, so a 1x viewport upscales blurrily on a retina
+      // panel. Supersample instead: emulate the page at panel-size × pixel-density,
+      // then object-contain the larger frame down into the panel → the frame lands
+      // 1:1 on the physical retina pixels, sharp. (lastViewportRef holds the
+      // EMULATED size so the onFrame self-heal compares against it correctly.)
+      const ss = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
+      const width = Math.round(box.width * ss)
+      const height = Math.round(box.height * ss)
       const last = lastViewportRef.current
 
       if (!force && Math.abs(width - last.width) < 4 && Math.abs(height - last.height) < 4) {
@@ -91,13 +98,9 @@ export function BrowserMirror() {
       }
 
       lastViewportRef.current = { height, width }
-      // Render the page at the display's pixel density (capped at 2x) so the
-      // screencast is captured at retina resolution — otherwise a 1x capture is
-      // upscaled onto the retina panel and looks blurry.
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
       exec({
         method: 'Emulation.setDeviceMetricsOverride',
-        params: { deviceScaleFactor: dpr, height, mobile: false, width }
+        params: { deviceScaleFactor: 1, height, mobile: false, width }
       })
     },
     [exec]
@@ -185,7 +188,7 @@ export function BrowserMirror() {
       }
 
       frameSizeRef.current = { height: frame.metadata.deviceHeight, width: frame.metadata.deviceWidth }
-      imgRef.current.src = `data:image/jpeg;base64,${frame.data}`
+      imgRef.current.src = `data:image/png;base64,${frame.data}`
       setStatus('live')
 
       // Self-heal: if a frame arrives at a size far from the panel's viewport

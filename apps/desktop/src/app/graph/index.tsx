@@ -52,6 +52,35 @@ interface GraphControlsState {
 const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1'
 const DEFAULT_CONTROLS: GraphControlsState = { nodeSize: 4, repulsion: 40, rotate: true, spread: 34 }
 
+// Chrome resolves CSS custom properties to the CSS Color-4 `color(srgb r g b / a)`
+// syntax, which three.js (the 3d-force-graph renderer) CANNOT parse — it silently
+// falls back to black, making nodes invisible on a dark background. Normalize every
+// resolved value to an opaque `rgb(r, g, b)` string that three.js parses reliably.
+function normalizeToRgb(computed: string): null | string {
+  if (!computed) {
+    return null
+  }
+
+  const rgb = computed.match(/rgba?\(([^)]+)\)/i)
+
+  if (rgb) {
+    const [r, g, b] = rgb[1].split(/[,/]/).map(part => Math.round(parseFloat(part.trim())))
+
+    return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? `rgb(${r}, ${g}, ${b})` : null
+  }
+
+  const srgb = computed.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i)
+
+  if (srgb) {
+    const [r, g, b] = [srgb[1], srgb[2], srgb[3]].map(part => Math.round(parseFloat(part) * 255))
+
+    return `rgb(${r}, ${g}, ${b})`
+  }
+
+  // Already a hex / named color three.js understands.
+  return computed
+}
+
 function resolveCssColor(value: string, fallback: string): string {
   const probe = document.createElement('span')
   probe.style.color = value
@@ -60,7 +89,7 @@ function resolveCssColor(value: string, fallback: string): string {
   const resolved = getComputedStyle(probe).color
   probe.remove()
 
-  return resolved || fallback
+  return normalizeToRgb(resolved) || fallback
 }
 
 function readGraphPalette(mode: 'dark' | 'light'): GraphPalette {

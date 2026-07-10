@@ -364,12 +364,12 @@ async function attachMirror(sender: Electron.WebContents, targetId: string): Pro
 
   await sessionCommand(session, 'Page.enable').catch(() => undefined)
   await sessionCommand(session, 'Page.startScreencast', {
-    // Headroom for a 2x (retina) capture of the panel-shaped viewport so the
-    // mirror stays sharp; higher JPEG quality since the panel is small.
-    format: 'jpeg',
-    maxHeight: 3200,
-    maxWidth: 2600,
-    quality: 82
+    // PNG (lossless) keeps text crisp — JPEG softens small type; with the browser
+    // forced to 2x density the frames arrive at retina resolution. Generous
+    // max dims so the 2x panel-shaped viewport is never downscaled.
+    format: 'png',
+    maxHeight: 3600,
+    maxWidth: 3000
   }).catch(() => undefined)
 
   return true
