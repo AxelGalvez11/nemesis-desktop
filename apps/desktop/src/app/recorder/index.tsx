@@ -6,12 +6,16 @@
 // v1 scope: record + save + play back. On-device transcription (whisper) is the
 // documented next step — see docs/research/nemesis-study-pages-oss-2026-07.md §4.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils'
+import { setComposerDraft } from '@/store/composer'
 
 import { saveNote } from '../library/vault'
+import { NEW_CHAT_ROUTE } from '../routes'
+import { correctPharmTerms } from './pharm-lexicon'
 import { transcribeAudio } from './transcribe'
 
 const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
@@ -31,8 +35,10 @@ export function RecorderView() {
   const [recordings, setRecordings] = useState<RecordingFile[]>([])
   const [playing, setPlaying] = useState<null | { path: string; src: string }>(null)
   const [transcripts, setTranscripts] = useState<Record<string, string>>({})
+  const [corrections, setCorrections] = useState<Record<string, number>>({})
   const [transcribingStatus, setTranscribingStatus] = useState<Record<string, string>>({})
   const [savedNote, setSavedNote] = useState<Record<string, boolean>>({})
+  const navigate = useNavigate()
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamsRef = useRef<MediaStream[]>([])
@@ -212,7 +218,11 @@ export function RecorderView() {
                 : 'Transcribing…'
         }))
       )
-      setTranscripts(current => ({ ...current, [file.path]: text || '(No speech detected.)' }))
+      // Deterministic pharm-vocabulary pass: fixes garbled drug names ("Lycinepral" →
+      // lisinopril) without any cloud call. See pharm-lexicon.ts.
+      const { changes, corrected } = correctPharmTerms(text || '')
+      setTranscripts(current => ({ ...current, [file.path]: corrected || '(No speech detected.)' }))
+      setCorrections(current => ({ ...current, [file.path]: changes.length }))
     } catch (err) {
       setTranscripts(current => ({
         ...current,
@@ -227,6 +237,26 @@ export function RecorderView() {
       })
     }
   }, [])
+
+  const draftFlashcards = useCallback(
+    (file: RecordingFile) => {
+      const text = transcripts[file.path]
+
+      if (!text) {
+        return
+      }
+
+      setComposerDraft(
+        'Turn this lecture transcript into 8-15 exam-quality flashcards for a pharmacy/health-sciences student. ' +
+          'Application-level questions (mechanisms, adverse effects, interactions, monitoring), one concept per card, no "what is X" filler. ' +
+          'Reply with ONLY tab-separated lines, one card per line: front<TAB>back. No headers, no numbering, no commentary — ' +
+          "I'll paste your reply straight into Study → Import cards.\n\nTranscript:\n" +
+          text
+      )
+      navigate(NEW_CHAT_ROUTE)
+    },
+    [navigate, transcripts]
+  )
 
   const saveTranscriptNote = useCallback(
     async (file: RecordingFile) => {
@@ -321,7 +351,7 @@ export function RecorderView() {
                   {transcript && (
                     <div className="rounded-md bg-muted/40 p-3">
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{transcript}</p>
-                      <div className="mt-2 flex items-center gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Button
                           disabled={savedNote[file.path]}
                           onClick={() => void saveTranscriptNote(file)}
@@ -330,6 +360,14 @@ export function RecorderView() {
                         >
                           {savedNote[file.path] ? 'Saved to Library ✓' : 'Save as note'}
                         </Button>
+                        <Button onClick={() => draftFlashcards(file)} size="sm" variant="secondary">
+                          Draft flashcards
+                        </Button>
+                        {(corrections[file.path] ?? 0) > 0 && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {corrections[file.path]} pharm term{corrections[file.path] === 1 ? '' : 's'} auto-corrected
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
