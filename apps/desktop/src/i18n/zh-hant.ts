@@ -1414,7 +1414,9 @@ export const zhHant = defineLocale({
       skills: '技能與工具',
       messaging: '訊息平台',
       artifacts: '成品',
-      study: '學習'
+      study: '學習',
+      library: '資料庫',
+      graph: '知識圖譜'
     },
     searchAria: '搜尋工作階段',
     searchPlaceholder: '搜尋工作階段…',

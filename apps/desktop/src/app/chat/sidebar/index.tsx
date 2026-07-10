@@ -97,7 +97,7 @@ import {
 
 import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis'
 
-import { type AppView, ARTIFACTS_ROUTE, MESSAGING_ROUTE, SKILLS_ROUTE, STUDY_ROUTE } from '../../routes'
+import { type AppView, ARTIFACTS_ROUTE, LIBRARY_ROUTE, MESSAGING_ROUTE, SKILLS_ROUTE, STUDY_ROUTE } from '../../routes'
 import type { SidebarNavItem } from '../../types'
 
 import { countLabel } from './chrome'
@@ -147,7 +147,8 @@ const SIDEBAR_NAV_ALL: SidebarNavItem[] = [
   },
   { id: 'messaging', label: '', icon: props => <Codicon name="comment" {...props} />, route: MESSAGING_ROUTE },
   { id: 'artifacts', label: '', icon: props => <Codicon name="files" {...props} />, route: ARTIFACTS_ROUTE },
-  { id: 'study', label: 'Study', icon: props => <Codicon name="mortar-board" {...props} />, route: STUDY_ROUTE }
+  { id: 'study', label: 'Study', icon: props => <Codicon name="mortar-board" {...props} />, route: STUDY_ROUTE },
+  { id: 'library', label: 'Library', icon: props => <Codicon name="book" {...props} />, route: LIBRARY_ROUTE }
 ]
 
 const SIDEBAR_NAV = SIDEBAR_NAV_ALL.filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_NAV.has(item.id))

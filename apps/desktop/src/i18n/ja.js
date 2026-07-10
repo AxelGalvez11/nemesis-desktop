@@ -1405,7 +1405,9 @@ export const ja = defineLocale({
             skills: 'スキルとツール',
             messaging: 'メッセージング',
             artifacts: 'アーティファクト',
-            study: '学習'
+            study: '学習',
+            library: 'ライブラリ',
+            graph: 'グラフ'
         },
         searchAria: 'セッションを検索',
         searchPlaceholder: 'セッションを検索…',

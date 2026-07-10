@@ -1436,7 +1436,9 @@ export const en = {
             skills: 'Capabilities',
             messaging: 'Messaging',
             artifacts: 'Artifacts',
-            study: 'Study'
+            study: 'Study',
+            library: 'Library',
+            graph: 'Graph'
         },
         searchAria: 'Search sessions',
         searchPlaceholder: 'Search sessions…',

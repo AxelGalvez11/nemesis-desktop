@@ -1630,7 +1630,9 @@ export const zh = {
             skills: '技能与工具',
             messaging: '消息平台',
             artifacts: '产物',
-            study: '学习'
+            study: '学习',
+            library: '资料库',
+            graph: '知识图谱'
         },
         searchAria: '搜索会话',
         searchPlaceholder: '搜索会话…',
