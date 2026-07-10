@@ -27,6 +27,7 @@ import {
   addCard,
   buildQueue,
   deckStats,
+  type DeckStats,
   deleteCard,
   deleteDeck,
   freshId,
@@ -500,24 +501,24 @@ function DeckBrowser({
   }
 
   return (
-    <div className="pb-8">
+    <div className="pb-10">
       <Heatmap state={state} />
       {groups.map(group => (
-        <section className="px-6 pt-5" key={group.course}>
-          <div className="mb-2 flex items-baseline justify-between border-b border-border pb-1.5">
-            <h2 className="text-sm font-semibold">{group.course}</h2>
+        <section className="px-8 pt-7" key={group.course}>
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-[15px] font-semibold tracking-tight">{group.course}</h2>
             <span className="text-xs text-muted-foreground">
               {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} · {group.stats.total} cards
             </span>
           </div>
           {view === 'list' ? (
-            <div className="overflow-hidden rounded-lg border border-border">
+            <div className="flex flex-col gap-2">
               {group.decks.map(deck => (
                 <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {group.decks.map(deck => (
                 <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
               ))}
@@ -526,6 +527,27 @@ function DeckBrowser({
         </section>
       ))}
     </div>
+  )
+}
+
+// Fraction of a deck's cards that have been studied at least once (not "new").
+function masteryPct(stats: DeckStats): number {
+  return stats.total > 0 ? Math.round(((stats.total - stats.fresh) / stats.total) * 100) : 0
+}
+
+function MasteryBar({ pct }: { pct: number }) {
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,color-mix(in_srgb,gray_18%,transparent))">
+      <div className="h-full rounded-full bg-(--theme-primary) transition-all" style={{ width: `${pct}%` }} />
+    </div>
+  )
+}
+
+function DuePill({ due }: { due: number }) {
+  return (
+    <span className="shrink-0 rounded-full bg-(--theme-primary)/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-(--theme-primary)">
+      {due} due
+    </span>
   )
 }
 
@@ -547,20 +569,29 @@ function DeckRow({
   const stats = deckStats(state, deck.id, now)
 
   return (
-    <div className="flex items-center gap-3 border-t border-border bg-card px-3 py-2 first:border-t-0 hover:bg-accent/50">
-      <div className="min-w-0 flex-1 truncate text-sm">{deck.name}</div>
-      <span className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
-        {stats.total} cards · {stats.fresh} new
-      </span>
-      <span className="w-16 shrink-0 text-right">{stats.due > 0 && <Badge variant="muted">{stats.due} due</Badge>}</span>
-      <div className="flex shrink-0 gap-1.5">
+    <div className="group flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-(--theme-primary)/40">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium">{deck.name}</span>
+          {stats.due > 0 && <DuePill due={stats.due} />}
+        </div>
+        <div className="mt-1.5 flex items-center gap-2">
+          <div className="h-1 w-28 max-w-[40%] overflow-hidden rounded-full bg-(--ui-bg-tertiary,color-mix(in_srgb,gray_18%,transparent))">
+            <div className="h-full rounded-full bg-(--theme-primary)" style={{ width: `${masteryPct(stats)}%` }} />
+          </div>
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {stats.total} cards · {stats.fresh} new
+          </span>
+        </div>
+      </div>
+      <div className="flex shrink-0 gap-1.5 opacity-80 transition-opacity group-hover:opacity-100">
         <Button disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
           Study
         </Button>
-        <Button disabled={stats.total < 2} onClick={() => onMatch(deck.id)} size="sm" variant="outline">
+        <Button disabled={stats.total < 2} onClick={() => onMatch(deck.id)} size="sm" variant="ghost">
           Match
         </Button>
-        <Button onClick={() => onBrowse(deck.id)} size="sm" variant="outline">
+        <Button onClick={() => onBrowse(deck.id)} size="sm" variant="ghost">
           Cards
         </Button>
       </div>
@@ -584,26 +615,33 @@ function DeckCard({
   state: StudyState
 }) {
   const stats = deckStats(state, deck.id, now)
+  const pct = masteryPct(stats)
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
-      <div className="min-w-0">
-        <div className="flex items-start justify-between gap-2">
-          <div className="truncate text-sm font-medium">{deck.name}</div>
-          {stats.due > 0 && <Badge variant="muted">{stats.due} due</Badge>}
-        </div>
-        <div className="mt-1 text-xs text-muted-foreground">
-          {stats.total} cards · {stats.fresh} new
-        </div>
+    <div className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-(--theme-primary)/40 hover:shadow-lg hover:shadow-black/20">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-[15px] font-semibold leading-snug tracking-tight">{deck.name}</h3>
+        {stats.due > 0 && <DuePill due={stats.due} />}
       </div>
-      <div className="mt-auto flex gap-2">
-        <Button className="flex-1" disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
+
+      <div className="mt-auto">
+        <div className="mb-1.5 flex items-baseline justify-between text-[11px] text-muted-foreground">
+          <span className="tabular-nums">
+            {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
+          </span>
+          <span className="tabular-nums">{pct}% studied</span>
+        </div>
+        <MasteryBar pct={pct} />
+      </div>
+
+      <div className="flex gap-2">
+        <Button className="flex-1" disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm">
           {stats.due > 0 ? 'Study' : 'Done for now'}
         </Button>
         <Button disabled={stats.total < 2} onClick={() => onMatch(deck.id)} size="sm" variant="outline">
           Match
         </Button>
-        <Button onClick={() => onBrowse(deck.id)} size="sm" variant="outline">
+        <Button onClick={() => onBrowse(deck.id)} size="sm" variant="ghost">
           Cards
         </Button>
       </div>
@@ -655,8 +693,9 @@ function Heatmap({ state }: { state: StudyState }) {
   }
 
   return (
-    <div className="px-6 pt-1">
-      <div className="mb-2.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+    <div className="px-8 pt-2">
+      <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs">
         <Stat label="day streak" value={stats.currentStreak} />
         <Stat label="longest" value={stats.longestStreak} />
         <Stat label="days active" value={`${stats.daysLearnedPct}%`} />
@@ -693,6 +732,7 @@ function Heatmap({ state }: { state: StudyState }) {
           ))}
           <span>More</span>
         </div>
+      </div>
       </div>
     </div>
   )
