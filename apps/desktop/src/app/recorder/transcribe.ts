@@ -24,6 +24,10 @@ let transcriberPromise: Promise<Transcriber> | null = null
 function getTranscriber(onStatus?: (s: TranscribeStatus) => void): Promise<Transcriber> {
   if (!transcriberPromise) {
     transcriberPromise = pipeline('automatic-speech-recognition', MODEL_ID, {
+      // Force full-precision weights. The default 4-bit-quantized variant fails to
+      // create an ONNX session in the bundled onnxruntime-web (MatMulNBits missing
+      // scale). fp32 is a touch larger but loads reliably single-threaded.
+      dtype: { decoder_model_merged: 'fp32', encoder_model: 'fp32' },
       progress_callback: (info: { status?: string; progress?: number }) => {
         if (info.status === 'progress') {
           onStatus?.({ progress: info.progress, stage: 'loading-model' })
