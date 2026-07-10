@@ -97,6 +97,23 @@ declare global {
       revealLogs: () => Promise<{ ok: boolean; path: string; error?: string }>
       getRecentLogs: () => Promise<{ path: string; lines: string[] }>
       readDir: (path: string) => Promise<HermesReadDirResult>
+      // App-managed agent browser: persistent Chromium the agent drives via CDP
+      // and the chat right rail mirrors (screencast + forwarded input).
+      schoolBrowser?: {
+        ensure: () => Promise<{ ok: boolean; reason?: string }>
+        list: () => Promise<{ running: boolean; tabs: { id: string; title: string; url: string }[] }>
+        attach: (targetId: string) => Promise<boolean>
+        detach: () => Promise<boolean>
+        exec: (payload: Record<string, unknown>) => Promise<unknown>
+        onFrame: (
+          callback: (frame: {
+            data: string
+            metadata: { deviceHeight: number; deviceWidth: number }
+            targetId: string
+          }) => void
+        ) => () => void
+        onEvent: (callback: (event: { targetId: string; type: string; url?: string }) => void) => () => void
+      }
       gitRoot?: (path: string) => Promise<string | null>
       // Reveal a path in the OS file manager (Finder / Explorer).
       revealPath?: (path: string) => Promise<boolean>

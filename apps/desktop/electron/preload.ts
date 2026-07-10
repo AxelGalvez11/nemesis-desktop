@@ -96,6 +96,26 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   revealLogs: () => ipcRenderer.invoke('hermes:logs:reveal'),
   getRecentLogs: () => ipcRenderer.invoke('hermes:logs:recent'),
   readDir: dirPath => ipcRenderer.invoke('hermes:fs:readDir', dirPath),
+  // App-managed agent browser (school-portal mirror in the chat right rail).
+  schoolBrowser: {
+    ensure: () => ipcRenderer.invoke('hermes:schoolBrowser:ensure'),
+    list: () => ipcRenderer.invoke('hermes:schoolBrowser:list'),
+    attach: targetId => ipcRenderer.invoke('hermes:schoolBrowser:attach', targetId),
+    detach: () => ipcRenderer.invoke('hermes:schoolBrowser:detach'),
+    exec: payload => ipcRenderer.invoke('hermes:schoolBrowser:exec', payload),
+    onFrame: callback => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on('hermes:schoolBrowser:frame', listener)
+
+      return () => ipcRenderer.removeListener('hermes:schoolBrowser:frame', listener)
+    },
+    onEvent: callback => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on('hermes:schoolBrowser:event', listener)
+
+      return () => ipcRenderer.removeListener('hermes:schoolBrowser:event', listener)
+    }
+  },
   gitRoot: startPath => ipcRenderer.invoke('hermes:fs:gitRoot', startPath),
   revealPath: targetPath => ipcRenderer.invoke('hermes:fs:reveal', targetPath),
   renamePath: (targetPath, newName) => ipcRenderer.invoke('hermes:fs:rename', targetPath, newName),

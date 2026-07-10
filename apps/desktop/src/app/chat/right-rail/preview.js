@@ -7,10 +7,20 @@ import { Tip } from '@/components/ui/tooltip';
 import { translateNow, useI18n } from '@/i18n';
 import { formatCombo } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
-import { $panesFlipped, $rightRailActiveTabId, RIGHT_RAIL_PREVIEW_TAB_ID, selectRightRailTab } from '@/store/layout';
+import { $browserRailOpen } from '@/store/browser-rail';
+import { $panesFlipped, $rightRailActiveTabId, RIGHT_RAIL_BROWSER_TAB_ID, RIGHT_RAIL_PREVIEW_TAB_ID, selectRightRailTab } from '@/store/layout';
 import { $filePreviewTabs, $previewReloadRequest, $previewTarget, closeOtherRightRailTabs, closeRightRail, closeRightRailTab, closeRightRailTabsToRight } from '@/store/preview';
 import { $dirtyPreviewUrls } from '@/store/preview-edit';
+import { BrowserMirror } from './browser-mirror';
 import { PreviewPane } from './preview-pane';
+// Synthetic target for the agent-browser mirror tab — it renders BrowserMirror,
+// not PreviewPane, so this only feeds the tab strip (label/tooltip/dirty-lookup).
+const BROWSER_TAB_TARGET = {
+    kind: 'url',
+    label: 'Browser',
+    source: 'agent-browser',
+    url: 'about:agent-browser'
+};
 export const PREVIEW_RAIL_MIN_WIDTH = '18rem';
 export const PREVIEW_RAIL_MAX_WIDTH = '38rem';
 const INTRINSIC = `clamp(${PREVIEW_RAIL_MIN_WIDTH}, 36vw, 32rem)`;
@@ -32,12 +42,16 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
     const filePreviewTabs = useStore($filePreviewTabs);
     const previewTarget = useStore($previewTarget);
     const dirtyPreviewUrls = useStore($dirtyPreviewUrls);
+    const browserRailOpen = useStore($browserRailOpen);
     const tabs = useMemo(() => [
+        ...(browserRailOpen
+            ? [{ id: RIGHT_RAIL_BROWSER_TAB_ID, label: 'Browser', target: BROWSER_TAB_TARGET }]
+            : []),
         ...(previewTarget
             ? [{ id: RIGHT_RAIL_PREVIEW_TAB_ID, label: t.preview.tab, target: previewTarget }]
             : []),
         ...filePreviewTabs.map(({ id, target }) => ({ id, label: tabLabelFor(target), target }))
-    ], [filePreviewTabs, previewTarget, t.preview.tab]);
+    ], [browserRailOpen, filePreviewTabs, previewTarget, t.preview.tab]);
     const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0];
     useEffect(() => {
         if (activeTab && activeTab.id !== activeTabId) {
@@ -76,5 +90,5 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
                                                     event.preventDefault();
                                                 }
                                             }, children: [active && (_jsx("span", { "aria-hidden": "true", className: "absolute inset-x-0 top-0 h-px bg-(--ui-stroke-primary)" })), _jsx(Tip, { label: tab.target.path || tab.target.url || tab.label, children: _jsx("button", { "aria-selected": active, className: "flex h-full min-w-0 max-w-full items-center overflow-hidden pl-3 pr-2 text-left outline-none", onClick: () => selectRightRailTab(tab.id), role: "tab", type: "button", children: _jsx("span", { className: "block min-w-0 truncate", children: tab.label }) }) }), _jsx("span", { "aria-hidden": "true", className: "pointer-events-none absolute inset-y-0 right-0 w-9 bg-[linear-gradient(to_right,transparent,var(--tab-bg)_55%)] opacity-0 transition-opacity group-hover/tab:opacity-100 group-focus-within/tab:opacity-100" }), dirty && (_jsx("span", { "aria-hidden": "true", className: "pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center opacity-100 transition-opacity group-hover/tab:opacity-0 group-focus-within/tab:opacity-0", children: _jsx("span", { className: "size-2 rounded-full bg-amber-500 shadow-[0_0_0_2px_var(--tab-bg),0_1px_2px_rgba(0,0,0,0.45)] dark:bg-amber-400" }) })), _jsx("button", { "aria-label": t.preview.closeTab(tab.label), className: "pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-sm text-(--ui-text-tertiary) opacity-0 transition-[background-color,color,opacity] hover:bg-(--ui-bg-secondary) hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100", onClick: () => closeRightRailTab(tab.id), type: "button", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) })] }) }), _jsxs(ContextMenuContent, { children: [_jsxs(ContextMenuItem, { onSelect: () => closeRightRailTab(tab.id), children: [t.common.close, _jsx("span", { className: "ml-auto pl-4 text-(--ui-text-tertiary)", children: formatCombo('mod+w') })] }), _jsx(ContextMenuItem, { disabled: !hasOthers, onSelect: () => closeOtherRightRailTabs(tab.id), children: t.preview.closeOthers }), _jsx(ContextMenuItem, { disabled: !hasTabsToRight, onSelect: () => closeRightRailTabsToRight(tab.id), children: t.preview.closeToRight }), _jsx(ContextMenuSeparator, {}), _jsx(ContextMenuItem, { onSelect: closeRightRail, children: t.preview.closeAll })] })] }, tab.id));
-                        }) }), _jsx("button", { "aria-label": t.preview.closePane, className: "mr-1.5 grid size-6 shrink-0 self-center place-items-center rounded-md text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/rail-tabs:opacity-100 [-webkit-app-region:no-drag]", onClick: closeRightRail, type: "button", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: _jsx(PreviewPane, { embedded: true, onRestartServer: isPreview ? onRestartServer : undefined, reloadRequest: previewReloadRequest, setTitlebarToolGroup: setTitlebarToolGroup, target: activeTab.target }) })] }));
+                        }) }), _jsx("button", { "aria-label": t.preview.closePane, className: "mr-1.5 grid size-6 shrink-0 self-center place-items-center rounded-md text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/rail-tabs:opacity-100 [-webkit-app-region:no-drag]", onClick: closeRightRail, type: "button", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: activeTab.id === RIGHT_RAIL_BROWSER_TAB_ID ? (_jsx(BrowserMirror, {})) : (_jsx(PreviewPane, { embedded: true, onRestartServer: isPreview ? onRestartServer : undefined, reloadRequest: previewReloadRequest, setTitlebarToolGroup: setTitlebarToolGroup, target: activeTab.target })) })] }));
 }

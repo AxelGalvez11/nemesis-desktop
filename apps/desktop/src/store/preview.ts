@@ -3,9 +3,11 @@ import { atom, computed } from 'nanostores'
 import { persistentAtom } from '@/lib/persisted'
 import { normalize } from '@/lib/text'
 
+import { $browserRailOpen } from './browser-rail'
 import {
   $rightRailActiveTabId,
   PREVIEW_PANE_ID,
+  RIGHT_RAIL_BROWSER_TAB_ID,
   RIGHT_RAIL_PREVIEW_TAB_ID,
   type RightRailTabId,
   selectRightRailTab
@@ -79,10 +81,12 @@ export const $filePreviewTabs = persistentAtom<FilePreviewTab[]>(TABS_STORAGE_KE
 })
 
 // Drop a restored active file-tab that didn't survive validation so the rail
-// never points at a tab that isn't there.
+// never points at a tab that isn't there. Same for a restored 'browser' id —
+// the mirror tab always starts closed.
 if (
-  $rightRailActiveTabId.get().startsWith('file:') &&
-  !$filePreviewTabs.get().some(tab => tab.id === $rightRailActiveTabId.get())
+  ($rightRailActiveTabId.get().startsWith('file:') &&
+    !$filePreviewTabs.get().some(tab => tab.id === $rightRailActiveTabId.get())) ||
+  $rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID
 ) {
   selectRightRailTab(RIGHT_RAIL_PREVIEW_TAB_ID)
 }
@@ -448,11 +452,34 @@ function closeFilePreviewTab(tabId: RightRailTabId) {
   }
 }
 
+/** Hide the agent-browser mirror tab (the browser process keeps running). */
+function closeBrowserRailTab() {
+  if (!$browserRailOpen.get()) {
+    return
+  }
+
+  $browserRailOpen.set(false)
+
+  if ($rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID) {
+    selectRightRailTab($previewTarget.get() ? RIGHT_RAIL_PREVIEW_TAB_ID : ($filePreviewTabs.get()[0]?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID))
+  }
+
+  if (!$previewTarget.get() && $filePreviewTabs.get().length === 0) {
+    setPaneOpen(PREVIEW_PANE_ID, false)
+  }
+}
+
 export function closeRightRailTab(tabId: RightRailTabId) {
   if (tabId === RIGHT_RAIL_PREVIEW_TAB_ID) {
     if ($previewTarget.get()) {
       dismissPreviewTarget()
     }
+
+    return
+  }
+
+  if (tabId === RIGHT_RAIL_BROWSER_TAB_ID) {
+    closeBrowserRailTab()
 
     return
   }
@@ -467,6 +494,10 @@ export const closeActiveRightRailTab = () => closeRightRailTab($rightRailActiveT
 // so "close others / to the right" act on what the user actually sees.
 function rightRailTabOrder(): RightRailTabId[] {
   const ids: RightRailTabId[] = []
+
+  if ($browserRailOpen.get()) {
+    ids.push(RIGHT_RAIL_BROWSER_TAB_ID)
+  }
 
   if ($previewTarget.get()) {
     ids.push(RIGHT_RAIL_PREVIEW_TAB_ID)
@@ -504,13 +535,15 @@ export function closeRightRailTabsToRight(tabId: RightRailTabId) {
   }
 }
 
-/** Dismisses the active preview + every file tab so the rail pane unmounts. */
+/** Dismisses the active preview + every file tab + the browser mirror so the
+ *  rail pane unmounts. */
 export function closeRightRail() {
   if ($previewTarget.get()) {
     dismissPreviewTarget()
   }
 
   $filePreviewTabs.set([])
+  $browserRailOpen.set(false)
   setPaneOpen(PREVIEW_PANE_ID, false)
 }
 

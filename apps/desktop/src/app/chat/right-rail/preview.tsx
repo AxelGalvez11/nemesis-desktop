@@ -14,9 +14,11 @@ import { Tip } from '@/components/ui/tooltip'
 import { translateNow, useI18n } from '@/i18n'
 import { formatCombo } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
+import { $browserRailOpen } from '@/store/browser-rail'
 import {
   $panesFlipped,
   $rightRailActiveTabId,
+  RIGHT_RAIL_BROWSER_TAB_ID,
   RIGHT_RAIL_PREVIEW_TAB_ID,
   type RightRailTabId,
   selectRightRailTab
@@ -33,7 +35,17 @@ import {
 } from '@/store/preview'
 import { $dirtyPreviewUrls } from '@/store/preview-edit'
 
+import { BrowserMirror } from './browser-mirror'
 import { PreviewPane } from './preview-pane'
+
+// Synthetic target for the agent-browser mirror tab — it renders BrowserMirror,
+// not PreviewPane, so this only feeds the tab strip (label/tooltip/dirty-lookup).
+const BROWSER_TAB_TARGET: PreviewTarget = {
+  kind: 'url',
+  label: 'Browser',
+  source: 'agent-browser',
+  url: 'about:agent-browser'
+}
 
 export const PREVIEW_RAIL_MIN_WIDTH = '18rem'
 export const PREVIEW_RAIL_MAX_WIDTH = '38rem'
@@ -72,15 +84,19 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
   const filePreviewTabs = useStore($filePreviewTabs)
   const previewTarget = useStore($previewTarget)
   const dirtyPreviewUrls = useStore($dirtyPreviewUrls)
+  const browserRailOpen = useStore($browserRailOpen)
 
   const tabs = useMemo<readonly RailTab[]>(
     () => [
+      ...(browserRailOpen
+        ? [{ id: RIGHT_RAIL_BROWSER_TAB_ID, label: 'Browser', target: BROWSER_TAB_TARGET } as RailTab]
+        : []),
       ...(previewTarget
         ? [{ id: RIGHT_RAIL_PREVIEW_TAB_ID, label: t.preview.tab, target: previewTarget } as RailTab]
         : []),
       ...filePreviewTabs.map(({ id, target }) => ({ id, label: tabLabelFor(target), target }) as RailTab)
     ],
-    [filePreviewTabs, previewTarget, t.preview.tab]
+    [browserRailOpen, filePreviewTabs, previewTarget, t.preview.tab]
   )
 
   const activeTab = tabs.find(tab => tab.id === activeTabId) ?? tabs[0]
@@ -215,13 +231,17 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <PreviewPane
-          embedded
-          onRestartServer={isPreview ? onRestartServer : undefined}
-          reloadRequest={previewReloadRequest}
-          setTitlebarToolGroup={setTitlebarToolGroup}
-          target={activeTab.target}
-        />
+        {activeTab.id === RIGHT_RAIL_BROWSER_TAB_ID ? (
+          <BrowserMirror />
+        ) : (
+          <PreviewPane
+            embedded
+            onRestartServer={isPreview ? onRestartServer : undefined}
+            reloadRequest={previewReloadRequest}
+            setTitlebarToolGroup={setTitlebarToolGroup}
+            target={activeTab.target}
+          />
+        )}
       </div>
     </aside>
   )

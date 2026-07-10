@@ -10,6 +10,8 @@ import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overla
 import { DesktopOnboardingOverlay } from '@/components/onboarding';
 import { Pane, PaneMain } from '@/components/pane-shell';
 import { RemoteDisplayBanner } from '@/components/remote-display-banner';
+import { useAgentBrowserWatcher } from '@/hooks/use-agent-browser-watcher';
+import { useExportsPreviewWatcher } from '@/hooks/use-exports-preview-watcher';
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { isFocusWithin } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
@@ -27,6 +29,7 @@ import { $paneOpen } from '../store/panes';
 import { setPetActivity } from '../store/pet';
 import { setPetScale } from '../store/pet-gallery';
 import { setPetOverlayOpenAppHandler, setPetOverlayScaleHandler, setPetOverlaySubmitHandler } from '../store/pet-overlay';
+import { $browserRailOpen } from '../store/browser-rail';
 import { $filePreviewTarget, $previewTarget, closeActiveRightRailTab } from '../store/preview';
 import { $activeGatewayProfile, $freshSessionRequest, $profileScope, refreshActiveProfile } from '../store/profile';
 import { $startWorkSessionRequest, followActiveSessionCwd, resolveNewSessionCwd } from '../store/projects';
@@ -127,6 +130,10 @@ export function DesktopController() {
     const queryClient = useQueryClient();
     const location = useLocation();
     const navigate = useNavigate();
+    // Deliverables written into Library/Exports auto-open in the preview rail.
+    useExportsPreviewWatcher();
+    // The agent-browser mirror pops open when a turn starts browsing.
+    useAgentBrowserWatcher();
     const busyRef = useRef(false);
     const creatingSessionRef = useRef(false);
     const messagingTranscriptSignatureRef = useRef(new Map());
@@ -138,6 +145,7 @@ export function DesktopController() {
     const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId);
     const filePreviewTarget = useStore($filePreviewTarget);
     const previewTarget = useStore($previewTarget);
+    const browserRailOpen = useStore($browserRailOpen);
     const selectedStoredSessionId = useStore($selectedStoredSessionId);
     const messagingSessions = useStore($messagingSessions);
     const terminalTakeover = useStore($terminalTakeover);
@@ -171,8 +179,8 @@ export function DesktopController() {
     });
     const { connectionRef, gatewayRef, requestGateway } = useGatewayRequest();
     useEffect(() => {
-        window.hermesDesktop?.setPreviewShortcutActive?.(Boolean(chatOpen && (filePreviewTarget || previewTarget)));
-    }, [chatOpen, filePreviewTarget, previewTarget]);
+        window.hermesDesktop?.setPreviewShortcutActive?.(Boolean(chatOpen && (filePreviewTarget || previewTarget || browserRailOpen)));
+    }, [browserRailOpen, chatOpen, filePreviewTarget, previewTarget]);
     useEffect(() => {
         startUpdatePoller();
         const unsubscribe = window.hermesDesktop?.onOpenUpdatesRequested?.(() => openUpdatesWindow());
@@ -267,7 +275,7 @@ export function DesktopController() {
                 return;
             }
             // Otherwise ⌘/Ctrl+W closes the active preview tab when one is open.
-            if ($filePreviewTarget.get() || $previewTarget.get()) {
+            if ($filePreviewTarget.get() || $previewTarget.get() || $browserRailOpen.get()) {
                 event.preventDefault();
                 event.stopPropagation();
                 closeActiveRightRailTab();
@@ -789,13 +797,13 @@ export function DesktopController() {
     const railSide = panesFlipped ? 'left' : 'right';
     // Other sidebars docked as real columns on the terminal's rail. Force-collapsed
     // hover-reveal overlays (narrow window) don't take a column, so they don't count.
-    const railColumnOpen = (chatOpen && Boolean(previewTarget || filePreviewTarget) && previewPaneOpen) ||
+    const railColumnOpen = (chatOpen && Boolean(previewTarget || filePreviewTarget || browserRailOpen) && previewPaneOpen) ||
         (chatOpen && !narrowViewport && fileBrowserOpen) ||
         (chatOpen && Boolean(currentCwd.trim()) && !narrowViewport && reviewOpen);
     // Once the terminal would share its rail with another sidebar, drop it to a
     // full-width row beneath them rather than cramming in one more skinny column.
     const terminalAsRow = terminalSidebarOpen && railColumnOpen;
-    const previewPane = (_jsx(Pane, { disabled: !chatOpen || (!previewTarget && !filePreviewTarget), id: PREVIEW_PANE_ID, maxWidth: PREVIEW_RAIL_MAX_WIDTH, minWidth: PREVIEW_RAIL_MIN_WIDTH, resizable: true, side: railSide, width: PREVIEW_RAIL_PANE_WIDTH, children: chatOpen ? (_jsx(ChatPreviewRail, { onRestartServer: restartPreviewServer, setTitlebarToolGroup: setTitlebarToolGroup })) : null }, "preview"));
+    const previewPane = (_jsx(Pane, { disabled: !chatOpen || (!previewTarget && !filePreviewTarget && !browserRailOpen), id: PREVIEW_PANE_ID, maxWidth: PREVIEW_RAIL_MAX_WIDTH, minWidth: PREVIEW_RAIL_MIN_WIDTH, resizable: true, side: railSide, width: PREVIEW_RAIL_PANE_WIDTH, children: chatOpen ? (_jsx(ChatPreviewRail, { onRestartServer: restartPreviewServer, setTitlebarToolGroup: setTitlebarToolGroup })) : null }, "preview"));
     const fileBrowserPane = (_jsx(Pane, { defaultOpen: false, disabled: !chatOpen, forceCollapsed: narrowViewport, hoverReveal: true, id: "file-browser", maxWidth: FILE_BROWSER_MAX_WIDTH, minWidth: FILE_BROWSER_MIN_WIDTH, resizable: true, side: railSide, width: FILE_BROWSER_DEFAULT_WIDTH, children: _jsx(RightSidebarPane, { onActivateFile: path => composer.insertContextPathInlineRef(path), onActivateFolder: path => composer.insertContextPathInlineRef(path, true) }, currentCwd || 'no-cwd') }, "file-browser"));
     const reviewPane = (_jsx(Pane, { defaultOpen: true, 
         // The diff pane only makes sense in a workspace, so force it shut when the
@@ -809,7 +817,7 @@ export function DesktopController() {
         // Mobile overlay sits at its min width — compact, doesn't bury the chat.
         overlayWidth: FILE_BROWSER_MIN_WIDTH, resizable: true, side: railSide, width: FILE_BROWSER_DEFAULT_WIDTH, children: _jsx(ReviewPane, {}, currentCwd || 'no-cwd') }, "review"));
     const terminalPane = (_jsx(Pane, { bottomRow: terminalAsRow, defaultOpen: true, disabled: !terminalSidebarOpen, divider: true, height: "38vh", id: "terminal-sidebar", maxHeight: "80vh", maxWidth: "80vw", minHeight: "8rem", minWidth: "22vw", resizable: true, side: railSide, width: "42vw", children: _jsx("div", { className: cn('relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-(--ui-editor-surface-background)', terminalAsRow ? 'border-l border-(--ui-stroke-secondary) pt-0' : 'pt-(--titlebar-height)'), children: _jsx(TerminalPaneChrome, {}) }) }, "terminal-sidebar"));
-    return (_jsxs(AppShell, { leftStatusbarItems: leftStatusbarItems, leftTitlebarTools: titlebarToolGroups.flat.left, mainOverlays: mainOverlays, onOpenSettings: openSettings, overlays: overlays, previewPaneOpen: chatOpen && Boolean(previewTarget || filePreviewTarget), statusbarItems: statusbarItems, terminalPaneOpen: terminalSidebarOpen, titlebarTools: titlebarToolGroups.flat.right, children: [!isSecondaryWindow() && (_jsx(Pane, { forceCollapsed: narrowViewport, hoverReveal: true, id: "chat-sidebar", maxWidth: SIDEBAR_MAX_WIDTH, minWidth: SIDEBAR_DEFAULT_WIDTH, onOverlayActiveChange: setSidebarOverlayMounted, resizable: true, side: sidebarSide, width: `${SIDEBAR_DEFAULT_WIDTH}px`, children: sidebar })), _jsx(PaneMain, { children: _jsxs(Routes, { children: [_jsx(Route, { element: chatView, index: true }), _jsx(Route, { element: chatView, path: ":sessionId" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(SkillsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "skills" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(MessagingView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "messaging" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(ArtifactsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "artifacts" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(StudyView, {}) }), path: "study" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(LibraryView, {}) }), path: "library" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(GraphView, {}) }), path: "graph" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(RecorderView, {}) }), path: "recorder" }), _jsx(Route, { element: null, path: "cron" }), _jsx(Route, { element: null, path: "profiles" }), _jsx(Route, { element: null, path: "settings" }), _jsx(Route, { element: null, path: "command-center" }), _jsx(Route, { element: null, path: "agents" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEW_CHAT_ROUTE }), path: "new" }), _jsx(Route, { element: _jsx(LegacySessionRedirect, {}), path: "sessions/:sessionId" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEW_CHAT_ROUTE }), path: "*" })] }) }), panesFlipped ? fileBrowserPane : terminalPane, previewPane, reviewPane, panesFlipped ? terminalPane : fileBrowserPane] }));
+    return (_jsxs(AppShell, { leftStatusbarItems: leftStatusbarItems, leftTitlebarTools: titlebarToolGroups.flat.left, mainOverlays: mainOverlays, onOpenSettings: openSettings, overlays: overlays, previewPaneOpen: chatOpen && Boolean(previewTarget || filePreviewTarget || browserRailOpen), statusbarItems: statusbarItems, terminalPaneOpen: terminalSidebarOpen, titlebarTools: titlebarToolGroups.flat.right, children: [!isSecondaryWindow() && (_jsx(Pane, { forceCollapsed: narrowViewport, hoverReveal: true, id: "chat-sidebar", maxWidth: SIDEBAR_MAX_WIDTH, minWidth: SIDEBAR_DEFAULT_WIDTH, onOverlayActiveChange: setSidebarOverlayMounted, resizable: true, side: sidebarSide, width: `${SIDEBAR_DEFAULT_WIDTH}px`, children: sidebar })), _jsx(PaneMain, { children: _jsxs(Routes, { children: [_jsx(Route, { element: chatView, index: true }), _jsx(Route, { element: chatView, path: ":sessionId" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(SkillsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "skills" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(MessagingView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "messaging" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(ArtifactsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "artifacts" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(StudyView, {}) }), path: "study" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(LibraryView, {}) }), path: "library" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(GraphView, {}) }), path: "graph" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(RecorderView, {}) }), path: "recorder" }), _jsx(Route, { element: null, path: "cron" }), _jsx(Route, { element: null, path: "profiles" }), _jsx(Route, { element: null, path: "settings" }), _jsx(Route, { element: null, path: "command-center" }), _jsx(Route, { element: null, path: "agents" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEW_CHAT_ROUTE }), path: "new" }), _jsx(Route, { element: _jsx(LegacySessionRedirect, {}), path: "sessions/:sessionId" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEW_CHAT_ROUTE }), path: "*" })] }) }), panesFlipped ? fileBrowserPane : terminalPane, previewPane, reviewPane, panesFlipped ? terminalPane : fileBrowserPane] }));
 }
 function LegacySessionRedirect() {
     const { sessionId } = useParams();

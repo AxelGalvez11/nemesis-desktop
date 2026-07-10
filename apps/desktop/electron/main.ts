@@ -65,6 +65,7 @@ import {
 import { installEmbedReferer } from './embed-referer'
 import { readDirForIpc } from './fs-read-dir'
 import { probeGatewayWebSocket } from './gateway-ws-probe'
+import { registerSchoolBrowserIpc } from './school-browser'
 import { scanGitRepos } from './git-repo-scan'
 import {
   fileDiffVsHead,
@@ -7895,6 +7896,9 @@ function disposeTerminalSession(id) {
 }
 
 ipcMain.handle('hermes:fs:readDir', async (_event, dirPath) => readDirForIpc(dirPath))
+
+// App-managed agent browser (school-portal mirror) — see school-browser.ts.
+registerSchoolBrowserIpc()
 
 ipcMain.handle('hermes:fs:gitRoot', async (_event, startPath) => gitRootForIpc(startPath))
 

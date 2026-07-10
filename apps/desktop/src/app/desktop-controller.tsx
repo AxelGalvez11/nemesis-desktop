@@ -10,6 +10,7 @@ import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overla
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { Pane, PaneMain } from '@/components/pane-shell'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
+import { useAgentBrowserWatcher } from '@/hooks/use-agent-browser-watcher'
 import { useExportsPreviewWatcher } from '@/hooks/use-exports-preview-watcher'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { isFocusWithin } from '@/lib/keybinds/combo'
@@ -47,6 +48,7 @@ import {
   setPetOverlayScaleHandler,
   setPetOverlaySubmitHandler
 } from '../store/pet-overlay'
+import { $browserRailOpen } from '../store/browser-rail'
 import { $filePreviewTarget, $previewTarget, closeActiveRightRailTab } from '../store/preview'
 import { $activeGatewayProfile, $freshSessionRequest, $profileScope, refreshActiveProfile } from '../store/profile'
 import { $startWorkSessionRequest, followActiveSessionCwd, resolveNewSessionCwd } from '../store/projects'
@@ -190,6 +192,8 @@ export function DesktopController() {
 
   // Deliverables written into Library/Exports auto-open in the preview rail.
   useExportsPreviewWatcher()
+  // The agent-browser mirror pops open when a turn starts browsing.
+  useAgentBrowserWatcher()
 
   const busyRef = useRef(false)
   const creatingSessionRef = useRef(false)
@@ -203,6 +207,7 @@ export function DesktopController() {
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
   const filePreviewTarget = useStore($filePreviewTarget)
   const previewTarget = useStore($previewTarget)
+  const browserRailOpen = useStore($browserRailOpen)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
   const messagingSessions = useStore($messagingSessions)
   const terminalTakeover = useStore($terminalTakeover)
@@ -266,8 +271,10 @@ export function DesktopController() {
   const { connectionRef, gatewayRef, requestGateway } = useGatewayRequest()
 
   useEffect(() => {
-    window.hermesDesktop?.setPreviewShortcutActive?.(Boolean(chatOpen && (filePreviewTarget || previewTarget)))
-  }, [chatOpen, filePreviewTarget, previewTarget])
+    window.hermesDesktop?.setPreviewShortcutActive?.(
+      Boolean(chatOpen && (filePreviewTarget || previewTarget || browserRailOpen))
+    )
+  }, [browserRailOpen, chatOpen, filePreviewTarget, previewTarget])
 
   useEffect(() => {
     startUpdatePoller()
@@ -383,7 +390,7 @@ export function DesktopController() {
       }
 
       // Otherwise ⌘/Ctrl+W closes the active preview tab when one is open.
-      if ($filePreviewTarget.get() || $previewTarget.get()) {
+      if ($filePreviewTarget.get() || $previewTarget.get() || $browserRailOpen.get()) {
         event.preventDefault()
         event.stopPropagation()
         closeActiveRightRailTab()
@@ -1184,7 +1191,7 @@ export function DesktopController() {
   // Other sidebars docked as real columns on the terminal's rail. Force-collapsed
   // hover-reveal overlays (narrow window) don't take a column, so they don't count.
   const railColumnOpen =
-    (chatOpen && Boolean(previewTarget || filePreviewTarget) && previewPaneOpen) ||
+    (chatOpen && Boolean(previewTarget || filePreviewTarget || browserRailOpen) && previewPaneOpen) ||
     (chatOpen && !narrowViewport && fileBrowserOpen) ||
     (chatOpen && Boolean(currentCwd.trim()) && !narrowViewport && reviewOpen)
 
@@ -1194,7 +1201,7 @@ export function DesktopController() {
 
   const previewPane = (
     <Pane
-      disabled={!chatOpen || (!previewTarget && !filePreviewTarget)}
+      disabled={!chatOpen || (!previewTarget && !filePreviewTarget && !browserRailOpen)}
       id={PREVIEW_PANE_ID}
       key="preview"
       maxWidth={PREVIEW_RAIL_MAX_WIDTH}
@@ -1299,7 +1306,7 @@ export function DesktopController() {
       mainOverlays={mainOverlays}
       onOpenSettings={openSettings}
       overlays={overlays}
-      previewPaneOpen={chatOpen && Boolean(previewTarget || filePreviewTarget)}
+      previewPaneOpen={chatOpen && Boolean(previewTarget || filePreviewTarget || browserRailOpen)}
       statusbarItems={statusbarItems}
       terminalPaneOpen={terminalSidebarOpen}
       titlebarTools={titlebarToolGroups.flat.right}

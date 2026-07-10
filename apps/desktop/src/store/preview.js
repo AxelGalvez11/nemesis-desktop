@@ -1,7 +1,8 @@
 import { atom, computed } from 'nanostores';
 import { persistentAtom } from '@/lib/persisted';
 import { normalize } from '@/lib/text';
-import { $rightRailActiveTabId, PREVIEW_PANE_ID, RIGHT_RAIL_PREVIEW_TAB_ID, selectRightRailTab } from './layout';
+import { $browserRailOpen } from './browser-rail';
+import { $rightRailActiveTabId, PREVIEW_PANE_ID, RIGHT_RAIL_BROWSER_TAB_ID, RIGHT_RAIL_PREVIEW_TAB_ID, selectRightRailTab } from './layout';
 import { setPaneOpen } from './panes';
 import { $activeSessionId, $selectedStoredSessionId } from './session';
 const REGISTRY_STORAGE_KEY = 'hermes.desktop.sessionPreviews.v1';
@@ -20,9 +21,11 @@ export const $filePreviewTabs = persistentAtom(TABS_STORAGE_KEY, [], {
     encode: tabs => JSON.stringify(tabs, (key, value) => (key === 'dataUrl' ? undefined : value))
 });
 // Drop a restored active file-tab that didn't survive validation so the rail
-// never points at a tab that isn't there.
-if ($rightRailActiveTabId.get().startsWith('file:') &&
-    !$filePreviewTabs.get().some(tab => tab.id === $rightRailActiveTabId.get())) {
+// never points at a tab that isn't there. Same for a restored 'browser' id —
+// the mirror tab always starts closed.
+if (($rightRailActiveTabId.get().startsWith('file:') &&
+    !$filePreviewTabs.get().some(tab => tab.id === $rightRailActiveTabId.get())) ||
+    $rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID) {
     selectRightRailTab(RIGHT_RAIL_PREVIEW_TAB_ID);
 }
 export const $filePreviewTarget = computed([$filePreviewTabs, $rightRailActiveTabId], (tabs, activeTabId) => {
@@ -284,11 +287,28 @@ function closeFilePreviewTab(tabId) {
         setPaneOpen(PREVIEW_PANE_ID, false);
     }
 }
+/** Hide the agent-browser mirror tab (the browser process keeps running). */
+function closeBrowserRailTab() {
+    if (!$browserRailOpen.get()) {
+        return;
+    }
+    $browserRailOpen.set(false);
+    if ($rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID) {
+        selectRightRailTab($previewTarget.get() ? RIGHT_RAIL_PREVIEW_TAB_ID : ($filePreviewTabs.get()[0]?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID));
+    }
+    if (!$previewTarget.get() && $filePreviewTabs.get().length === 0) {
+        setPaneOpen(PREVIEW_PANE_ID, false);
+    }
+}
 export function closeRightRailTab(tabId) {
     if (tabId === RIGHT_RAIL_PREVIEW_TAB_ID) {
         if ($previewTarget.get()) {
             dismissPreviewTarget();
         }
+        return;
+    }
+    if (tabId === RIGHT_RAIL_BROWSER_TAB_ID) {
+        closeBrowserRailTab();
         return;
     }
     closeFilePreviewTab(tabId);
@@ -299,6 +319,9 @@ export const closeActiveRightRailTab = () => closeRightRailTab($rightRailActiveT
 // so "close others / to the right" act on what the user actually sees.
 function rightRailTabOrder() {
     const ids = [];
+    if ($browserRailOpen.get()) {
+        ids.push(RIGHT_RAIL_BROWSER_TAB_ID);
+    }
     if ($previewTarget.get()) {
         ids.push(RIGHT_RAIL_PREVIEW_TAB_ID);
     }
@@ -327,12 +350,14 @@ export function closeRightRailTabsToRight(tabId) {
         closeRightRailTab(id);
     }
 }
-/** Dismisses the active preview + every file tab so the rail pane unmounts. */
+/** Dismisses the active preview + every file tab + the browser mirror so the
+ *  rail pane unmounts. */
 export function closeRightRail() {
     if ($previewTarget.get()) {
         dismissPreviewTarget();
     }
     $filePreviewTabs.set([]);
+    $browserRailOpen.set(false);
     setPaneOpen(PREVIEW_PANE_ID, false);
 }
 export function clearSessionPreviewRegistry() {
