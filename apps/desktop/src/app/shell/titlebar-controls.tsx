@@ -15,10 +15,12 @@ import {
   $fileBrowserOpen,
   $panesFlipped,
   $sidebarOpen,
+  PREVIEW_PANE_ID,
   toggleFileBrowserOpen,
   togglePanesFlipped,
   toggleSidebarOpen
 } from '@/store/layout'
+import { $paneOpen, togglePane } from '@/store/panes'
 
 import { appViewForPath, isOverlayView } from '../routes'
 
@@ -55,6 +57,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const fileBrowserOpen = useStore($fileBrowserOpen)
   const sidebarOpen = useStore($sidebarOpen)
   const panesFlipped = useStore($panesFlipped)
+  const previewPaneOpen = useStore($paneOpen(PREVIEW_PANE_ID))
 
   const toggleHaptics = () => {
     if (!hapticsMuted) {
@@ -72,7 +75,11 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   // swaps which pane each one toggles. Default: sessions left, file browser
   // right. Flipped: file browser left, sessions right. Sidebar toggles never
   // carry an active highlight — they're plain show/hide affordances.
-  const fileBrowserEdge = { open: fileBrowserOpen, toggle: toggleFileBrowserOpen }
+  // Student build: the right edge IS the single tabbed rail (Sources | Browser
+  // | Preview) — there is no separate file-browser column to toggle.
+  const fileBrowserEdge = NEMESIS_STUDENT_BUILD
+    ? { open: previewPaneOpen, toggle: () => togglePane(PREVIEW_PANE_ID) }
+    : { open: fileBrowserOpen, toggle: toggleFileBrowserOpen }
   const sessionsEdge = { open: sidebarOpen, toggle: toggleSidebarOpen }
   const leftEdge = panesFlipped ? fileBrowserEdge : sessionsEdge
   const rightEdge = panesFlipped ? sessionsEdge : fileBrowserEdge

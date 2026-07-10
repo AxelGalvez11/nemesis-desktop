@@ -16,7 +16,6 @@ import { $currentCwd } from '@/store/session';
 import { SidebarPanelLabel } from '../shell/sidebar-label';
 import { ProjectTree } from './files/tree';
 import { useProjectTree } from './files/use-project-tree';
-import { SourcesTab } from './sources';
 export function RightSidebarPane({ onActivateFile, onActivateFolder }) {
     const { t } = useI18n();
     const r = t.rightSidebar;
@@ -47,7 +46,7 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }) {
     };
     return (_jsx("aside", { "aria-label": r.aria, className: cn('before:pointer-events-none relative flex h-full w-full min-w-0 flex-col overflow-hidden border-(--ui-stroke-secondary) bg-(--ui-sidebar-surface-background) pt-(--titlebar-height) text-(--ui-text-tertiary)', panesFlipped
             ? 'border-r shadow-[inset_-0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'
-            : 'border-l shadow-[inset_0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'), children: NEMESIS_STUDENT_BUILD ? (_jsx(SourcesTab, {})) : (_jsx(FilesystemTab, { canCollapse: canCollapse, collapseNonce: collapseNonce, cwd: effectiveCwd, cwdName: cwdName, data: data, error: rootError, hasWorkspace: hasWorkspace, loading: rootLoading, onActivateFile: onActivateFile, onActivateFolder: onActivateFolder, onCollapseAll: collapseAll, onLoadChildren: loadChildren, onNodeOpenChange: setNodeOpen, onPreviewFile: previewFile, onRefresh: () => void refreshRoot(), openState: openState })) }));
+            : 'border-l shadow-[inset_0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'), children: NEMESIS_STUDENT_BUILD ? (_jsx(PaneEmptyState, { label: "Not available" })) : (_jsx(FilesystemTab, { canCollapse: canCollapse, collapseNonce: collapseNonce, cwd: effectiveCwd, cwdName: cwdName, data: data, error: rootError, hasWorkspace: hasWorkspace, loading: rootLoading, onActivateFile: onActivateFile, onActivateFolder: onActivateFolder, onCollapseAll: collapseAll, onLoadChildren: loadChildren, onNodeOpenChange: setNodeOpen, onPreviewFile: previewFile, onRefresh: () => void refreshRoot(), openState: openState })) }));
 }
 // Sidebar palette + hover-reveal: header actions stay reachable while moving
 // from the project label to the action buttons.

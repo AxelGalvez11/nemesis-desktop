@@ -7,19 +7,27 @@ import { Tip } from '@/components/ui/tooltip';
 import { translateNow, useI18n } from '@/i18n';
 import { formatCombo } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
+import { SourcesTab } from '@/app/right-sidebar/sources';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $browserRailOpen } from '@/store/browser-rail';
-import { $panesFlipped, $rightRailActiveTabId, RIGHT_RAIL_BROWSER_TAB_ID, RIGHT_RAIL_PREVIEW_TAB_ID, selectRightRailTab } from '@/store/layout';
+import { $panesFlipped, $rightRailActiveTabId, RIGHT_RAIL_BROWSER_TAB_ID, RIGHT_RAIL_PREVIEW_TAB_ID, RIGHT_RAIL_SOURCES_TAB_ID, selectRightRailTab } from '@/store/layout';
 import { $filePreviewTabs, $previewReloadRequest, $previewTarget, closeOtherRightRailTabs, closeRightRail, closeRightRailTab, closeRightRailTabsToRight } from '@/store/preview';
 import { $dirtyPreviewUrls } from '@/store/preview-edit';
 import { BrowserMirror } from './browser-mirror';
 import { PreviewPane } from './preview-pane';
-// Synthetic target for the agent-browser mirror tab — it renders BrowserMirror,
-// not PreviewPane, so this only feeds the tab strip (label/tooltip/dirty-lookup).
+// Synthetic targets for the non-PreviewPane tabs (browser mirror + pinned
+// sources) — they only feed the tab strip (label/tooltip/dirty-lookup).
 const BROWSER_TAB_TARGET = {
     kind: 'url',
     label: 'Browser',
     source: 'agent-browser',
     url: 'about:agent-browser'
+};
+const SOURCES_TAB_TARGET = {
+    kind: 'url',
+    label: 'Sources',
+    source: 'sources',
+    url: 'about:sources'
 };
 export const PREVIEW_RAIL_MIN_WIDTH = '18rem';
 export const PREVIEW_RAIL_MAX_WIDTH = '38rem';
@@ -44,6 +52,11 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
     const dirtyPreviewUrls = useStore($dirtyPreviewUrls);
     const browserRailOpen = useStore($browserRailOpen);
     const tabs = useMemo(() => [
+        // Student build: Sources is the rail's pinned home tab — the one right
+        // panel replaces the old separate sources sidebar column.
+        ...(NEMESIS_STUDENT_BUILD
+            ? [{ id: RIGHT_RAIL_SOURCES_TAB_ID, label: 'Sources', target: SOURCES_TAB_TARGET }]
+            : []),
         ...(browserRailOpen
             ? [{ id: RIGHT_RAIL_BROWSER_TAB_ID, label: 'Browser', target: BROWSER_TAB_TARGET }]
             : []),
@@ -70,6 +83,7 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
         // titlebar-height so it opens below the band. 0px elsewhere → unchanged.
         style: { paddingTop: 'var(--right-rail-top-inset, 0px)' }, children: [_jsxs("div", { className: "group/rail-tabs flex h-(--titlebar-height) shrink-0 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)", children: [_jsx("div", { className: "flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, index) => {
                             const active = tab.id === activeTab.id;
+                            const pinned = tab.id === RIGHT_RAIL_SOURCES_TAB_ID;
                             const hasOthers = tabs.length > 1;
                             const hasTabsToRight = index < tabs.length - 1;
                             const dirty = Boolean(dirtyPreviewUrls[tab.target.url]);
@@ -89,6 +103,6 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
                                                 if (event.button === 1) {
                                                     event.preventDefault();
                                                 }
-                                            }, children: [active && (_jsx("span", { "aria-hidden": "true", className: "absolute inset-x-0 top-0 h-px bg-(--ui-stroke-primary)" })), _jsx(Tip, { label: tab.target.path || tab.target.url || tab.label, children: _jsx("button", { "aria-selected": active, className: "flex h-full min-w-0 max-w-full items-center overflow-hidden pl-3 pr-2 text-left outline-none", onClick: () => selectRightRailTab(tab.id), role: "tab", type: "button", children: _jsx("span", { className: "block min-w-0 truncate", children: tab.label }) }) }), _jsx("span", { "aria-hidden": "true", className: "pointer-events-none absolute inset-y-0 right-0 w-9 bg-[linear-gradient(to_right,transparent,var(--tab-bg)_55%)] opacity-0 transition-opacity group-hover/tab:opacity-100 group-focus-within/tab:opacity-100" }), dirty && (_jsx("span", { "aria-hidden": "true", className: "pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center opacity-100 transition-opacity group-hover/tab:opacity-0 group-focus-within/tab:opacity-0", children: _jsx("span", { className: "size-2 rounded-full bg-amber-500 shadow-[0_0_0_2px_var(--tab-bg),0_1px_2px_rgba(0,0,0,0.45)] dark:bg-amber-400" }) })), _jsx("button", { "aria-label": t.preview.closeTab(tab.label), className: "pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-sm text-(--ui-text-tertiary) opacity-0 transition-[background-color,color,opacity] hover:bg-(--ui-bg-secondary) hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100", onClick: () => closeRightRailTab(tab.id), type: "button", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) })] }) }), _jsxs(ContextMenuContent, { children: [_jsxs(ContextMenuItem, { onSelect: () => closeRightRailTab(tab.id), children: [t.common.close, _jsx("span", { className: "ml-auto pl-4 text-(--ui-text-tertiary)", children: formatCombo('mod+w') })] }), _jsx(ContextMenuItem, { disabled: !hasOthers, onSelect: () => closeOtherRightRailTabs(tab.id), children: t.preview.closeOthers }), _jsx(ContextMenuItem, { disabled: !hasTabsToRight, onSelect: () => closeRightRailTabsToRight(tab.id), children: t.preview.closeToRight }), _jsx(ContextMenuSeparator, {}), _jsx(ContextMenuItem, { onSelect: closeRightRail, children: t.preview.closeAll })] })] }, tab.id));
-                        }) }), _jsx("button", { "aria-label": t.preview.closePane, className: "mr-1.5 grid size-6 shrink-0 self-center place-items-center rounded-md text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/rail-tabs:opacity-100 [-webkit-app-region:no-drag]", onClick: closeRightRail, type: "button", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: activeTab.id === RIGHT_RAIL_BROWSER_TAB_ID ? (_jsx(BrowserMirror, {})) : (_jsx(PreviewPane, { embedded: true, onRestartServer: isPreview ? onRestartServer : undefined, reloadRequest: previewReloadRequest, setTitlebarToolGroup: setTitlebarToolGroup, target: activeTab.target })) })] }));
+                                            }, children: [active && (_jsx("span", { "aria-hidden": "true", className: "absolute inset-x-0 top-0 h-px bg-(--ui-stroke-primary)" })), _jsx(Tip, { label: tab.target.path || tab.target.url || tab.label, children: _jsx("button", { "aria-selected": active, className: "flex h-full min-w-0 max-w-full items-center overflow-hidden pl-3 pr-2 text-left outline-none", onClick: () => selectRightRailTab(tab.id), role: "tab", type: "button", children: _jsx("span", { className: "block min-w-0 truncate", children: tab.label }) }) }), _jsx("span", { "aria-hidden": "true", className: "pointer-events-none absolute inset-y-0 right-0 w-9 bg-[linear-gradient(to_right,transparent,var(--tab-bg)_55%)] opacity-0 transition-opacity group-hover/tab:opacity-100 group-focus-within/tab:opacity-100" }), dirty && (_jsx("span", { "aria-hidden": "true", className: "pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center opacity-100 transition-opacity group-hover/tab:opacity-0 group-focus-within/tab:opacity-0", children: _jsx("span", { className: "size-2 rounded-full bg-amber-500 shadow-[0_0_0_2px_var(--tab-bg),0_1px_2px_rgba(0,0,0,0.45)] dark:bg-amber-400" }) })), !pinned && (_jsx("button", { "aria-label": t.preview.closeTab(tab.label), className: "pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-sm text-(--ui-text-tertiary) opacity-0 transition-[background-color,color,opacity] hover:bg-(--ui-bg-secondary) hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100", onClick: () => closeRightRailTab(tab.id), type: "button", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) }))] }) }), _jsxs(ContextMenuContent, { children: [_jsxs(ContextMenuItem, { disabled: pinned, onSelect: () => closeRightRailTab(tab.id), children: [t.common.close, _jsx("span", { className: "ml-auto pl-4 text-(--ui-text-tertiary)", children: formatCombo('mod+w') })] }), _jsx(ContextMenuItem, { disabled: !hasOthers, onSelect: () => closeOtherRightRailTabs(tab.id), children: t.preview.closeOthers }), _jsx(ContextMenuItem, { disabled: !hasTabsToRight, onSelect: () => closeRightRailTabsToRight(tab.id), children: t.preview.closeToRight }), _jsx(ContextMenuSeparator, {}), _jsx(ContextMenuItem, { onSelect: closeRightRail, children: t.preview.closeAll })] })] }, tab.id));
+                        }) }), _jsx("button", { "aria-label": t.preview.closePane, className: "mr-1.5 grid size-6 shrink-0 self-center place-items-center rounded-md text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/rail-tabs:opacity-100 [-webkit-app-region:no-drag]", onClick: closeRightRail, type: "button", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: activeTab.id === RIGHT_RAIL_SOURCES_TAB_ID ? (_jsx("div", { className: "flex h-full min-h-0 flex-col bg-(--ui-sidebar-surface-background)", children: _jsx(SourcesTab, {}) })) : activeTab.id === RIGHT_RAIL_BROWSER_TAB_ID ? (_jsx(BrowserMirror, {})) : (_jsx(PreviewPane, { embedded: true, onRestartServer: isPreview ? onRestartServer : undefined, reloadRequest: previewReloadRequest, setTitlebarToolGroup: setTitlebarToolGroup, target: activeTab.target })) })] }));
 }

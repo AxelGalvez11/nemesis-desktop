@@ -20,8 +20,18 @@ export function useAgentBrowserWatcher() {
     void window.hermesDesktop?.schoolBrowser?.ensure().catch(() => undefined)
 
     let lastOpenedFor = ''
+    // nanostores fires the subscriber once with the CURRENT value — for a
+    // restored session whose last turn used the browser, that would pop the
+    // mirror on every relaunch. Only live updates should auto-open.
+    let initialSnapshot = true
 
     return $messages.subscribe(messages => {
+      if (initialSnapshot) {
+        initialSnapshot = false
+
+        return
+      }
+
       const last = messages[messages.length - 1] as { id?: string } | undefined
 
       if (!last) {

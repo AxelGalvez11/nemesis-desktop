@@ -30,6 +30,9 @@ export const FILE_BROWSER_PANE_ID = 'file-browser';
 export const PREVIEW_PANE_ID = 'preview';
 export const RIGHT_RAIL_PREVIEW_TAB_ID = 'preview';
 export const RIGHT_RAIL_BROWSER_TAB_ID = 'browser';
+// Student build only: the agent's cited sources live as a PINNED first tab in
+// the single right rail (there is no separate sources sidebar column).
+export const RIGHT_RAIL_SOURCES_TAB_ID = 'sources';
 ensurePaneRegistered(CHAT_SIDEBAR_PANE_ID, { open: true });
 ensurePaneRegistered(FILE_BROWSER_PANE_ID, { open: false });
 ensurePaneRegistered(PREVIEW_PANE_ID, { open: true });

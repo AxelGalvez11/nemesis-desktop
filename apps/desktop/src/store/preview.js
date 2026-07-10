@@ -1,8 +1,9 @@
 import { atom, computed } from 'nanostores';
 import { persistentAtom } from '@/lib/persisted';
 import { normalize } from '@/lib/text';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $browserRailOpen } from './browser-rail';
-import { $rightRailActiveTabId, PREVIEW_PANE_ID, RIGHT_RAIL_BROWSER_TAB_ID, RIGHT_RAIL_PREVIEW_TAB_ID, selectRightRailTab } from './layout';
+import { $rightRailActiveTabId, PREVIEW_PANE_ID, RIGHT_RAIL_BROWSER_TAB_ID, RIGHT_RAIL_PREVIEW_TAB_ID, RIGHT_RAIL_SOURCES_TAB_ID, selectRightRailTab } from './layout';
 import { setPaneOpen } from './panes';
 import { $activeSessionId, $selectedStoredSessionId } from './session';
 const REGISTRY_STORAGE_KEY = 'hermes.desktop.sessionPreviews.v1';
@@ -22,11 +23,13 @@ export const $filePreviewTabs = persistentAtom(TABS_STORAGE_KEY, [], {
 });
 // Drop a restored active file-tab that didn't survive validation so the rail
 // never points at a tab that isn't there. Same for a restored 'browser' id —
-// the mirror tab always starts closed.
+// the mirror tab always starts closed — and a restored 'sources' id outside
+// the student build (where that tab doesn't exist).
 if (($rightRailActiveTabId.get().startsWith('file:') &&
     !$filePreviewTabs.get().some(tab => tab.id === $rightRailActiveTabId.get())) ||
-    $rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID) {
-    selectRightRailTab(RIGHT_RAIL_PREVIEW_TAB_ID);
+    $rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID ||
+    (!NEMESIS_STUDENT_BUILD && $rightRailActiveTabId.get() === RIGHT_RAIL_SOURCES_TAB_ID)) {
+    selectRightRailTab(NEMESIS_STUDENT_BUILD ? RIGHT_RAIL_SOURCES_TAB_ID : RIGHT_RAIL_PREVIEW_TAB_ID);
 }
 export const $filePreviewTarget = computed([$filePreviewTabs, $rightRailActiveTabId], (tabs, activeTabId) => {
     if (!activeTabId.startsWith('file:')) {
@@ -301,6 +304,11 @@ function closeBrowserRailTab() {
     }
 }
 export function closeRightRailTab(tabId) {
+    // The Sources tab is pinned (student build) — the whole-rail close is the
+    // only way it leaves the strip.
+    if (tabId === RIGHT_RAIL_SOURCES_TAB_ID) {
+        return;
+    }
     if (tabId === RIGHT_RAIL_PREVIEW_TAB_ID) {
         if ($previewTarget.get()) {
             dismissPreviewTarget();
@@ -319,6 +327,9 @@ export const closeActiveRightRailTab = () => closeRightRailTab($rightRailActiveT
 // so "close others / to the right" act on what the user actually sees.
 function rightRailTabOrder() {
     const ids = [];
+    if (NEMESIS_STUDENT_BUILD) {
+        ids.push(RIGHT_RAIL_SOURCES_TAB_ID);
+    }
     if ($browserRailOpen.get()) {
         ids.push(RIGHT_RAIL_BROWSER_TAB_ID);
     }

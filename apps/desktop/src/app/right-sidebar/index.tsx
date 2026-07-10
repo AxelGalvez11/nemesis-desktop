@@ -19,7 +19,6 @@ import { SidebarPanelLabel } from '../shell/sidebar-label'
 
 import { ProjectTree } from './files/tree'
 import { useProjectTree } from './files/use-project-tree'
-import { SourcesTab } from './sources'
 
 interface RightSidebarPaneProps {
   onActivateFile: (path: string) => void
@@ -83,11 +82,11 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
           : 'border-l shadow-[inset_0.0625rem_0_0_color-mix(in_srgb,white_18%,transparent)]'
       )}
     >
-      {/* Student build: the rail IS the agent's cited sources. The workspace file
-          tree is a developer surface — hidden entirely for students (the Library
-          is their file home). */}
+      {/* This pane is the DEVELOPER workspace tree only. The student build never
+          mounts it — Sources lives as the pinned first tab of the chat right
+          rail (see ChatPreviewRail). */}
       {NEMESIS_STUDENT_BUILD ? (
-        <SourcesTab />
+        <PaneEmptyState label="Not available" />
       ) : (
         <FilesystemTab
           canCollapse={canCollapse}

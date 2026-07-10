@@ -13,6 +13,7 @@ import { RemoteDisplayBanner } from '@/components/remote-display-banner'
 import { useAgentBrowserWatcher } from '@/hooks/use-agent-browser-watcher'
 import { useExportsPreviewWatcher } from '@/hooks/use-exports-preview-watcher'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { isFocusWithin } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
 import { useSkinCommand } from '@/themes/use-skin-command'
@@ -1191,8 +1192,10 @@ export function DesktopController() {
   // Other sidebars docked as real columns on the terminal's rail. Force-collapsed
   // hover-reveal overlays (narrow window) don't take a column, so they don't count.
   const railColumnOpen =
-    (chatOpen && Boolean(previewTarget || filePreviewTarget || browserRailOpen) && previewPaneOpen) ||
-    (chatOpen && !narrowViewport && fileBrowserOpen) ||
+    (chatOpen &&
+      (NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
+      previewPaneOpen) ||
+    (chatOpen && !NEMESIS_STUDENT_BUILD && !narrowViewport && fileBrowserOpen) ||
     (chatOpen && Boolean(currentCwd.trim()) && !narrowViewport && reviewOpen)
 
   // Once the terminal would share its rail with another sidebar, drop it to a
@@ -1201,7 +1204,9 @@ export function DesktopController() {
 
   const previewPane = (
     <Pane
-      disabled={!chatOpen || (!previewTarget && !filePreviewTarget && !browserRailOpen)}
+      disabled={
+        !chatOpen || (!NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen)
+      }
       id={PREVIEW_PANE_ID}
       key="preview"
       maxWidth={PREVIEW_RAIL_MAX_WIDTH}
@@ -1216,7 +1221,9 @@ export function DesktopController() {
     </Pane>
   )
 
-  const fileBrowserPane = (
+  // Student build has exactly ONE right panel — the tabbed rail (Sources |
+  // Browser | Preview). The developer file-browser column never mounts.
+  const fileBrowserPane = NEMESIS_STUDENT_BUILD ? null : (
     <Pane
       defaultOpen={false}
       disabled={!chatOpen}
@@ -1306,7 +1313,9 @@ export function DesktopController() {
       mainOverlays={mainOverlays}
       onOpenSettings={openSettings}
       overlays={overlays}
-      previewPaneOpen={chatOpen && Boolean(previewTarget || filePreviewTarget || browserRailOpen)}
+      previewPaneOpen={
+        chatOpen && (NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen))
+      }
       statusbarItems={statusbarItems}
       terminalPaneOpen={terminalSidebarOpen}
       titlebarTools={titlebarToolGroups.flat.right}

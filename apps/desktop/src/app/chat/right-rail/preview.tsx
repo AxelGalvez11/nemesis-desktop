@@ -14,12 +14,15 @@ import { Tip } from '@/components/ui/tooltip'
 import { translateNow, useI18n } from '@/i18n'
 import { formatCombo } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
+import { SourcesTab } from '@/app/right-sidebar/sources'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { $browserRailOpen } from '@/store/browser-rail'
 import {
   $panesFlipped,
   $rightRailActiveTabId,
   RIGHT_RAIL_BROWSER_TAB_ID,
   RIGHT_RAIL_PREVIEW_TAB_ID,
+  RIGHT_RAIL_SOURCES_TAB_ID,
   type RightRailTabId,
   selectRightRailTab
 } from '@/store/layout'
@@ -38,13 +41,20 @@ import { $dirtyPreviewUrls } from '@/store/preview-edit'
 import { BrowserMirror } from './browser-mirror'
 import { PreviewPane } from './preview-pane'
 
-// Synthetic target for the agent-browser mirror tab — it renders BrowserMirror,
-// not PreviewPane, so this only feeds the tab strip (label/tooltip/dirty-lookup).
+// Synthetic targets for the non-PreviewPane tabs (browser mirror + pinned
+// sources) — they only feed the tab strip (label/tooltip/dirty-lookup).
 const BROWSER_TAB_TARGET: PreviewTarget = {
   kind: 'url',
   label: 'Browser',
   source: 'agent-browser',
   url: 'about:agent-browser'
+}
+
+const SOURCES_TAB_TARGET: PreviewTarget = {
+  kind: 'url',
+  label: 'Sources',
+  source: 'sources',
+  url: 'about:sources'
 }
 
 export const PREVIEW_RAIL_MIN_WIDTH = '18rem'
@@ -88,6 +98,11 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
 
   const tabs = useMemo<readonly RailTab[]>(
     () => [
+      // Student build: Sources is the rail's pinned home tab — the one right
+      // panel replaces the old separate sources sidebar column.
+      ...(NEMESIS_STUDENT_BUILD
+        ? [{ id: RIGHT_RAIL_SOURCES_TAB_ID, label: 'Sources', target: SOURCES_TAB_TARGET } as RailTab]
+        : []),
       ...(browserRailOpen
         ? [{ id: RIGHT_RAIL_BROWSER_TAB_ID, label: 'Browser', target: BROWSER_TAB_TARGET } as RailTab]
         : []),
@@ -133,6 +148,7 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
         >
           {tabs.map((tab, index) => {
             const active = tab.id === activeTab.id
+            const pinned = tab.id === RIGHT_RAIL_SOURCES_TAB_ID
             const hasOthers = tabs.length > 1
             const hasTabsToRight = index < tabs.length - 1
             const dirty = Boolean(dirtyPreviewUrls[tab.target.url])
@@ -192,18 +208,20 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
                         <span className="size-2 rounded-full bg-amber-500 shadow-[0_0_0_2px_var(--tab-bg),0_1px_2px_rgba(0,0,0,0.45)] dark:bg-amber-400" />
                       </span>
                     )}
-                    <button
-                      aria-label={t.preview.closeTab(tab.label)}
-                      className="pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-sm text-(--ui-text-tertiary) opacity-0 transition-[background-color,color,opacity] hover:bg-(--ui-bg-secondary) hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100"
-                      onClick={() => closeRightRailTab(tab.id)}
-                      type="button"
-                    >
-                      <Codicon name="close" size="0.75rem" />
-                    </button>
+                    {!pinned && (
+                      <button
+                        aria-label={t.preview.closeTab(tab.label)}
+                        className="pointer-events-none absolute right-1.5 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-sm text-(--ui-text-tertiary) opacity-0 transition-[background-color,color,opacity] hover:bg-(--ui-bg-secondary) hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100"
+                        onClick={() => closeRightRailTab(tab.id)}
+                        type="button"
+                      >
+                        <Codicon name="close" size="0.75rem" />
+                      </button>
+                    )}
                   </div>
                 </ContextMenuTrigger>
                 <ContextMenuContent>
-                  <ContextMenuItem onSelect={() => closeRightRailTab(tab.id)}>
+                  <ContextMenuItem disabled={pinned} onSelect={() => closeRightRailTab(tab.id)}>
                     {t.common.close}
                     <span className="ml-auto pl-4 text-(--ui-text-tertiary)">{formatCombo('mod+w')}</span>
                   </ContextMenuItem>
@@ -231,7 +249,11 @@ export function ChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {activeTab.id === RIGHT_RAIL_BROWSER_TAB_ID ? (
+        {activeTab.id === RIGHT_RAIL_SOURCES_TAB_ID ? (
+          <div className="flex h-full min-h-0 flex-col bg-(--ui-sidebar-surface-background)">
+            <SourcesTab />
+          </div>
+        ) : activeTab.id === RIGHT_RAIL_BROWSER_TAB_ID ? (
           <BrowserMirror />
         ) : (
           <PreviewPane
