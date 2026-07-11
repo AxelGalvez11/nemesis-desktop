@@ -1,6 +1,7 @@
 export const SESSION_ROUTE_PREFIX = '/';
 export const NEW_CHAT_ROUTE = '/';
 export const TODAY_ROUTE = '/today';
+export const LEDGER_ROUTE = '/ledger';
 export const SETTINGS_ROUTE = '/settings';
 export const COMMAND_CENTER_ROUTE = '/command-center';
 export const SKILLS_ROUTE = '/skills';
@@ -18,6 +19,7 @@ export const STARMAP_ROUTE = '/starmap';
 export const APP_ROUTES = [
     { id: 'new', path: NEW_CHAT_ROUTE, view: 'chat' },
     { id: 'today', path: TODAY_ROUTE, view: 'today' },
+    { id: 'ledger', path: LEDGER_ROUTE, view: 'ledger' },
     { id: 'settings', path: SETTINGS_ROUTE, view: 'settings' },
     { id: 'command-center', path: COMMAND_CENTER_ROUTE, view: 'command-center' },
     { id: 'skills', path: SKILLS_ROUTE, view: 'skills' },

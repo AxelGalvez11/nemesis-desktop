@@ -128,6 +128,7 @@ export type SidebarNavId =
   | 'command-center'
   | 'graph'
   | 'library'
+  | 'ledger'
   | 'messaging'
   | 'new-session'
   | 'recorder'

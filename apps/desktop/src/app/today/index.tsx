@@ -18,7 +18,7 @@ import {
 import { setComposerDraft } from '@/store/composer'
 
 import { type CalendarEvent, dateKey, loadCalendarState, parseDateKey } from '../calendar/model'
-import { CALENDAR_ROUTE, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../routes'
+import { CALENDAR_ROUTE, LEDGER_ROUTE, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../routes'
 
 const DAY_START_MINUTES = 8 * 60
 const DAY_END_MINUTES = 22 * 60
@@ -537,10 +537,14 @@ export function TodayView() {
           </Card>
         </div>
 
-        <div className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-(--ui-stroke-tertiary) px-4 py-3 text-center text-[0.6875rem] text-(--ui-text-tertiary)">
+        <button
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg border border-(--ui-stroke-tertiary) px-4 py-3 text-center text-[0.6875rem] text-(--ui-text-tertiary) transition-colors hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-secondary)"
+          onClick={() => navigate(LEDGER_ROUTE)}
+          type="button"
+        >
           <Codicon className="shrink-0 text-(--theme-primary)" name="shield" size="0.85rem" />
           <span>Read your accounts this morning · sent nothing · submitted nothing.</span>
-        </div>
+        </button>
       </div>
     </main>
   )
