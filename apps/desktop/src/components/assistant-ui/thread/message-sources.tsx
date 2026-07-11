@@ -4,8 +4,9 @@
 // traffic); this is the per-answer receipt.
 import { type FC, useMemo } from 'react'
 
-import { SourceFavicon, sourcesFromText } from '@/app/right-sidebar/sources'
+import { SOURCE_CHIP_CLASS_NAME, SourceFavicon, sourcesFromText } from '@/app/right-sidebar/sources'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
+import { focusSourceInRail } from '@/store/source-focus'
 
 export const MessageSources: FC<{ text: string }> = ({ text }) => {
   const sources = useMemo(() => (text ? sourcesFromText(text) : []), [text])
@@ -18,17 +19,17 @@ export const MessageSources: FC<{ text: string }> = ({ text }) => {
     <div className="mt-3 flex flex-wrap gap-1.5" data-slot="nemesis_message-sources">
       {sources.map(source => (
         <button
-          className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] text-foreground/85 transition-colors hover:border-(--theme-primary) hover:text-foreground"
+          className={SOURCE_CHIP_CLASS_NAME}
           key={source.url}
-          onClick={() => void window.hermesDesktop?.openExternal?.(source.url)}
+          onClick={() => focusSourceInRail(source.url)}
           title={`${source.title}\n${source.url}`}
           type="button"
         >
           <SourceFavicon domain={source.domain} />
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-(--theme-primary)">
+          <span className="max-w-[14rem] truncate text-foreground/80">{source.title}</span>
+          <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/55">
             {source.badge}
           </span>
-          <span className="max-w-[14rem] truncate text-muted-foreground">{source.title}</span>
         </button>
       ))}
     </div>

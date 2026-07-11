@@ -3,10 +3,17 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 // WebContentsView the MAIN process composites OVER this panel — no screencast,
 // no forwarded input (cf. browser-mirror.tsx, the config fallback). This
 // component renders only the tab strip + URL bar + a placeholder box, and
-// keeps the main process told exactly where the page should sit (setBounds
-// with the placeholder's rect, in CSS px — main scales by the live zoomFactor)
-// and when it may be shown at all (setVisible — the native view floats above
-// ALL DOM, so it must yield while a modal dialog is open).
+// keeps the main process told exactly where the page should sit and when it
+// may be shown at all (setVisible — the native view floats above ALL DOM, so
+// it must yield while a modal dialog is open).
+//
+// COORDINATES: setBounds wants device-independent pixels (DIP) relative to the
+// window content view; getBoundingClientRect returns CSS px. At web-zoom z,
+// DIP = CSS × z. We do that multiply HERE (single source of truth) and the
+// main process applies the rect verbatim — so there's no cross-process race
+// where main scales a stale CSS rect by a fresh zoom factor (that mismatch
+// was what let the page spill out over the chat when the panel first showed
+// or the zoom changed).
 import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Codicon } from '@/components/ui/codicon';
@@ -15,8 +22,13 @@ import { $zoomPercent } from '@/store/zoom';
 import { BrowserMirror } from './browser-mirror';
 // ResizeObserver only fires on SIZE changes; pure position shifts (another
 // pane opening pushes this one sideways at the same size) are caught by this
-// slow poll instead.
-const BOUNDS_POLL_MS = 250;
+// poll instead. Kept brisk so any residual drift self-corrects within a couple
+// frames rather than lingering as a visible misplacement.
+const BOUNDS_POLL_MS = 120;
+// Below this the placeholder isn't really laid out yet (freshly mounted, or the
+// rail is mid-collapse): its rect is 0/near-0 and must NOT be sent as bounds —
+// that's exactly what parked the page over the chat for a frame.
+const MIN_PANEL_PX = 8;
 function api() {
     return window.hermesDesktop?.schoolView;
 }
@@ -88,16 +100,24 @@ function NativeBrowserPanel() {
     // Last rect actually SENT — drift is measured against it, so slow 1px-a-beat
     // creep still converges on a send instead of being skipped forever.
     const lastSentRef = useRef({ height: -1, width: -1, x: -1, y: -1 });
+    // Live web-zoom factor for the CSS→DIP conversion. Kept in a ref so
+    // reportBounds stays a stable callback (it reads the latest zoom without
+    // being re-created every zoom step).
+    const zoomFactorRef = useRef(1);
+    zoomFactorRef.current = (zoomPercent || 100) / 100;
+    // Returns true only when a real (laid-out) rect was pushed — the reveal path
+    // waits on that so the view is never shown at stale or zero bounds.
     const reportBounds = useCallback((force = false) => {
         const box = placeholderRef.current?.getBoundingClientRect();
-        if (!box) {
-            return;
+        if (!box || box.width < MIN_PANEL_PX || box.height < MIN_PANEL_PX) {
+            return false;
         }
+        const z = zoomFactorRef.current;
         const rect = {
-            height: Math.round(box.height),
-            width: Math.round(box.width),
-            x: Math.round(box.x),
-            y: Math.round(box.y)
+            height: Math.round(box.height * z),
+            width: Math.round(box.width * z),
+            x: Math.round(box.x * z),
+            y: Math.round(box.y * z)
         };
         const last = lastSentRef.current;
         const unchanged = Math.abs(rect.x - last.x) < 2 &&
@@ -105,12 +125,13 @@ function NativeBrowserPanel() {
             Math.abs(rect.width - last.width) < 2 &&
             Math.abs(rect.height - last.height) < 2;
         if (!force && unchanged) {
-            return;
+            return true;
         }
         lastSentRef.current = rect;
         void api()
             ?.setBounds(rect)
             .catch(() => undefined);
+        return true;
     }, []);
     // Tab/URL state: seed once, then live off the main-process broadcasts
     // (every tab mutation pushes a fresh snapshot).
@@ -121,16 +142,21 @@ function NativeBrowserPanel() {
             .catch(() => undefined);
         return api()?.onState(setState);
     }, []);
-    // Geometry: observer for size changes + the position-shift poll.
+    // Geometry: observer for size changes + a window-resize hook for position
+    // shifts (the rail slides right when the window widens at the same rail
+    // width, which ResizeObserver doesn't see) + a brisk poll as the backstop.
     useEffect(() => {
         const observer = new ResizeObserver(() => reportBounds());
         if (placeholderRef.current) {
             observer.observe(placeholderRef.current);
         }
+        const onResize = () => reportBounds(true);
+        window.addEventListener('resize', onResize);
         const timer = window.setInterval(() => reportBounds(), BOUNDS_POLL_MS);
         reportBounds(true);
         return () => {
             observer.disconnect();
+            window.removeEventListener('resize', onResize);
             window.clearInterval(timer);
         };
     }, [reportBounds]);
@@ -146,12 +172,45 @@ function NativeBrowserPanel() {
     useEffect(() => {
         let lastApplied = null;
         let raf = 0;
+        let revealRaf = 0;
+        let disposed = false;
+        // Reveal only AFTER a real, current rect has been pushed — otherwise the
+        // view flashes for a frame at whatever bounds it last had (a different
+        // window width, or the pre-layout zero rect). Retry across a few frames
+        // because a freshly-mounted / just-un-collapsed placeholder needs a beat to
+        // lay out before getBoundingClientRect is meaningful.
+        const revealWhenMeasured = (attempt = 0) => {
+            window.cancelAnimationFrame(revealRaf);
+            revealRaf = window.requestAnimationFrame(() => {
+                if (disposed) {
+                    return;
+                }
+                // Force a fresh send (bypass the unchanged-skip) so the view is at the
+                // correct spot the instant it appears.
+                const measured = reportBounds(true);
+                if (measured) {
+                    void api()
+                        ?.setVisible(true)
+                        .catch(() => undefined);
+                }
+                else if (attempt < 8) {
+                    revealWhenMeasured(attempt + 1);
+                }
+            });
+        };
         const sync = () => {
             const next = !document.querySelector('[role="dialog"][data-state="open"]');
-            if (next !== lastApplied) {
-                lastApplied = next;
+            if (next === lastApplied) {
+                return;
+            }
+            lastApplied = next;
+            if (next) {
+                revealWhenMeasured();
+            }
+            else {
+                window.cancelAnimationFrame(revealRaf);
                 void api()
-                    ?.setVisible(next)
+                    ?.setVisible(false)
                     .catch(() => undefined);
             }
         };
@@ -175,13 +234,15 @@ function NativeBrowserPanel() {
             subtree: true
         });
         return () => {
+            disposed = true;
             observer.disconnect();
             window.cancelAnimationFrame(raf);
+            window.cancelAnimationFrame(revealRaf);
             void api()
                 ?.setVisible(false)
                 .catch(() => undefined);
         };
-    }, []);
+    }, [reportBounds]);
     // Tab-op invokes resolve with the fresh snapshot — apply it directly
     // instead of waiting a beat for the broadcast to come back around.
     const apply = useCallback((op) => {

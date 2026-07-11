@@ -3,12 +3,14 @@
 // list. This replaces the developer file-tree as the default right-sidebar pane: students
 // ask evidence questions, so the rail should answer "where did that come from?".
 import { useStore } from '@nanostores/react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { type ChatMessage, chatMessageText } from '@/lib/chat-messages'
+import { cn } from '@/lib/utils'
 import { openBrowserRail } from '@/store/browser-rail'
 import { $messages } from '@/store/session'
+import { $focusedSourceUrl } from '@/store/source-focus'
 
 export interface SourceRef {
   url: string
@@ -16,6 +18,9 @@ export interface SourceRef {
   badge: string
   domain: string
 }
+
+export const SOURCE_CHIP_CLASS_NAME =
+  'group/source inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/35 bg-card/65 px-2 py-1 text-[11px] leading-none text-muted-foreground shadow-[0_1px_1px_rgb(0_0_0/0.04)] transition-[background-color,border-color,color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border/70 hover:bg-card hover:text-foreground hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/35'
 
 const MD_LINK = /\[([^\]\n]{1,160})\]\((https?:\/\/[^\s)]+)\)/g
 const BARE_URL = /https?:\/\/[^\s<>"'()[\]{}]+/g
@@ -141,12 +146,17 @@ function makeSink(): { out: SourceRef[]; sink: SourceSink } {
     }
 
     seen.add(key)
+
     const domain = parsed.hostname.replace(/^www\./, '')
+
     // API lookups label better by WHAT was searched than by their endpoint path.
-    const query = parsed.searchParams.get('term') || parsed.searchParams.get('search') || parsed.searchParams.get('query')
+    const query =
+      parsed.searchParams.get('term') || parsed.searchParams.get('search') || parsed.searchParams.get('query')
+
     const fallback = query
       ? `${domain} — “${decodeURIComponent(query).replace(/\+/g, ' ').slice(0, 40)}”`
       : `${domain}${parsed.pathname.length > 1 ? decodeURIComponent(parsed.pathname).slice(0, 60) : ''}`
+
     out.push({ badge: badgeFor(parsed.hostname), domain, title: (title || fallback).trim(), url })
   }
 
@@ -238,7 +248,29 @@ export function SourceFavicon({ domain }: { domain: string }) {
 
 export function SourcesTab() {
   const messages = useStore($messages)
+  const focusedSourceUrl = useStore($focusedSourceUrl)
   const sources = useMemo(() => extractSources(messages), [messages])
+  const sourceElements = useRef(new Map<string, HTMLButtonElement>())
+
+  useEffect(() => {
+    if (!focusedSourceUrl) {
+      return
+    }
+
+    const sourceElement = sourceElements.current.get(focusedSourceUrl)
+
+    if (sourceElement) {
+      sourceElement.scrollIntoView({ block: 'nearest' })
+    }
+
+    const clearFocusTimer = window.setTimeout(() => {
+      if ($focusedSourceUrl.get() === focusedSourceUrl) {
+        $focusedSourceUrl.set(null)
+      }
+    }, 1600)
+
+    return () => window.clearTimeout(clearFocusTimer)
+  }, [focusedSourceUrl, sources])
 
   const openExternal = (url: string) => {
     void window.hermesDesktop?.openExternal?.(url)
@@ -276,17 +308,33 @@ export function SourcesTab() {
           <div className="flex flex-wrap gap-1.5">
             {sources.map(source => (
               <button
-                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2 py-1 text-[11px] text-foreground/85 transition-colors hover:border-(--theme-primary) hover:text-foreground"
+                className={cn(
+                  SOURCE_CHIP_CLASS_NAME,
+                  focusedSourceUrl === source.url &&
+                    'bg-card text-foreground ring-2 ring-(--theme-primary)/70 ring-offset-1 ring-offset-background'
+                )}
                 key={source.url}
                 onClick={() => openExternal(source.url)}
+                ref={element => {
+                  if (element) {
+                    sourceElements.current.set(source.url, element)
+                  } else {
+                    sourceElements.current.delete(source.url)
+                  }
+                }}
                 title={`${source.title}\n${source.url}`}
                 type="button"
               >
                 <SourceFavicon domain={source.domain} />
-                <span className="font-semibold uppercase tracking-wide text-[10px] text-(--theme-primary)">
+                <span className="max-w-[8.5rem] truncate text-foreground/80">{source.title}</span>
+                <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/55">
                   {source.badge}
                 </span>
-                <span className="max-w-[8.5rem] truncate text-muted-foreground">{source.title}</span>
+                <Codicon
+                  className="ml-0.5 shrink-0 opacity-0 transition-opacity group-hover/source:opacity-60 group-focus-visible/source:opacity-60"
+                  name="link-external"
+                  size="0.625rem"
+                />
               </button>
             ))}
           </div>

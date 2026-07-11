@@ -4755,7 +4755,10 @@ function setAndPersistZoomLevel(window, zoomLevel) {
   const next = clampZoomLevel(zoomLevel)
   window.webContents.setZoomLevel(next)
   // Keep any open settings UI in sync, including changes made via the
-  // keyboard shortcuts or the View menu.
+  // keyboard shortcuts or the View menu. The native school-browser view
+  // re-fits itself off this same broadcast: the renderer recomputes its DIP
+  // bounds from the new zoom (native-browser-panel.tsx) and re-sends, so main
+  // never has to re-scale a stale rect here.
   window.webContents.send('hermes:zoom:changed', { level: next, percent: zoomLevelToPercent(next) })
   window.webContents
     .executeJavaScript(

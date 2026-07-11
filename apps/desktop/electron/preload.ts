@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // Native school browser (WebContentsView tabs over the chat right rail).
   schoolView: {
     getState: () => ipcRenderer.invoke('hermes:schoolView:getState'),
+    debugBounds: () => ipcRenderer.invoke('hermes:schoolView:debugBounds'),
     newTab: url => ipcRenderer.invoke('hermes:schoolView:newTab', url),
     closeTab: id => ipcRenderer.invoke('hermes:schoolView:closeTab', id),
     activate: id => ipcRenderer.invoke('hermes:schoolView:activate', id),

@@ -163,21 +163,6 @@ function pushState() {
   broadcast('hermes:schoolView:state', serializeState())
 }
 
-/** Views position in device-independent px; the renderer reports CSS px from
- *  getBoundingClientRect, which drift apart the moment window zoom ≠ 100%.
- *  Scaling by the live zoomFactor keeps the native view glued to the panel
- *  at every zoom step (the settings "text size" option and Cmd +/−). */
-function scaledBounds(rect: PanelRect): Electron.Rectangle {
-  const factor = hostWindow && !hostWindow.isDestroyed() ? hostWindow.webContents.getZoomFactor() : 1
-
-  return {
-    height: Math.max(0, Math.round(rect.height * factor)),
-    width: Math.max(0, Math.round(rect.width * factor)),
-    x: Math.round(rect.x * factor),
-    y: Math.round(rect.y * factor)
-  }
-}
-
 function applyLayout() {
   if (!hostWindow || hostWindow.isDestroyed()) {
     return
@@ -189,7 +174,16 @@ function applyLayout() {
     tab.view.setVisible(show)
 
     if (show && panelRect) {
-      tab.view.setBounds(scaledBounds(panelRect))
+      // panelRect is already in DIP — the renderer did the CSS→DIP conversion
+      // with the live zoom factor (see native-browser-panel.tsx). Apply it
+      // verbatim; no scaling here, so main can never fight the renderer over
+      // the factor.
+      tab.view.setBounds({
+        height: Math.max(0, Math.round(panelRect.height)),
+        width: Math.max(0, Math.round(panelRect.width)),
+        x: Math.round(panelRect.x),
+        y: Math.round(panelRect.y)
+      })
     }
   }
 }
@@ -369,6 +363,21 @@ export function installSchoolView(win: BrowserWindow) {
 export function registerSchoolViewIpc() {
   ipcMain.handle('hermes:schoolView:getState', () => serializeState())
 
+  // Diagnostics: the active view's real DIP bounds + the host content size, so
+  // a harness can confirm the page sits inside the rail (no cross-process
+  // scaling drift) without needing an OS-level composite screenshot.
+  ipcMain.handle('hermes:schoolView:debugBounds', () => {
+    const tab = activeTab()
+    const content = hostWindow && !hostWindow.isDestroyed() ? hostWindow.getContentBounds() : null
+
+    return {
+      content: content ? { height: content.height, width: content.width } : null,
+      panelRect,
+      view: tab ? tab.view.getBounds() : null,
+      visible: panelVisible
+    }
+  })
+
   ipcMain.handle('hermes:schoolView:newTab', (_event, rawUrl) => {
     const tab = createTab(typeof rawUrl === 'string' ? rawUrl : undefined)
 
@@ -430,7 +439,13 @@ export function registerSchoolViewIpc() {
     return serializeState()
   })
 
-  ipcMain.handle('hermes:schoolView:setBounds', (_event, rect) => {
+  ipcMain.handle('hermes:schoolView:setBounds', (event, rect) => {
+    // Geometry only means anything in the HOST window's coordinate space — a
+    // secondary session window's panel must not steer views it doesn't host.
+    if (!hostWindow || event.sender !== hostWindow.webContents) {
+      return false
+    }
+
     const parsed = rect as Partial<PanelRect> | null
 
     if (
@@ -452,7 +467,11 @@ export function registerSchoolViewIpc() {
     return true
   })
 
-  ipcMain.handle('hermes:schoolView:setVisible', (_event, visible) => {
+  ipcMain.handle('hermes:schoolView:setVisible', (event, visible) => {
+    if (!hostWindow || event.sender !== hostWindow.webContents) {
+      return false
+    }
+
     panelVisible = Boolean(visible)
     applyLayout()
     pushState()

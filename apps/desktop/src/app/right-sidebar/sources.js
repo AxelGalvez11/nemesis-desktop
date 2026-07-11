@@ -4,11 +4,14 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 // list. This replaces the developer file-tree as the default right-sidebar pane: students
 // ask evidence questions, so the rail should answer "where did that come from?".
 import { useStore } from '@nanostores/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Codicon } from '@/components/ui/codicon';
 import { chatMessageText } from '@/lib/chat-messages';
+import { cn } from '@/lib/utils';
 import { openBrowserRail } from '@/store/browser-rail';
 import { $messages } from '@/store/session';
+import { $focusedSourceUrl } from '@/store/source-focus';
+export const SOURCE_CHIP_CLASS_NAME = 'group/source inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/35 bg-card/65 px-2 py-1 text-[11px] leading-none text-muted-foreground shadow-[0_1px_1px_rgb(0_0_0/0.04)] transition-[background-color,border-color,color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border/70 hover:bg-card hover:text-foreground hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/35';
 const MD_LINK = /\[([^\]\n]{1,160})\]\((https?:\/\/[^\s)]+)\)/g;
 const BARE_URL = /https?:\/\/[^\s<>"'()[\]{}]+/g;
 const PMID_RE = /\bPMID:?\s*(\d{6,9})\b/gi;
@@ -172,9 +175,34 @@ export function SourceFavicon({ domain }) {
 }
 export function SourcesTab() {
     const messages = useStore($messages);
+    const focusedSourceUrl = useStore($focusedSourceUrl);
     const sources = useMemo(() => extractSources(messages), [messages]);
+    const sourceElements = useRef(new Map());
+    useEffect(() => {
+        if (!focusedSourceUrl) {
+            return;
+        }
+        const sourceElement = sourceElements.current.get(focusedSourceUrl);
+        if (sourceElement) {
+            sourceElement.scrollIntoView({ block: 'nearest' });
+        }
+        const clearFocusTimer = window.setTimeout(() => {
+            if ($focusedSourceUrl.get() === focusedSourceUrl) {
+                $focusedSourceUrl.set(null);
+            }
+        }, 1600);
+        return () => window.clearTimeout(clearFocusTimer);
+    }, [focusedSourceUrl, sources]);
     const openExternal = (url) => {
         void window.hermesDesktop?.openExternal?.(url);
     };
-    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col pt-1", children: [_jsxs("div", { className: "flex h-7 shrink-0 items-center justify-between px-2.5", children: [_jsx("span", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70", children: "Sources" }), _jsxs("button", { className: "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.65rem] font-medium text-muted-foreground transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground", onClick: () => openBrowserRail(), title: "Watch and steer the agent's browser", type: "button", children: [_jsx(Codicon, { name: "globe", size: "0.7rem" }), "Browser"] })] }), sources.length === 0 ? (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 text-center", children: [_jsx("div", { className: "text-[0.7rem] font-semibold uppercase tracking-[0.07em] text-muted-foreground/75", children: "No sources yet" }), _jsx("div", { className: "text-[0.68rem] leading-relaxed text-muted-foreground/65", children: "Ask a research question \u2014 every paper, label, and trial the agent cites lands here." })] })) : (_jsx("div", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: _jsx("div", { className: "flex flex-wrap gap-1.5", children: sources.map(source => (_jsxs("button", { className: "inline-flex max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2 py-1 text-[11px] text-foreground/85 transition-colors hover:border-(--theme-primary) hover:text-foreground", onClick: () => openExternal(source.url), title: `${source.title}\n${source.url}`, type: "button", children: [_jsx(SourceFavicon, { domain: source.domain }), _jsx("span", { className: "font-semibold uppercase tracking-wide text-[10px] text-(--theme-primary)", children: source.badge }), _jsx("span", { className: "max-w-[8.5rem] truncate text-muted-foreground", children: source.title })] }, source.url))) }) }))] }));
+    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col pt-1", children: [_jsxs("div", { className: "flex h-7 shrink-0 items-center justify-between px-2.5", children: [_jsx("span", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70", children: "Sources" }), _jsxs("button", { className: "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.65rem] font-medium text-muted-foreground transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground", onClick: () => openBrowserRail(), title: "Watch and steer the agent's browser", type: "button", children: [_jsx(Codicon, { name: "globe", size: "0.7rem" }), "Browser"] })] }), sources.length === 0 ? (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 text-center", children: [_jsx("div", { className: "text-[0.7rem] font-semibold uppercase tracking-[0.07em] text-muted-foreground/75", children: "No sources yet" }), _jsx("div", { className: "text-[0.68rem] leading-relaxed text-muted-foreground/65", children: "Ask a research question \u2014 every paper, label, and trial the agent cites lands here." })] })) : (_jsx("div", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: _jsx("div", { className: "flex flex-wrap gap-1.5", children: sources.map(source => (_jsxs("button", { className: cn(SOURCE_CHIP_CLASS_NAME, focusedSourceUrl === source.url &&
+                            'bg-card text-foreground ring-2 ring-(--theme-primary)/70 ring-offset-1 ring-offset-background'), onClick: () => openExternal(source.url), ref: element => {
+                            if (element) {
+                                sourceElements.current.set(source.url, element);
+                            }
+                            else {
+                                sourceElements.current.delete(source.url);
+                            }
+                        }, title: `${source.title}\n${source.url}`, type: "button", children: [_jsx(SourceFavicon, { domain: source.domain }), _jsx("span", { className: "max-w-[8.5rem] truncate text-foreground/80", children: source.title }), _jsx("span", { className: "shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/55", children: source.badge }), _jsx(Codicon, { className: "ml-0.5 shrink-0 opacity-0 transition-opacity group-hover/source:opacity-60 group-focus-visible/source:opacity-60", name: "link-external", size: "0.625rem" })] }, source.url))) }) }))] }));
 }
