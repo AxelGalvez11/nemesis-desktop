@@ -16,7 +16,14 @@ import { useTheme } from '@/themes/context';
 import { LIBRARY_ROUTE } from '../routes';
 import { buildIndex, extractWikilinks, loadVault, saveNote } from '../library/vault';
 const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1';
-const DEFAULT_CONTROLS = { nodeSize: 4, repulsion: 40, rotate: true, spread: 34 };
+const DEFAULT_CONTROLS = {
+    neighborGlow: true,
+    nodeSize: 4,
+    repulsion: 40,
+    rotationSpeed: 0,
+    showNames: true,
+    spread: 34
+};
 // Always-visible node label (three-spritetext) tuning.
 const LABEL_MAX_CHARS = 24;
 const LABEL_TEXT_HEIGHT = 3.6;
@@ -165,6 +172,11 @@ export function GraphView() {
     // Direct-neighbor adjacency, rebuilt once per graph load (see the main effect below).
     const neighborsByNodeRef = useRef(new Map());
     const linksByNodeRef = useRef(new Map());
+    // Last-applied values for the tuning-panel effect below, so toggling "Node names" or
+    // dragging a layout slider only pays for a sprite rebuild / simulation reheat when
+    // that specific setting actually changed — not on every unrelated control tweak.
+    const prevShowNamesRef = useRef(controls.showNames);
+    const prevLayoutSignatureRef = useRef(`${controls.nodeSize}|${controls.spread}|${controls.repulsion}`);
     controlsRef.current = controls;
     useEffect(() => {
         const frame = window.requestAnimationFrame(() => {
@@ -187,8 +199,14 @@ export function GraphView() {
     // then re-trigger the (already-installed, ref-reading) color/width/particle accessors
     // via the library's own `.prop(.prop())` idiom for a cheap redigest — NOT refresh(),
     // which would tear down and rebuild every node's label sprite on every mouse move.
+    //
+    // "Neighbor glow" off short-circuits `active` to null — same as nothing being hovered
+    // or selected — so resolveNodeColor/resolveLinkColor fall through to their plain,
+    // un-dimmed color for every node/link. Written as a direct ref read (not a helper
+    // function call) everywhere it's needed below, so react-hooks/exhaustive-deps can see
+    // it only touches refs and doesn't ask for it to be listed as an effect dependency.
     function refreshHighlight() {
-        const active = hoverNodeRef.current ?? selectedNodeRef.current;
+        const active = controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null;
         const highlightNodes = highlightNodesRef.current;
         const highlightLinks = highlightLinksRef.current;
         highlightNodes.clear();
@@ -284,10 +302,13 @@ export function GraphView() {
                         : `<div style="font: 12px sans-serif; color:${paletteRef.current?.label ?? palette.label}">${graphNode.id}</div>`;
                 })
                     .nodeRelSize(controlsRef.current.nodeSize)
-                    .nodeColor((node) => resolveNodeColor(node, paletteRef.current ?? palette, highlightNodesRef.current, hoverNodeRef.current ?? selectedNodeRef.current))
+                    .nodeColor((node) => resolveNodeColor(node, paletteRef.current ?? palette, highlightNodesRef.current, controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null))
                     .nodeVal((node) => 1 + node.degree)
                     .nodeOpacity(0.9)
                     .nodeThreeObject((node) => {
+                    if (!controlsRef.current.showNames) {
+                        return undefined;
+                    }
                     const graphNode = node;
                     const activePalette = paletteRef.current ?? palette;
                     const color = graphNode.ghost ? activePalette.ghost : activePalette.label;
@@ -301,7 +322,7 @@ export function GraphView() {
                     return sprite;
                 })
                     .nodeThreeObjectExtend(true)
-                    .linkColor((link) => resolveLinkColor(link, paletteRef.current ?? palette, highlightLinksRef.current, hoverNodeRef.current ?? selectedNodeRef.current))
+                    .linkColor((link) => resolveLinkColor(link, paletteRef.current ?? palette, highlightLinksRef.current, controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null))
                     .linkWidth((link) => (highlightLinksRef.current.has(link) ? HIGHLIGHT_LINK_WIDTH : DEFAULT_LINK_WIDTH))
                     .linkOpacity(0.55)
                     .linkDirectionalParticles((link) => highlightLinksRef.current.has(link) ? HIGHLIGHT_LINK_PARTICLES : 0)
@@ -342,8 +363,8 @@ export function GraphView() {
                 instance.onEngineStop(() => instance.zoomToFit(500, 110));
                 window.setTimeout(() => instance.zoomToFit(700, 110), 1500);
                 const orbit = instance.controls();
-                orbit.autoRotate = controlsRef.current.rotate;
-                orbit.autoRotateSpeed = 0.5;
+                orbit.autoRotate = controlsRef.current.rotationSpeed > 0;
+                orbit.autoRotateSpeed = controlsRef.current.rotationSpeed;
                 observer = new ResizeObserver(() => {
                     instance.width(host.clientWidth || 800);
                     instance.height(host.clientHeight || 600);
@@ -374,8 +395,12 @@ export function GraphView() {
             graph?._destructor?.();
         };
     }, [navigate]);
-    // Live-apply the tuning panel: size, spread (link distance), repulsion (charge),
-    // rotation — then reheat so the layout actually re-settles.
+    // Live-apply the tuning panel: size, spread (link distance) and repulsion (charge) are
+    // cheap prop setters we can always re-send, but the simulation is only reheated when
+    // one of those three layout values actually changed — not on every render of this
+    // effect — so the "Rotation speed" / "Node names" / "Neighbor glow" controls below
+    // (none of which affect layout) don't jiggle the graph or yank the camera through the
+    // onEngineStop -> zoomToFit callback above.
     useEffect(() => {
         try {
             window.localStorage.setItem(GRAPH_SETTINGS_KEY, JSON.stringify(controls));
@@ -390,10 +415,21 @@ export function GraphView() {
         graph.nodeRelSize(controls.nodeSize);
         graph.d3Force('link')?.distance?.(controls.spread);
         graph.d3Force('charge')?.strength?.(-controls.repulsion);
-        graph.d3ReheatSimulation();
-        graph.controls().autoRotate = controls.rotate;
+        const layoutSignature = `${controls.nodeSize}|${controls.spread}|${controls.repulsion}`;
+        if (prevLayoutSignatureRef.current !== layoutSignature) {
+            prevLayoutSignatureRef.current = layoutSignature;
+            graph.d3ReheatSimulation();
+        }
+        const orbit = graph.controls();
+        orbit.autoRotate = controls.rotationSpeed > 0;
+        orbit.autoRotateSpeed = controls.rotationSpeed;
+        if (prevShowNamesRef.current !== controls.showNames) {
+            prevShowNamesRef.current = controls.showNames;
+            graph.refresh?.();
+        }
+        refreshHighlight();
     }, [controls, status]);
     return (_jsxs("div", { className: "relative flex h-full min-h-0 flex-col", children: [_jsxs("header", { className: "pointer-events-none absolute left-6 top-5 z-10", children: [_jsx("h1", { className: "text-lg font-semibold", children: "Graph" }), _jsx("p", { className: "text-xs text-muted-foreground", children: status === 'ready'
                             ? `${noteCount} notes${ghostCount > 0 ? ` · ${ghostCount} to create` : ''} — click any node`
-                            : '' }), status === 'ready' && ghostCount > 0 && (_jsx("p", { className: "text-[11px] text-muted-foreground/70", children: "Dim nodes are [[links]] with no note yet \u2014 click one to create it." }))] }), status === 'ready' && (_jsxs("div", { className: "absolute right-6 top-5 z-10 flex flex-col items-end gap-2", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { "aria-label": "Graph settings", className: "active:scale-[0.97] motion-reduce:transition-none", onClick: () => setPanelOpen(value => !value), size: "sm", variant: panelOpen ? 'secondary' : 'outline', children: _jsx(IconAdjustmentsHorizontal, { size: 14 }) }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?create=note`), size: "sm", variant: "outline", children: "+ New note" })] }), panelOpen && (_jsxs("div", { className: "w-64 rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated) p-4 text-(--ui-text-primary) shadow-lg", children: [_jsxs("div", { className: "mb-4", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Graph controls" }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: "Tune the map without changing your notes." })] }), _jsxs("div", { className: "space-y-4", children: [_jsx(ControlSlider, { label: "Node size", max: 10, min: 1, onChange: nodeSize => setControls(current => ({ ...current, nodeSize })), step: 0.5, value: controls.nodeSize }), _jsx(ControlSlider, { label: "Spread", max: 120, min: 10, onChange: spread => setControls(current => ({ ...current, spread })), step: 2, value: controls.spread }), _jsx(ControlSlider, { label: "Repulsion", max: 140, min: 0, onChange: repulsion => setControls(current => ({ ...current, repulsion })), step: 5, value: controls.repulsion })] }), _jsxs("label", { className: "mt-4 flex cursor-pointer items-center justify-between border-t border-(--ui-stroke-tertiary) pt-3 text-xs font-medium text-(--ui-text-primary)", children: ["Slow auto-rotate", _jsx(Switch, { checked: controls.rotate, onCheckedChange: rotate => setControls(current => ({ ...current, rotate })), size: "xs" })] }), _jsx(Button, { className: "mt-3", onClick: () => setControls(DEFAULT_CONTROLS), size: "inline", variant: "text", children: "Reset to defaults" })] }))] })), status === 'error' && (_jsx(EmptyState, { className: "flex-1", description: "Could not read the Library vault.", title: "Graph unavailable" })), status === 'empty' && (_jsx(EmptyState, { className: "flex-1", description: "Write linked notes in the Library first.", title: "Nothing to map yet" })), _jsx("div", { className: status === 'ready' || status === 'loading' ? 'min-h-0 flex-1' : 'hidden', ref: hostRef })] }));
+                            : '' }), status === 'ready' && ghostCount > 0 && (_jsx("p", { className: "text-[11px] text-muted-foreground/70", children: "Dim nodes are [[links]] with no note yet \u2014 click one to create it." }))] }), status === 'ready' && (_jsxs("div", { className: "absolute right-6 top-5 z-10 flex flex-col items-end gap-2", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { "aria-label": "Graph settings", className: "active:scale-[0.97] motion-reduce:transition-none", onClick: () => setPanelOpen(value => !value), size: "sm", variant: panelOpen ? 'secondary' : 'outline', children: _jsx(IconAdjustmentsHorizontal, { size: 14 }) }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?create=note`), size: "sm", variant: "outline", children: "+ New note" })] }), panelOpen && (_jsxs("div", { className: "w-64 rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated) p-4 text-(--ui-text-primary) shadow-lg", children: [_jsxs("div", { className: "mb-4", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Graph controls" }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: "Tune the map without changing your notes." })] }), _jsxs("div", { className: "space-y-4", children: [_jsx(ControlSlider, { label: "Node size", max: 10, min: 1, onChange: nodeSize => setControls(current => ({ ...current, nodeSize })), step: 0.5, value: controls.nodeSize }), _jsx(ControlSlider, { label: "Spread", max: 120, min: 10, onChange: spread => setControls(current => ({ ...current, spread })), step: 2, value: controls.spread }), _jsx(ControlSlider, { label: "Repulsion", max: 140, min: 0, onChange: repulsion => setControls(current => ({ ...current, repulsion })), step: 5, value: controls.repulsion }), _jsx(ControlSlider, { label: "Rotation speed", max: 3, min: 0, onChange: rotationSpeed => setControls(current => ({ ...current, rotationSpeed })), step: 0.1, value: controls.rotationSpeed })] }), _jsxs("label", { className: "mt-4 flex cursor-pointer items-center justify-between border-t border-(--ui-stroke-tertiary) pt-3 text-xs font-medium text-(--ui-text-primary)", children: ["Node names", _jsx(Switch, { checked: controls.showNames, onCheckedChange: showNames => setControls(current => ({ ...current, showNames })), size: "xs" })] }), _jsxs("label", { className: "mt-3 flex cursor-pointer items-center justify-between text-xs font-medium text-(--ui-text-primary)", children: ["Neighbor glow", _jsx(Switch, { checked: controls.neighborGlow, onCheckedChange: neighborGlow => setControls(current => ({ ...current, neighborGlow })), size: "xs" })] }), _jsx(Button, { className: "mt-3", onClick: () => setControls(DEFAULT_CONTROLS), size: "inline", variant: "text", children: "Reset to defaults" })] }))] })), status === 'error' && (_jsx(EmptyState, { className: "flex-1", description: "Could not read the Library vault.", title: "Graph unavailable" })), status === 'empty' && (_jsx(EmptyState, { className: "flex-1", description: "Write linked notes in the Library first.", title: "Nothing to map yet" })), _jsx("div", { className: status === 'ready' || status === 'loading' ? 'min-h-0 flex-1' : 'hidden', ref: hostRef })] }));
 }

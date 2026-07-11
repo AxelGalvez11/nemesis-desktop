@@ -261,7 +261,11 @@ function SourceRow({
   source: SourceRef
 }) {
   const fetchedTitle = useLinkTitle(source.url)
-  const title = fetchedTitle || source.title
+  // Some sources are raw API endpoints (NCBI eutils, openFDA) that answer a
+  // browser GET with an error page — "400 Bad Request", "403 Forbidden", etc.
+  // Never let that stand in as the title; fall back to our own derived label.
+  const looksLikeHttpError = /^\d{3}\b|bad request|forbidden|not found|error|access denied/i.test(fetchedTitle.trim())
+  const title = fetchedTitle && !looksLikeHttpError ? fetchedTitle : source.title
 
   return (
     <div className="group/source relative">
