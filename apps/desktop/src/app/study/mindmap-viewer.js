@@ -172,6 +172,7 @@ function MindmapCanvas({ file }) {
         let mind = null;
         let resizeObserver = null;
         let animationFrame = 0;
+        let hostCleanup = null;
         try {
             const root = applyStoredLayout(parseMindmapMarkdown(file.outline, file.title), readStoredLayout(file));
             addNoteIndicators(root);
@@ -209,6 +210,33 @@ function MindmapCanvas({ file }) {
                 const selected = nodes.at(-1);
                 setSelectedDetail(selected?.note ? { note: selected.note, topic: selected.topic } : null);
             });
+            // Clicking a parent node toggles its children open/closed — students expect the
+            // node itself to respond, not only mind-elixir's tiny edge expander dot. Notes
+            // still open via the selection listener above; both can happen on one click.
+            // A small movement guard keeps drag-drops from also toggling the dropped node.
+            let pointerOrigin = null;
+            const onPointerDown = (event) => {
+                pointerOrigin = { x: event.clientX, y: event.clientY };
+            };
+            const onTopicClick = (event) => {
+                const dragged = pointerOrigin &&
+                    Math.hypot(event.clientX - pointerOrigin.x, event.clientY - pointerOrigin.y) > 6;
+                if (dragged) {
+                    return;
+                }
+                const topic = event.target.closest('me-tpc');
+                const node = topic?.nodeObj;
+                if (mind && topic && node?.children?.length) {
+                    mind.expandNode(topic, node.expanded === false);
+                    persistLayout(file, mind);
+                }
+            };
+            host.addEventListener('pointerdown', onPointerDown);
+            host.addEventListener('click', onTopicClick);
+            hostCleanup = () => {
+                host.removeEventListener('pointerdown', onPointerDown);
+                host.removeEventListener('click', onTopicClick);
+            };
             mind.bus.addListener('operation', (operation) => {
                 if (operation.name === 'moveNodeAfter' || operation.name === 'moveNodeBefore' || operation.name === 'moveNodeIn') {
                     persistLayout(file, mind);
@@ -224,6 +252,7 @@ function MindmapCanvas({ file }) {
         return () => {
             window.cancelAnimationFrame(animationFrame);
             resizeObserver?.disconnect();
+            hostCleanup?.();
             mind?.destroy();
             mindRef.current = null;
         };
