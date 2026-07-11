@@ -1,136 +1,244 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-// Mind map viewer: renders an agent-written outline (see extras.ts) as an interactive
-// markmap (markmap-lib transforms markdown → tree, markmap-view lays it out as SVG).
-// Both are MIT-licensed and load no network resources — the transform + render are fully
-// local, matching every other vault-content viewer in this app (PdfViewer, Library notes).
-import { Transformer } from 'markmap-lib';
-import { Markmap } from 'markmap-view';
+// Interactive, local-only rendering for agent-authored Mindmaps/*.md files. Markdown
+// remains authoritative; mind-elixir only owns the viewport and a persisted arrangement.
+import 'mind-elixir/style.css';
+import MindElixir from 'mind-elixir';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-// One shared Transformer — it's stateless per-call (transform() takes the markdown fresh
-// each time), so there's no reason to build a new markdown-it pipeline per dialog open.
-const transformer = new Transformer();
-// Real CSS text, injected into markmap's own <style> tag (see the `style` option below) —
-// var()/color-mix() are resolved natively by the browser's CSS engine here, so referencing
-// the app's tokens directly is safe (unlike the `color` option below, which is a JS
-// function whose return value becomes an SVG stroke attribute).
-const MINDMAP_THEME_CSS = `
-.markmap {
-  --markmap-text-color: var(--ui-text-primary);
-  --markmap-a-color: var(--theme-primary);
-  --markmap-a-hover-color: var(--theme-primary);
-  --markmap-code-bg: color-mix(in srgb, var(--ui-text-primary) 10%, transparent);
-  --markmap-code-color: var(--ui-text-secondary);
-  --markmap-circle-open-bg: var(--ui-bg-card);
-  --markmap-highlight-bg: color-mix(in srgb, var(--theme-primary) 25%, transparent);
+import { LIBRARY_ROUTE } from '../routes';
+import { MINDMAP_DIR } from './extras';
+import { parseMindmapMarkdown } from './mindmap-parser';
+const LAYOUT_STORAGE_PREFIX = 'nemesis.study.mindmap.layout:';
+const MINDMAP_THEME = {
+    cssVar: {
+        '--accent-color': 'var(--theme-primary)',
+        '--bgcolor': 'var(--ui-editor-surface-background)',
+        '--color': 'var(--ui-text-secondary)',
+        '--main-bgcolor': 'var(--ui-bg-card)',
+        '--main-bgcolor-transparent': 'color-mix(in srgb, var(--ui-bg-card) 84%, transparent)',
+        '--main-border': '1px solid var(--ui-stroke-secondary)',
+        '--main-color': 'var(--ui-text-primary)',
+        '--map-padding': '64px 88px',
+        '--panel-bgcolor': 'var(--ui-bg-elevated)',
+        '--panel-border-color': 'var(--ui-stroke-secondary)',
+        '--panel-color': 'var(--ui-text-primary)',
+        '--root-bgcolor': 'var(--theme-primary)',
+        '--root-border-color': 'color-mix(in srgb, var(--theme-primary) 70%, black)',
+        '--root-color': 'white',
+        '--selected': 'var(--theme-primary)'
+    },
+    name: 'Nemesis Study',
+    palette: ['#b3382e', '#94683c', '#54745f', '#4e7082', '#735f86', '#8b5c66'],
+    type: 'light'
+};
+function mapPath(file) {
+    return `${MINDMAP_DIR}/${file.fileName}`;
 }
-`;
-// Chrome can resolve a CSS custom property to the CSS Color-4 `color(srgb r g b / a)`
-// syntax. That's real CSS (safe wherever the browser parses it natively, like the style
-// text above) — but the `color` option below returns a plain string that markmap-view
-// hands to d3's `.attr('stroke', …)`. The graph page (app/graph/index.tsx) hit this exact
-// class of bug with three.js, whose own color parser doesn't understand `color(srgb …)`
-// and silently falls back to black. SVG presentation attributes are CSS-parsed by the
-// browser too, so this is likely unnecessary here — but normalizing to a plain
-// `rgb(r, g, b)` string removes any doubt at near-zero cost. Local copy (not imported):
-// the graph page is out of this branch's scope, and this is a small, stable utility.
-function normalizeToRgb(computed) {
-    if (!computed) {
+function storageKey(file) {
+    return `${LAYOUT_STORAGE_PREFIX}${mapPath(file)}`;
+}
+function walkNodes(node, visit, parentId = null, index = 0) {
+    visit(node, parentId, index);
+    node.children?.forEach((child, index) => {
+        walkNodes(child, visit, node.id, index);
+    });
+}
+function collectLayout(root) {
+    const entries = [];
+    walkNodes(root, (node, parentId, index) => {
+        entries.push({ direction: node.direction, expanded: node.expanded, id: node.id, index, parentId });
+    });
+    return { entries, version: 1 };
+}
+function readStoredLayout(file) {
+    try {
+        const raw = window.localStorage.getItem(storageKey(file));
+        if (!raw) {
+            return null;
+        }
+        const parsed = JSON.parse(raw);
+        if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
+            return null;
+        }
+        const entries = parsed.entries.filter((entry) => Boolean(entry) &&
+            typeof entry.id === 'string' &&
+            typeof entry.index === 'number' &&
+            (entry.parentId === null || typeof entry.parentId === 'string'));
+        return { entries, version: 1 };
+    }
+    catch {
         return null;
     }
-    const rgb = computed.match(/rgba?\(([^)]+)\)/i);
-    if (rgb) {
-        const [r, g, b] = rgb[1].split(/[,/]/).map(part => Math.round(parseFloat(part.trim())));
-        return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? `rgb(${r}, ${g}, ${b})` : null;
+}
+function createsCycle(id, parentId, parentById) {
+    const visited = new Set([id]);
+    let cursor = parentId;
+    while (cursor) {
+        if (visited.has(cursor)) {
+            return true;
+        }
+        visited.add(cursor);
+        cursor = parentById.get(cursor) ?? null;
     }
-    const srgb = computed.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
-    if (srgb) {
-        const [r, g, b] = [srgb[1], srgb[2], srgb[3]].map(part => Math.round(parseFloat(part) * 255));
-        return `rgb(${r}, ${g}, ${b})`;
+    return false;
+}
+/** Apply only parent/order/direction/expanded state to freshly parsed nodes. Topics,
+ * notes, and membership always come from the current Markdown file. */
+function applyStoredLayout(root, stored) {
+    if (!stored) {
+        return root;
     }
-    return computed;
+    const nodesById = new Map();
+    const canonicalOrder = new Map();
+    const parentById = new Map();
+    walkNodes(root, (node, parentId, index) => {
+        nodesById.set(node.id, node);
+        canonicalOrder.set(node.id, index);
+        parentById.set(node.id, parentId);
+    });
+    const storedById = new Map(stored.entries.map(entry => [entry.id, entry]));
+    for (const entry of stored.entries) {
+        if (entry.id === root.id || !nodesById.has(entry.id) || !entry.parentId || !nodesById.has(entry.parentId)) {
+            continue;
+        }
+        if (!createsCycle(entry.id, entry.parentId, parentById)) {
+            parentById.set(entry.id, entry.parentId);
+        }
+    }
+    for (const node of nodesById.values()) {
+        node.children = [];
+        const entry = storedById.get(node.id);
+        if (entry?.direction === 0 || entry?.direction === 1) {
+            node.direction = entry.direction;
+        }
+        if (typeof entry?.expanded === 'boolean') {
+            node.expanded = entry.expanded;
+        }
+    }
+    for (const node of nodesById.values()) {
+        if (node.id === root.id) {
+            continue;
+        }
+        const parent = nodesById.get(parentById.get(node.id) ?? '') ?? root;
+        parent.children ??= [];
+        parent.children.push(node);
+    }
+    for (const parent of nodesById.values()) {
+        parent.children?.sort((left, right) => {
+            const leftEntry = storedById.get(left.id);
+            const rightEntry = storedById.get(right.id);
+            const leftOrder = leftEntry?.parentId === parent.id ? leftEntry.index : 1_000_000 + (canonicalOrder.get(left.id) ?? 0);
+            const rightOrder = rightEntry?.parentId === parent.id ? rightEntry.index : 1_000_000 + (canonicalOrder.get(right.id) ?? 0);
+            return leftOrder - rightOrder;
+        });
+    }
+    return root;
 }
-function resolveCssColor(value, fallback) {
-    const probe = document.createElement('span');
-    probe.style.color = value;
-    probe.style.display = 'none';
-    document.body.appendChild(probe);
-    const resolved = getComputedStyle(probe).color;
-    probe.remove();
-    return normalizeToRgb(resolved) || fallback;
+function addNoteIndicators(node) {
+    node.tags = node.note ? [{ className: 'mindmap-note-dot', text: '' }] : undefined;
+    node.children?.forEach(addNoteIndicators);
 }
-function readMindmapPalette() {
-    return {
-        accent: resolveCssColor('var(--theme-primary)', '#b3382e'),
-        line: resolveCssColor('color-mix(in srgb, var(--ui-text-primary) 32%, transparent)', 'rgba(160,160,160,0.5)')
-    };
+function persistLayout(file, mind) {
+    try {
+        window.localStorage.setItem(storageKey(file), JSON.stringify(collectLayout(mind.getData().nodeData)));
+    }
+    catch {
+        // Layout persistence is best-effort; the map remains fully usable without it.
+    }
 }
-/** Fallback-path parser: headings + bullets → an indented line list. Not a full markdown
- *  parser (deliberately) — this only has to be legible when markmap itself can't render. */
-function parseOutlineFallback(markdown) {
+function OutlineFallback({ file }) {
+    const root = parseMindmapMarkdown(file.outline, file.title);
     const lines = [];
-    let headingDepth = 0;
-    for (const rawLine of markdown.split(/\r?\n/)) {
-        const heading = rawLine.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
-        if (heading) {
-            headingDepth = heading[1].length - 1;
-            lines.push({ depth: headingDepth, text: heading[2] });
-            continue;
-        }
-        const bullet = rawLine.match(/^(\s*)[-*+]\s+(.+)$/);
-        if (bullet) {
-            const indent = Math.floor(bullet[1].replace(/\t/g, '  ').length / 2);
-            lines.push({ depth: headingDepth + 1 + indent, text: bullet[2] });
-            continue;
-        }
-        const text = rawLine.trim();
-        if (text) {
-            lines.push({ depth: headingDepth + 1, text });
-        }
-    }
-    return lines;
-}
-function OutlineFallback({ outline }) {
-    const lines = parseOutlineFallback(outline);
-    return (_jsxs("div", { className: "min-h-0 flex-1 overflow-y-auto px-6 py-5", children: [_jsx("p", { className: "mb-3 text-xs text-muted-foreground", children: "Showing the plain outline \u2014 the mind map view couldn\u2019t load." }), lines.length === 0 ? (_jsx("p", { className: "text-sm text-muted-foreground", children: "This mind map is empty." })) : (_jsx("div", { className: "space-y-1 font-mono text-[0.8125rem] leading-relaxed", children: lines.map((line, index) => (_jsx("div", { style: { paddingLeft: `${line.depth * 1.25}rem` }, children: line.text }, index))) }))] }));
+    const flatten = (node, depth) => {
+        lines.push({ depth, node });
+        node.children?.forEach(child => flatten(child, depth + 1));
+    };
+    flatten(root, 0);
+    return (_jsxs("div", { className: "min-h-0 flex-1 overflow-y-auto px-6 py-5", children: [_jsx("p", { className: "mb-3 text-xs text-muted-foreground", children: "Showing the plain outline \u2014 the interactive mind map couldn\u2019t load." }), _jsx("div", { className: "space-y-1 text-[0.8125rem] leading-relaxed", children: lines.map(({ depth, node }) => (_jsxs("div", { style: { paddingLeft: `${depth * 1.25}rem` }, children: [_jsx("span", { className: "font-medium", children: node.topic }), node.note && _jsxs("span", { className: "text-muted-foreground", children: [" \u2014 ", node.note] })] }, node.id))) })] }));
 }
 function MindmapCanvas({ file }) {
-    const svgRef = useRef(null);
-    const markmapRef = useRef(null);
+    const hostRef = useRef(null);
+    const mindRef = useRef(null);
     const [failed, setFailed] = useState(false);
+    const [selectedDetail, setSelectedDetail] = useState(null);
     useEffect(() => {
-        if (!svgRef.current) {
+        const host = hostRef.current;
+        if (!host) {
             setFailed(true);
             return;
         }
+        let mind = null;
+        let resizeObserver = null;
+        let animationFrame = 0;
         try {
-            const { root } = transformer.transform(file.outline.trim() || `# ${file.title}`);
-            const palette = readMindmapPalette();
-            markmapRef.current = Markmap.create(svgRef.current, {
-                autoFit: true,
-                color: node => (node.state.depth === 0 ? palette.accent : palette.line),
-                duration: 300,
-                style: () => MINDMAP_THEME_CSS
-            }, root);
+            const root = applyStoredLayout(parseMindmapMarkdown(file.outline, file.title), readStoredLayout(file));
+            addNoteIndicators(root);
+            mind = new MindElixir({
+                allowUndo: false,
+                before: {
+                    addChild: () => false,
+                    beginEdit: () => false,
+                    copyNode: () => false,
+                    copyNodes: () => false,
+                    insertParent: () => false,
+                    insertSibling: () => false,
+                    removeNodes: () => false,
+                    reshapeNode: () => false,
+                    rmSubline: () => false,
+                    setNodeTopic: () => false
+                },
+                contextMenu: false,
+                direction: MindElixir.SIDE,
+                editable: true,
+                el: host,
+                keypress: false,
+                overflowHidden: true,
+                theme: MINDMAP_THEME,
+                toolBar: false
+            });
+            const initError = mind.init({ direction: MindElixir.SIDE, nodeData: root, theme: MINDMAP_THEME });
+            if (initError) {
+                throw initError;
+            }
+            mindRef.current = mind;
+            mind.bus.addListener('selectNodes', nodes => {
+                const selected = nodes.at(-1);
+                setSelectedDetail(selected?.note ? { note: selected.note, topic: selected.topic } : null);
+            });
+            mind.bus.addListener('operation', (operation) => {
+                if (operation.name === 'moveNodeAfter' || operation.name === 'moveNodeBefore' || operation.name === 'moveNodeIn') {
+                    persistLayout(file, mind);
+                }
+            });
+            animationFrame = window.requestAnimationFrame(() => mind?.scaleFit());
+            resizeObserver = new ResizeObserver(() => mind?.scaleFit());
+            resizeObserver.observe(host);
         }
         catch {
             setFailed(true);
         }
         return () => {
-            markmapRef.current?.destroy();
-            markmapRef.current = null;
+            window.cancelAnimationFrame(animationFrame);
+            resizeObserver?.disconnect();
+            mind?.destroy();
+            mindRef.current = null;
         };
-        // `file` is intentionally excluded: this component remounts on file change (the
-        // caller passes `key={file.fileName}`), so re-running this effect for the same
-        // mounted instance would only ever happen for a `file` that hasn't changed.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [file]);
     if (failed) {
-        return _jsx(OutlineFallback, { outline: file.outline });
+        return _jsx(OutlineFallback, { file: file });
     }
-    return (_jsxs("div", { className: "relative min-h-0 flex-1", children: [_jsx("svg", { className: "h-full w-full", ref: svgRef }), _jsx(Button, { className: "absolute bottom-3 right-3", onClick: () => void markmapRef.current?.fit(), size: "sm", variant: "outline", children: "Fit" })] }));
+    return (_jsxs("div", { className: "flex min-h-0 flex-1 bg-(--ui-editor-surface-background)", children: [_jsxs("div", { className: "relative min-w-0 flex-1", children: [_jsx("div", { className: "study-mindmap-host h-full w-full", ref: hostRef }), _jsx("div", { className: "pointer-events-none absolute bottom-3 left-3 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated)/90 px-2.5 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary) shadow-sm", children: "Drag nodes to arrange \u00B7 scroll to pan \u00B7 Ctrl/\u2318 + scroll to zoom" }), _jsx(Button, { className: "absolute bottom-3 right-3", onClick: () => mindRef.current?.scaleFit(), size: "sm", variant: "outline", children: "Fit" })] }), selectedDetail && (_jsxs("aside", { className: "w-72 shrink-0 overflow-y-auto border-l border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-6", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-(--theme-primary)", children: "Explanation" }), _jsx("h3", { className: "mt-2 text-base font-semibold tracking-tight text-(--ui-text-primary)", children: selectedDetail.topic }), _jsx("p", { className: "mt-3 whitespace-pre-wrap text-sm leading-6 text-(--ui-text-secondary)", children: selectedDetail.note })] }))] }));
 }
 export function MindmapViewerDialog({ file, onOpenChange }) {
-    return (_jsx(Dialog, { onOpenChange: onOpenChange, open: file !== null, children: _jsx(DialogContent, { className: "flex h-[85vh] max-h-[85vh] w-full max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl", children: file && (_jsxs(_Fragment, { children: [_jsx(DialogHeader, { className: "shrink-0 border-b border-border px-5 py-3.5 pr-11", children: _jsx(DialogTitle, { className: "truncate", children: file.title }) }), _jsx(MindmapCanvas, { file: file }, file.fileName)] })) }) }));
+    const navigate = useNavigate();
+    const openSourceNote = () => {
+        if (!file) {
+            return;
+        }
+        onOpenChange(false);
+        navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(file.title)}`);
+    };
+    return (_jsx(Dialog, { onOpenChange: onOpenChange, open: file !== null, children: _jsx(DialogContent, { className: "flex h-[85vh] max-h-[85vh] w-[94vw] max-w-6xl flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl", children: file && (_jsxs(_Fragment, { children: [_jsx(DialogHeader, { className: "shrink-0 border-b border-border px-5 py-3.5 pr-12", children: _jsxs("div", { className: "flex items-center justify-between gap-4", children: [_jsxs("div", { className: "min-w-0", children: [_jsx(DialogTitle, { className: "truncate", children: file.title }), _jsx("p", { className: "mt-0.5 truncate text-[0.6875rem] text-muted-foreground", children: mapPath(file) })] }), _jsx(Button, { className: "shrink-0", onClick: openSourceNote, size: "sm", variant: "outline", children: "Open source note" })] }) }), _jsx(MindmapCanvas, { file: file }, file.fileName)] })) }) }));
 }
