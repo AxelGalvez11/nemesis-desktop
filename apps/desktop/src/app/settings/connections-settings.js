@@ -74,7 +74,7 @@ export function ConnectionsSettings({ onClose }) {
     const connect = (url) => {
         void api?.newTab?.(url);
         openBrowserRail();
-        onClose();
+        onClose?.();
     };
     const disconnect = (origin) => {
         void api?.disconnect?.(origin).then(refresh);

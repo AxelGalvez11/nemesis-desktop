@@ -5,17 +5,17 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { BootFailureOverlay } from '@/components/boot-failure-overlay';
 import { DesktopInstallOverlay } from '@/components/desktop-install-overlay';
-import { NemesisAccountGate } from '@/components/nemesis-account-gate';
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay';
+import { NemesisAccountGate } from '@/components/nemesis-account-gate';
 import { DesktopOnboardingOverlay } from '@/components/onboarding';
 import { Pane, PaneMain } from '@/components/pane-shell';
 import { RemoteDisplayBanner } from '@/components/remote-display-banner';
 import { useAgentBrowserWatcher } from '@/hooks/use-agent-browser-watcher';
 import { useExportsPreviewWatcher } from '@/hooks/use-exports-preview-watcher';
 import { useMediaQuery } from '@/hooks/use-media-query';
-import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { isFocusWithin } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { useSkinCommand } from '@/themes/use-skin-command';
 import { formatRefValue } from '../components/assistant-ui/directive-text';
 import { getSessionMessages, triggerCronJob } from '../hermes';
@@ -23,6 +23,7 @@ import { chatMessageText, preserveLocalAssistantErrors, toChatMessages } from '.
 import { storedSessionIdForNotification } from '../lib/session-ids';
 import { isMessagingSource } from '../lib/session-source';
 import { latestSessionTodos } from '../lib/todos';
+import { $browserRailOpen } from '../store/browser-rail';
 import { setCronFocusJobId } from '../store/cron';
 import { $fileBrowserOpen, $panesFlipped, $pinnedSessionIds, FILE_BROWSER_DEFAULT_WIDTH, FILE_BROWSER_MAX_WIDTH, FILE_BROWSER_MIN_WIDTH, pinSession, PREVIEW_PANE_ID, restoreWorktree, setSidebarOverlayMounted, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, unpinSession } from '../store/layout';
 import { respondToApprovalAction } from '../store/native-notifications';
@@ -30,18 +31,17 @@ import { $paneOpen } from '../store/panes';
 import { setPetActivity } from '../store/pet';
 import { setPetScale } from '../store/pet-gallery';
 import { setPetOverlayOpenAppHandler, setPetOverlayScaleHandler, setPetOverlaySubmitHandler } from '../store/pet-overlay';
-import { $browserRailOpen } from '../store/browser-rail';
 import { $filePreviewTarget, $previewTarget, closeActiveRightRailTab } from '../store/preview';
 import { $activeGatewayProfile, $freshSessionRequest, $profileScope, refreshActiveProfile } from '../store/profile';
 import { $startWorkSessionRequest, followActiveSessionCwd, resolveNewSessionCwd } from '../store/projects';
 import { $reviewOpen, REVIEW_PANE_ID } from '../store/review';
-import { $activeSessionId, $attentionSessionIds, $currentCwd, $freshDraftReady, $gatewayState, $messages, $messagingSessions, $resumeExhaustedSessionId, $resumeFailedSessionId, $selectedStoredSessionId, $sessions, getRememberedSessionId, sessionPinId, setAwaitingResponse, setBusy, setCurrentBranch, setCurrentCwd, setCurrentModel, setCurrentProvider, setMessages, setRememberedSessionId } from '../store/session';
+import { $activeSessionId, $attentionSessionIds, $currentCwd, $freshDraftReady, $gatewayState, $messages, $messagingSessions, $resumeExhaustedSessionId, $resumeFailedSessionId, $selectedStoredSessionId, $sessions, $sessionsLoading, $sessionsTotal, getRememberedSessionId, sessionPinId, setAwaitingResponse, setBusy, setCurrentBranch, setCurrentCwd, setCurrentModel, setCurrentProvider, setMessages, setRememberedSessionId } from '../store/session';
 import { onSessionsChanged } from '../store/session-sync';
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '../store/todos';
 import { openUpdatesWindow, startUpdatePoller, stopUpdatePoller } from '../store/updates';
 import { isSecondaryWindow } from '../store/windows';
 import { ChatView } from './chat';
-import { requestComposerFocus, requestComposerInsert } from './chat/composer/focus';
+import { requestComposerFocus, requestComposerInsert, requestComposerSubmit } from './chat/composer/focus';
 import { useComposerActions } from './chat/hooks/use-composer-actions';
 import { ChatPreviewRail, PREVIEW_RAIL_MAX_WIDTH, PREVIEW_RAIL_MIN_WIDTH, PREVIEW_RAIL_PANE_WIDTH } from './chat/right-rail';
 import { ChatSidebar } from './chat/sidebar';
@@ -61,7 +61,7 @@ import { $terminalTakeover } from './right-sidebar/store';
 import { TerminalPaneChrome } from './right-sidebar/terminal/chrome';
 import { PersistentTerminal } from './right-sidebar/terminal/persistent';
 import { closeActiveTerminal } from './right-sidebar/terminal/terminals';
-import { CRON_ROUTE, NEW_CHAT_ROUTE, routeSessionId, sessionRoute, SETTINGS_ROUTE, TODAY_ROUTE } from './routes';
+import { CRON_ROUTE, NEW_CHAT_ROUTE, routeSessionId, sessionRoute, SETTINGS_ROUTE, TODAY_ROUTE, WELCOME_ROUTE } from './routes';
 import { SessionPickerOverlay } from './session-picker-overlay';
 import { SessionSwitcher } from './session-switcher';
 import { useContextSuggestions } from './session/hooks/use-context-suggestions';
@@ -82,6 +82,7 @@ import { useStatusbarItems } from './shell/hooks/use-statusbar-items';
 import { ModelMenuPanel } from './shell/model-menu-panel';
 import { useGroupRegistry } from './shell/use-group-registry';
 import { UpdatesOverlay } from './updates-overlay';
+import { onboardingComplete } from './welcome/onboarding';
 const AgentsView = lazy(async () => ({ default: (await import('./agents')).AgentsView }));
 const ArtifactsView = lazy(async () => ({ default: (await import('./artifacts')).ArtifactsView }));
 const CommandCenterView = lazy(async () => ({ default: (await import('./command-center')).CommandCenterView }));
@@ -98,6 +99,7 @@ const RecorderView = lazy(async () => ({ default: (await import('./recorder')).R
 const CalendarView = lazy(async () => ({ default: (await import('./calendar')).CalendarView }));
 const TodayView = lazy(async () => ({ default: (await import('./today')).TodayView }));
 const LedgerView = lazy(async () => ({ default: (await import('./ledger')).LedgerView }));
+const WelcomeView = lazy(async () => ({ default: (await import('./welcome')).WelcomeView }));
 // Latest cron-job sessions surfaced in the collapsed "Cron jobs" section. The
 // Cron sessions are written by a background scheduler tick (the desktop
 // backend), so no user action signals the UI. Poll the bounded cron list on
@@ -152,6 +154,8 @@ export function DesktopController() {
     const browserRailOpen = useStore($browserRailOpen);
     const selectedStoredSessionId = useStore($selectedStoredSessionId);
     const messagingSessions = useStore($messagingSessions);
+    const sessionsLoading = useStore($sessionsLoading);
+    const sessionsTotal = useStore($sessionsTotal);
     const terminalTakeover = useStore($terminalTakeover);
     const reviewOpen = useStore($reviewOpen);
     const fileBrowserOpen = useStore($fileBrowserOpen);
@@ -174,6 +178,8 @@ export function DesktopController() {
     const getRouteToken = useCallback(() => routeTokenRef.current, []);
     const { agentsOpen, chatOpen, closeOverlayToPreviousRoute, commandCenterInitialSection, commandCenterOpen, cronOpen, currentView, openAgents, openCommandCenterSection, openStarmap, profilesOpen, settingsOpen, starmapOpen, toggleCommandCenter } = useOverlayRouting();
     const terminalSidebarOpen = chatOpen && terminalTakeover;
+    const welcomeOpen = currentView === 'welcome';
+    const browserSurfaceOpen = chatOpen || (welcomeOpen && browserRailOpen);
     const titlebarToolGroups = useGroupRegistry();
     const statusbarItemGroups = useGroupRegistry();
     const setTitlebarToolGroup = titlebarToolGroups.set;
@@ -800,21 +806,27 @@ export function DesktopController() {
                 void removeSession(selectedStoredSessionId);
             }
         }, onDismissError: dismissError, onEdit: editMessage, onPasteClipboardImage: opts => composer.pasteClipboardImage(opts), onPickFiles: () => void composer.pickContextPaths('file'), onPickFolders: () => void composer.pickContextPaths('folder'), onPickImages: () => void composer.pickImages(), onReload: reloadFromMessage, onRemoveAttachment: id => void composer.removeAttachment(id), onRestoreToMessage: restoreToMessage, onRetryResume: sessionId => void resumeSession(sessionId, true), onSteer: steerPrompt, onSubmit: submitText, onThreadMessagesChange: handleThreadMessagesChange, onToggleSelectedPin: toggleSelectedPin, onTranscribeAudio: transcribeVoiceAudio }));
+    const startOnboardingSweep = (prompt) => {
+        startFreshSessionDraft();
+        requestComposerSubmit(prompt, { target: 'main' });
+    };
+    const coldStartView = studentColdStart ? (sessionsLoading ? null : !onboardingComplete() && sessionsTotal === 0 ? (_jsx(Navigate, { replace: true, to: WELCOME_ROUTE })) : (_jsx(Navigate, { replace: true, to: TODAY_ROUTE }))) : (chatView);
     // Flipped layout mirrors the default: sessions sidebar → right, file
     // browser + preview rail → left. Same panes, swapped sides.
     const sidebarSide = panesFlipped ? 'right' : 'left';
     const railSide = panesFlipped ? 'left' : 'right';
     // Other sidebars docked as real columns on the terminal's rail. Force-collapsed
     // hover-reveal overlays (narrow window) don't take a column, so they don't count.
-    const railColumnOpen = (chatOpen &&
-        (NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
+    const railColumnOpen = (browserSurfaceOpen &&
+        (welcomeOpen || NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
         previewPaneOpen) ||
         (chatOpen && !NEMESIS_STUDENT_BUILD && !narrowViewport && fileBrowserOpen) ||
         (chatOpen && Boolean(currentCwd.trim()) && !narrowViewport && reviewOpen);
     // Once the terminal would share its rail with another sidebar, drop it to a
     // full-width row beneath them rather than cramming in one more skinny column.
     const terminalAsRow = terminalSidebarOpen && railColumnOpen;
-    const previewPane = (_jsx(Pane, { disabled: !chatOpen || (!NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen), id: PREVIEW_PANE_ID, maxWidth: PREVIEW_RAIL_MAX_WIDTH, minWidth: PREVIEW_RAIL_MIN_WIDTH, resizable: true, side: railSide, width: PREVIEW_RAIL_PANE_WIDTH, children: chatOpen ? (_jsx(ChatPreviewRail, { onRestartServer: restartPreviewServer, setTitlebarToolGroup: setTitlebarToolGroup })) : null }, "preview"));
+    const previewPane = (_jsx(Pane, { disabled: !browserSurfaceOpen ||
+            (!welcomeOpen && !NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen), id: PREVIEW_PANE_ID, maxWidth: PREVIEW_RAIL_MAX_WIDTH, minWidth: PREVIEW_RAIL_MIN_WIDTH, resizable: true, side: railSide, width: PREVIEW_RAIL_PANE_WIDTH, children: browserSurfaceOpen ? (_jsx(ChatPreviewRail, { onRestartServer: restartPreviewServer, setTitlebarToolGroup: setTitlebarToolGroup })) : null }, "preview"));
     // Student build has exactly ONE right panel — the tabbed rail (Sources |
     // Browser | Preview). The developer file-browser column never mounts.
     const fileBrowserPane = NEMESIS_STUDENT_BUILD ? null : (_jsx(Pane, { defaultOpen: false, disabled: !chatOpen, forceCollapsed: narrowViewport, hoverReveal: true, id: "file-browser", maxWidth: FILE_BROWSER_MAX_WIDTH, minWidth: FILE_BROWSER_MIN_WIDTH, resizable: true, side: railSide, width: FILE_BROWSER_DEFAULT_WIDTH, children: _jsx(RightSidebarPane, { onActivateFile: path => composer.insertContextPathInlineRef(path), onActivateFolder: path => composer.insertContextPathInlineRef(path, true) }, currentCwd || 'no-cwd') }, "file-browser"));
@@ -830,7 +842,8 @@ export function DesktopController() {
         // Mobile overlay sits at its min width — compact, doesn't bury the chat.
         overlayWidth: FILE_BROWSER_MIN_WIDTH, resizable: true, side: railSide, width: FILE_BROWSER_DEFAULT_WIDTH, children: _jsx(ReviewPane, {}, currentCwd || 'no-cwd') }, "review"));
     const terminalPane = (_jsx(Pane, { bottomRow: terminalAsRow, defaultOpen: true, disabled: !terminalSidebarOpen, divider: true, height: "38vh", id: "terminal-sidebar", maxHeight: "80vh", maxWidth: "80vw", minHeight: "8rem", minWidth: "22vw", resizable: true, side: railSide, width: "42vw", children: _jsx("div", { className: cn('relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-(--ui-editor-surface-background)', terminalAsRow ? 'border-l border-(--ui-stroke-secondary) pt-0' : 'pt-(--titlebar-height)'), children: _jsx(TerminalPaneChrome, {}) }) }, "terminal-sidebar"));
-    return (_jsxs(AppShell, { leftStatusbarItems: leftStatusbarItems, leftTitlebarTools: titlebarToolGroups.flat.left, mainOverlays: mainOverlays, onOpenSettings: openSettings, overlays: overlays, previewPaneOpen: chatOpen && (NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)), statusbarItems: statusbarItems, terminalPaneOpen: terminalSidebarOpen, titlebarTools: titlebarToolGroups.flat.right, children: [!isSecondaryWindow() && (_jsx(Pane, { forceCollapsed: narrowViewport, hoverReveal: true, id: "chat-sidebar", maxWidth: SIDEBAR_MAX_WIDTH, minWidth: SIDEBAR_DEFAULT_WIDTH, onOverlayActiveChange: setSidebarOverlayMounted, resizable: true, side: sidebarSide, width: `${SIDEBAR_DEFAULT_WIDTH}px`, children: sidebar })), _jsx(PaneMain, { children: _jsxs(Routes, { children: [_jsx(Route, { element: studentColdStart ? _jsx(Navigate, { replace: true, to: TODAY_ROUTE }) : chatView, index: true }), _jsx(Route, { element: chatView, path: ":sessionId" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(TodayView, {}) }), path: "today" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(LedgerView, {}) }), path: "ledger" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(SkillsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "skills" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(MessagingView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "messaging" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(ArtifactsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "artifacts" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(StudyView, {}) }), path: "study" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(LibraryView, {}) }), path: "library" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(GraphView, {}) }), path: "graph" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(RecorderView, {}) }), path: "recorder" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(CalendarView, {}) }), path: "calendar" }), _jsx(Route, { element: null, path: "cron" }), _jsx(Route, { element: null, path: "profiles" }), _jsx(Route, { element: null, path: "settings" }), _jsx(Route, { element: null, path: "command-center" }), _jsx(Route, { element: null, path: "agents" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE }), path: "new" }), _jsx(Route, { element: _jsx(LegacySessionRedirect, {}), path: "sessions/:sessionId" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE }), path: "*" })] }) }), panesFlipped ? fileBrowserPane : terminalPane, previewPane, reviewPane, panesFlipped ? terminalPane : fileBrowserPane] }));
+    return (_jsxs(AppShell, { leftStatusbarItems: leftStatusbarItems, leftTitlebarTools: titlebarToolGroups.flat.left, mainOverlays: mainOverlays, onOpenSettings: openSettings, overlays: overlays, previewPaneOpen: browserSurfaceOpen &&
+            (welcomeOpen || NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)), statusbarItems: statusbarItems, terminalPaneOpen: terminalSidebarOpen, titlebarTools: titlebarToolGroups.flat.right, children: [!isSecondaryWindow() && (_jsx(Pane, { disabled: welcomeOpen, forceCollapsed: narrowViewport, hoverReveal: true, id: "chat-sidebar", maxWidth: SIDEBAR_MAX_WIDTH, minWidth: SIDEBAR_DEFAULT_WIDTH, onOverlayActiveChange: setSidebarOverlayMounted, resizable: true, side: sidebarSide, width: `${SIDEBAR_DEFAULT_WIDTH}px`, children: sidebar })), _jsx(PaneMain, { children: _jsxs(Routes, { children: [_jsx(Route, { element: coldStartView, index: true }), _jsx(Route, { element: chatView, path: ":sessionId" }), _jsx(Route, { element: NEMESIS_STUDENT_BUILD ? (_jsx(Suspense, { fallback: null, children: _jsx(WelcomeView, { onStartSweep: startOnboardingSweep }) })) : (_jsx(Navigate, { replace: true, to: NEW_CHAT_ROUTE })), path: "welcome" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(TodayView, {}) }), path: "today" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(LedgerView, {}) }), path: "ledger" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(SkillsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "skills" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(MessagingView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "messaging" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(ArtifactsView, { setStatusbarItemGroup: setStatusbarItemGroup }) }), path: "artifacts" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(StudyView, {}) }), path: "study" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(LibraryView, {}) }), path: "library" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(GraphView, {}) }), path: "graph" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(RecorderView, {}) }), path: "recorder" }), _jsx(Route, { element: _jsx(Suspense, { fallback: null, children: _jsx(CalendarView, {}) }), path: "calendar" }), _jsx(Route, { element: null, path: "cron" }), _jsx(Route, { element: null, path: "profiles" }), _jsx(Route, { element: null, path: "settings" }), _jsx(Route, { element: null, path: "command-center" }), _jsx(Route, { element: null, path: "agents" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE }), path: "new" }), _jsx(Route, { element: _jsx(LegacySessionRedirect, {}), path: "sessions/:sessionId" }), _jsx(Route, { element: _jsx(Navigate, { replace: true, to: NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE }), path: "*" })] }) }), panesFlipped ? fileBrowserPane : terminalPane, previewPane, reviewPane, panesFlipped ? terminalPane : fileBrowserPane] }));
 }
 function LegacySessionRedirect() {
     const { sessionId } = useParams();

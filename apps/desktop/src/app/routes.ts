@@ -1,6 +1,7 @@
 export const SESSION_ROUTE_PREFIX = '/'
 export const NEW_CHAT_ROUTE = '/'
 export const TODAY_ROUTE = '/today'
+export const WELCOME_ROUTE = '/welcome'
 export const LEDGER_ROUTE = '/ledger'
 export const SETTINGS_ROUTE = '/settings'
 export const COMMAND_CENTER_ROUTE = '/command-center'
@@ -35,6 +36,7 @@ export type AppView =
   | 'starmap'
   | 'study'
   | 'today'
+  | 'welcome'
 
 export type AppRouteId =
   | 'agents'
@@ -54,6 +56,7 @@ export type AppRouteId =
   | 'starmap'
   | 'study'
   | 'today'
+  | 'welcome'
 
 export interface AppRoute {
   id: AppRouteId
@@ -64,6 +67,7 @@ export interface AppRoute {
 export const APP_ROUTES = [
   { id: 'new', path: NEW_CHAT_ROUTE, view: 'chat' },
   { id: 'today', path: TODAY_ROUTE, view: 'today' },
+  { id: 'welcome', path: WELCOME_ROUTE, view: 'welcome' },
   { id: 'ledger', path: LEDGER_ROUTE, view: 'ledger' },
   { id: 'settings', path: SETTINGS_ROUTE, view: 'settings' },
   { id: 'command-center', path: COMMAND_CENTER_ROUTE, view: 'command-center' },

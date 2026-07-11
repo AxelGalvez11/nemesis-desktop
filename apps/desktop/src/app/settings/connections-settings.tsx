@@ -59,7 +59,7 @@ function originOf(url: string): string {
   }
 }
 
-export function ConnectionsSettings({ onClose }: { onClose: () => void }) {
+export function ConnectionsSettings({ onClose }: { onClose?: () => void }) {
   const [status, setStatus] = useState<Record<string, boolean>>({})
   const [customUrl, setCustomUrl] = useState('')
   const api = window.hermesDesktop?.schoolView
@@ -89,7 +89,7 @@ export function ConnectionsSettings({ onClose }: { onClose: () => void }) {
   const connect = (url: string) => {
     void api?.newTab?.(url)
     openBrowserRail()
-    onClose()
+    onClose?.()
   }
 
   const disconnect = (origin: string) => {
@@ -114,8 +114,8 @@ export function ConnectionsSettings({ onClose }: { onClose: () => void }) {
         </span>
         <h2 className="text-lg font-semibold text-foreground">Connect your school accounts</h2>
         <p className="text-sm text-muted-foreground">
-          No API keys, no setup codes. You just sign in once in Nemesis&apos;s own browser — then the agent works
-          inside that signed-in session for you. Your passwords are never shown to or stored by the agent.
+          No API keys, no setup codes. You just sign in once in Nemesis&apos;s own browser — then the agent works inside
+          that signed-in session for you. Your passwords are never shown to or stored by the agent.
         </p>
       </div>
 

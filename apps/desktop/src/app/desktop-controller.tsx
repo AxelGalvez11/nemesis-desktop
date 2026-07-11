@@ -5,17 +5,17 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 're
 
 import { BootFailureOverlay } from '@/components/boot-failure-overlay'
 import { DesktopInstallOverlay } from '@/components/desktop-install-overlay'
-import { NemesisAccountGate } from '@/components/nemesis-account-gate'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
+import { NemesisAccountGate } from '@/components/nemesis-account-gate'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { Pane, PaneMain } from '@/components/pane-shell'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
 import { useAgentBrowserWatcher } from '@/hooks/use-agent-browser-watcher'
 import { useExportsPreviewWatcher } from '@/hooks/use-exports-preview-watcher'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { isFocusWithin } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { useSkinCommand } from '@/themes/use-skin-command'
 
 import { formatRefValue } from '../components/assistant-ui/directive-text'
@@ -24,6 +24,7 @@ import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChat
 import { storedSessionIdForNotification } from '../lib/session-ids'
 import { isMessagingSource } from '../lib/session-source'
 import { latestSessionTodos } from '../lib/todos'
+import { $browserRailOpen } from '../store/browser-rail'
 import { setCronFocusJobId } from '../store/cron'
 import {
   $fileBrowserOpen,
@@ -49,7 +50,6 @@ import {
   setPetOverlayScaleHandler,
   setPetOverlaySubmitHandler
 } from '../store/pet-overlay'
-import { $browserRailOpen } from '../store/browser-rail'
 import { $filePreviewTarget, $previewTarget, closeActiveRightRailTab } from '../store/preview'
 import { $activeGatewayProfile, $freshSessionRequest, $profileScope, refreshActiveProfile } from '../store/profile'
 import { $startWorkSessionRequest, followActiveSessionCwd, resolveNewSessionCwd } from '../store/projects'
@@ -66,6 +66,8 @@ import {
   $resumeFailedSessionId,
   $selectedStoredSessionId,
   $sessions,
+  $sessionsLoading,
+  $sessionsTotal,
   getRememberedSessionId,
   sessionPinId,
   setAwaitingResponse,
@@ -83,7 +85,7 @@ import { openUpdatesWindow, startUpdatePoller, stopUpdatePoller } from '../store
 import { isSecondaryWindow } from '../store/windows'
 
 import { ChatView } from './chat'
-import { requestComposerFocus, requestComposerInsert } from './chat/composer/focus'
+import { requestComposerFocus, requestComposerInsert, requestComposerSubmit } from './chat/composer/focus'
 import { useComposerActions } from './chat/hooks/use-composer-actions'
 import {
   ChatPreviewRail,
@@ -108,7 +110,15 @@ import { $terminalTakeover } from './right-sidebar/store'
 import { TerminalPaneChrome } from './right-sidebar/terminal/chrome'
 import { PersistentTerminal } from './right-sidebar/terminal/persistent'
 import { closeActiveTerminal } from './right-sidebar/terminal/terminals'
-import { CRON_ROUTE, NEW_CHAT_ROUTE, routeSessionId, sessionRoute, SETTINGS_ROUTE, TODAY_ROUTE } from './routes'
+import {
+  CRON_ROUTE,
+  NEW_CHAT_ROUTE,
+  routeSessionId,
+  sessionRoute,
+  SETTINGS_ROUTE,
+  TODAY_ROUTE,
+  WELCOME_ROUTE
+} from './routes'
 import { SessionPickerOverlay } from './session-picker-overlay'
 import { SessionSwitcher } from './session-switcher'
 import { useContextSuggestions } from './session/hooks/use-context-suggestions'
@@ -131,6 +141,7 @@ import type { StatusbarItem } from './shell/statusbar-controls'
 import type { TitlebarTool } from './shell/titlebar-controls'
 import { useGroupRegistry } from './shell/use-group-registry'
 import { UpdatesOverlay } from './updates-overlay'
+import { onboardingComplete } from './welcome/onboarding'
 
 const AgentsView = lazy(async () => ({ default: (await import('./agents')).AgentsView }))
 const ArtifactsView = lazy(async () => ({ default: (await import('./artifacts')).ArtifactsView }))
@@ -148,6 +159,7 @@ const RecorderView = lazy(async () => ({ default: (await import('./recorder')).R
 const CalendarView = lazy(async () => ({ default: (await import('./calendar')).CalendarView }))
 const TodayView = lazy(async () => ({ default: (await import('./today')).TodayView }))
 const LedgerView = lazy(async () => ({ default: (await import('./ledger')).LedgerView }))
+const WelcomeView = lazy(async () => ({ default: (await import('./welcome')).WelcomeView }))
 
 // Latest cron-job sessions surfaced in the collapsed "Cron jobs" section. The
 // Cron sessions are written by a background scheduler tick (the desktop
@@ -214,6 +226,8 @@ export function DesktopController() {
   const browserRailOpen = useStore($browserRailOpen)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
   const messagingSessions = useStore($messagingSessions)
+  const sessionsLoading = useStore($sessionsLoading)
+  const sessionsTotal = useStore($sessionsTotal)
   const terminalTakeover = useStore($terminalTakeover)
   const reviewOpen = useStore($reviewOpen)
   const fileBrowserOpen = useStore($fileBrowserOpen)
@@ -231,8 +245,7 @@ export function DesktopController() {
   // that to distinguish a cold boot at `/` from an intentional later trip to
   // NEW_CHAT_ROUTE (Today "Start", New session, etc.), which must still open
   // the composer in the student build.
-  const studentColdStart =
-    NEMESIS_STUDENT_BUILD && location.pathname === NEW_CHAT_ROUTE && location.key === 'default'
+  const studentColdStart = NEMESIS_STUDENT_BUILD && location.pathname === NEW_CHAT_ROUTE && location.key === 'default'
 
   const routeToken = `${location.pathname}:${location.search}:${location.hash}`
   const routeTokenRef = useRef(routeToken)
@@ -257,6 +270,8 @@ export function DesktopController() {
   } = useOverlayRouting()
 
   const terminalSidebarOpen = chatOpen && terminalTakeover
+  const welcomeOpen = currentView === 'welcome'
+  const browserSurfaceOpen = chatOpen || (welcomeOpen && browserRailOpen)
 
   const titlebarToolGroups = useGroupRegistry<TitlebarTool>()
   const statusbarItemGroups = useGroupRegistry<StatusbarItem>()
@@ -1195,6 +1210,21 @@ export function DesktopController() {
     />
   )
 
+  const startOnboardingSweep = (prompt: string) => {
+    startFreshSessionDraft()
+    requestComposerSubmit(prompt, { target: 'main' })
+  }
+
+  const coldStartView = studentColdStart ? (
+    sessionsLoading ? null : !onboardingComplete() && sessionsTotal === 0 ? (
+      <Navigate replace to={WELCOME_ROUTE} />
+    ) : (
+      <Navigate replace to={TODAY_ROUTE} />
+    )
+  ) : (
+    chatView
+  )
+
   // Flipped layout mirrors the default: sessions sidebar → right, file
   // browser + preview rail → left. Same panes, swapped sides.
   const sidebarSide = panesFlipped ? 'right' : 'left'
@@ -1203,8 +1233,8 @@ export function DesktopController() {
   // Other sidebars docked as real columns on the terminal's rail. Force-collapsed
   // hover-reveal overlays (narrow window) don't take a column, so they don't count.
   const railColumnOpen =
-    (chatOpen &&
-      (NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
+    (browserSurfaceOpen &&
+      (welcomeOpen || NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
       previewPaneOpen) ||
     (chatOpen && !NEMESIS_STUDENT_BUILD && !narrowViewport && fileBrowserOpen) ||
     (chatOpen && Boolean(currentCwd.trim()) && !narrowViewport && reviewOpen)
@@ -1216,7 +1246,8 @@ export function DesktopController() {
   const previewPane = (
     <Pane
       disabled={
-        !chatOpen || (!NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen)
+        !browserSurfaceOpen ||
+        (!welcomeOpen && !NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen)
       }
       id={PREVIEW_PANE_ID}
       key="preview"
@@ -1226,7 +1257,7 @@ export function DesktopController() {
       side={railSide}
       width={PREVIEW_RAIL_PANE_WIDTH}
     >
-      {chatOpen ? (
+      {browserSurfaceOpen ? (
         <ChatPreviewRail onRestartServer={restartPreviewServer} setTitlebarToolGroup={setTitlebarToolGroup} />
       ) : null}
     </Pane>
@@ -1325,7 +1356,8 @@ export function DesktopController() {
       onOpenSettings={openSettings}
       overlays={overlays}
       previewPaneOpen={
-        chatOpen && (NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen))
+        browserSurfaceOpen &&
+        (welcomeOpen || NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen))
       }
       statusbarItems={statusbarItems}
       terminalPaneOpen={terminalSidebarOpen}
@@ -1333,6 +1365,7 @@ export function DesktopController() {
     >
       {!isSecondaryWindow() && (
         <Pane
+          disabled={welcomeOpen}
           forceCollapsed={narrowViewport}
           hoverReveal
           id="chat-sidebar"
@@ -1348,8 +1381,20 @@ export function DesktopController() {
       )}
       <PaneMain>
         <Routes>
-          <Route element={studentColdStart ? <Navigate replace to={TODAY_ROUTE} /> : chatView} index />
+          <Route element={coldStartView} index />
           <Route element={chatView} path=":sessionId" />
+          <Route
+            element={
+              NEMESIS_STUDENT_BUILD ? (
+                <Suspense fallback={null}>
+                  <WelcomeView onStartSweep={startOnboardingSweep} />
+                </Suspense>
+              ) : (
+                <Navigate replace to={NEW_CHAT_ROUTE} />
+              )
+            }
+            path="welcome"
+          />
           <Route
             element={
               <Suspense fallback={null}>
