@@ -360,8 +360,85 @@ export function installSchoolView(win: BrowserWindow) {
   }
 }
 
+/** "Connected" = the school session holds at least one cookie for the portal's
+ *  registrable-ish domain. A logged-in Blackboard/Outlook/Gmail session always
+ *  leaves session cookies; an empty jar means the student never signed in (or
+ *  signed out). Best-effort — any lookup error reports not-connected rather
+ *  than throwing, so the Connections UI degrades to "Connect". */
+async function connectionStatus(origins: string[]): Promise<Record<string, boolean>> {
+  const ses = schoolSession()
+  const out: Record<string, boolean> = {}
+
+  await Promise.all(
+    origins.map(async origin => {
+      let host = origin
+
+      try {
+        host = new URL(origin).hostname
+      } catch {
+        // Treat a bare host string as-is.
+      }
+
+      // Match cookies on the base domain (last two labels) so a login on
+      // login.microsoftonline.com counts for outlook.cloud.microsoft, etc.
+      const parts = host.split('.')
+      const base = parts.length > 2 ? parts.slice(-2).join('.') : host
+
+      try {
+        const cookies = await ses.cookies.get({ domain: base })
+        out[origin] = cookies.length > 0
+      } catch {
+        out[origin] = false
+      }
+    })
+  )
+
+  return out
+}
+
+/** Sign out of a portal: drop every cookie whose domain matches it. */
+async function disconnectOrigin(origin: string): Promise<void> {
+  const ses = schoolSession()
+  let host = origin
+
+  try {
+    host = new URL(origin).hostname
+  } catch {
+    // bare host
+  }
+
+  const parts = host.split('.')
+  const base = parts.length > 2 ? parts.slice(-2).join('.') : host
+
+  try {
+    const cookies = await ses.cookies.get({ domain: base })
+
+    await Promise.all(
+      cookies.map(cookie => {
+        const scheme = cookie.secure ? 'https' : 'http'
+        const cookieHost = cookie.domain?.replace(/^\./, '') ?? base
+
+        return ses.cookies.remove(`${scheme}://${cookieHost}${cookie.path ?? '/'}`, cookie.name).catch(() => undefined)
+      })
+    )
+    await ses.cookies.flushStore()
+  } catch {
+    // best-effort sign-out
+  }
+}
+
 export function registerSchoolViewIpc() {
   ipcMain.handle('hermes:schoolView:getState', () => serializeState())
+
+  ipcMain.handle('hermes:schoolView:connectionStatus', (_event, origins) =>
+    connectionStatus(Array.isArray(origins) ? origins.map(String) : [])
+  )
+
+  ipcMain.handle('hermes:schoolView:disconnect', async (_event, origin) => {
+    await disconnectOrigin(String(origin ?? ''))
+
+    return true
+  })
 
   // Diagnostics: the active view's real DIP bounds + the host content size, so
   // a harness can confirm the page sits inside the rail (no cross-process

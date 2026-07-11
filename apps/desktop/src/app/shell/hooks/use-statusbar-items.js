@@ -1,8 +1,9 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { useStore } from '@nanostores/react';
 import { useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
+import { $elapsedMs, $paused, $recording, formatElapsed } from '@/app/recorder/service';
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store';
-import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis';
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel';
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel';
 import { Codicon } from '@/components/ui/codicon';
@@ -12,11 +13,12 @@ import { Activity, AlertCircle, Clock, Command, Hash, Loader2, Terminal, Zap, Za
 import { contextBarLabel, LiveDuration, usageContextLabel } from '@/lib/statusbar';
 import { cn } from '@/lib/utils';
 import { setGlobalYolo, setSessionYolo } from '@/lib/yolo-session';
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis';
 import { $activeSessionId, $busy, $connection, $currentUsage, $sessionStartedAt, $turnStartedAt, $yoloActive, setYoloActive } from '@/store/session';
 import { $subagentsBySession, activeSubagentCount, failedSubagentCount } from '@/store/subagents';
 import { $gatewayRestarting } from '@/store/system-actions';
 import { $backendUpdateApply, $backendUpdateStatus, $desktopVersion, $updateApply, $updateStatus, openUpdateOverlayFor } from '@/store/updates';
-import { CRON_ROUTE } from '../../routes';
+import { CRON_ROUTE, RECORDER_ROUTE } from '../../routes';
 export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, extraLeftItems, extraRightItems, gatewayState, inferenceStatus, openAgents, openCommandCenterSection, freshDraftReady, requestGateway, statusSnapshot, toggleCommandCenter }) {
     const { t } = useI18n();
     const copy = t.shell.statusbar;
@@ -35,6 +37,10 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
     const backendUpdateApply = useStore($backendUpdateApply);
     const desktopVersion = useStore($desktopVersion);
     const connection = useStore($connection);
+    const recorderState = useStore($recording);
+    const recorderPaused = useStore($paused);
+    const recorderElapsedMs = useStore($elapsedMs);
+    const location = useLocation();
     const contextUsage = useMemo(() => usageContextLabel(currentUsage), [currentUsage]);
     const contextBar = useMemo(() => contextBarLabel(currentUsage), [currentUsage]);
     // Per-session approval bypass (same scope as the TUI's Shift+Tab). On a
@@ -182,6 +188,17 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
     ]);
     const coreLeftStatusbarItems = useMemo(() => [
         {
+            className: 'font-semibold tabular-nums text-(--theme-primary) hover:text-(--theme-primary)',
+            detail: formatElapsed(recorderElapsedMs),
+            hidden: recorderState !== 'recording' || location.pathname === RECORDER_ROUTE,
+            icon: _jsx("span", { className: cn('size-1.5 rounded-full bg-(--theme-primary)', !recorderPaused && 'animate-pulse') }),
+            id: 'active-recording',
+            label: recorderPaused ? 'PAUSED' : 'REC',
+            title: recorderPaused ? 'Recording paused — return to Recorder' : 'Recording in progress — return to Recorder',
+            to: RECORDER_ROUTE,
+            variant: 'action'
+        },
+        {
             className: `w-7 justify-center px-0${commandCenterOpen ? ' bg-accent/55 text-foreground' : ''}`,
             icon: _jsx(Command, { className: "size-3.5" }),
             id: 'command-center',
@@ -233,6 +250,10 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
         inferenceReady,
         inferenceStatus?.reason,
         openAgents,
+        location.pathname,
+        recorderElapsedMs,
+        recorderPaused,
+        recorderState,
         subagentsFailed,
         subagentsRunning,
         toggleCommandCenter

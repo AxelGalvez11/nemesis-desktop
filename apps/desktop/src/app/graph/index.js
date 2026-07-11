@@ -4,6 +4,8 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 // community 3D graph plugin). Clicking a node opens that note in the Library; wikilink
 // targets that don't exist yet render as dim "ghost" nodes and a click CREATES the note
 // (Obsidian's edit affordance), so the graph is a place to grow the vault, not just view it.
+// Every node carries an always-visible title sprite (three-spritetext), and hovering or
+// clicking a node lights up its direct neighbors while fading the rest of the graph.
 import { IconAdjustmentsHorizontal } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +17,20 @@ import { LIBRARY_ROUTE } from '../routes';
 import { buildIndex, extractWikilinks, loadVault, saveNote } from '../library/vault';
 const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1';
 const DEFAULT_CONTROLS = { nodeSize: 4, repulsion: 40, rotate: true, spread: 34 };
+// Always-visible node label (three-spritetext) tuning.
+const LABEL_MAX_CHARS = 24;
+const LABEL_TEXT_HEIGHT = 3.6;
+// The label's bottom edge sits this much beyond the node sphere's own radius (see
+// sprite.center below) — proportional, not a flat offset, so it still clears big hub
+// spheres instead of looking glued on at high "Node size" settings.
+const LABEL_OFFSET_SCALE = 1.2;
+// Hover/select "connected neighbor" glow tuning.
+const DEFAULT_LINK_WIDTH = 0.5;
+const HIGHLIGHT_LINK_WIDTH = 2.5;
+const HIGHLIGHT_LINK_PARTICLES = 3;
+const HIGHLIGHT_LINK_PARTICLE_WIDTH = 2.2;
+// How far a non-neighbor color is blended toward the background when a highlight is active.
+const DIM_MIX_RATIO = 0.65;
 // Chrome resolves CSS custom properties to the CSS Color-4 `color(srgb r g b / a)`
 // syntax, which three.js (the 3d-force-graph renderer) CANNOT parse — it silently
 // falls back to black, making nodes invisible on a dark background. Normalize every
@@ -63,6 +79,56 @@ function graphNodeColor(node, palette) {
     }
     return graphNode.degree >= 2 ? palette.accent : palette.node;
 }
+function parseRgbTriplet(color) {
+    const match = color.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+    if (!match) {
+        return null;
+    }
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+// Blend an already-normalized rgb(...) color toward the background to "dim" it for the
+// non-neighbor state during hover/select glow. Plain arithmetic rather than CSS
+// color-mix, for the same reason normalizeToRgb exists above: don't depend on the
+// runtime's own color parsing. Falls back to the original color if either input isn't a
+// plain rgb()/rgba() string (e.g. a hex fallback from resolveCssColor).
+function dimColor(color, background, ratio) {
+    const fg = parseRgbTriplet(color);
+    const bg = parseRgbTriplet(background);
+    if (!fg || !bg) {
+        return color;
+    }
+    const [r, g, b] = fg.map((channel, index) => Math.round(channel * (1 - ratio) + bg[index] * ratio));
+    return `rgb(${r}, ${g}, ${b})`;
+}
+// Layers the hover/select glow on top of the node's normal color: the active node and its
+// direct neighbors brighten to the theme accent, everything else fades toward the
+// background once a highlight is active. With no active node this is just graphNodeColor.
+function resolveNodeColor(node, palette, highlightNodes, active) {
+    const normal = graphNodeColor(node, palette);
+    if (!active) {
+        return normal;
+    }
+    return highlightNodes.has(node) ? palette.accent : dimColor(normal, palette.background, DIM_MIX_RATIO);
+}
+function resolveLinkColor(link, palette, highlightLinks, active) {
+    if (!active) {
+        return palette.link;
+    }
+    return highlightLinks.has(link) ? palette.accent : dimColor(palette.link, palette.background, DIM_MIX_RATIO);
+}
+function truncateLabel(text) {
+    return text.length > LABEL_MAX_CHARS ? `${text.slice(0, LABEL_MAX_CHARS - 1)}…` : text;
+}
+// Small Map<K, V[]> append helper used to build the node adjacency below without mutating
+// the graph's own node/link objects.
+function pushToMap(map, key, value) {
+    const existing = map.get(key);
+    if (existing) {
+        existing.push(value);
+        return;
+    }
+    map.set(key, [value]);
+}
 function loadControls() {
     try {
         const raw = window.localStorage.getItem(GRAPH_SETTINGS_KEY);
@@ -90,6 +156,15 @@ export function GraphView() {
     const { renderedMode, theme } = useTheme();
     const controlsRef = useRef(controls);
     const paletteRef = useRef(null);
+    // Hover/select glow state — refs (not React state) since these drive imperative
+    // three.js accessor re-evaluation, not re-renders.
+    const hoverNodeRef = useRef(null);
+    const selectedNodeRef = useRef(null);
+    const highlightNodesRef = useRef(new Set());
+    const highlightLinksRef = useRef(new Set());
+    // Direct-neighbor adjacency, rebuilt once per graph load (see the main effect below).
+    const neighborsByNodeRef = useRef(new Map());
+    const linksByNodeRef = useRef(new Map());
     controlsRef.current = controls;
     useEffect(() => {
         const frame = window.requestAnimationFrame(() => {
@@ -100,12 +175,38 @@ export function GraphView() {
                 return;
             }
             graph.backgroundColor(palette.background);
-            graph.nodeColor(node => graphNodeColor(node, palette));
-            graph.linkColor(() => palette.link);
+            // refresh() flushes every node's three.js object — including the label sprites,
+            // which only read the palette at creation time — and re-evaluates the
+            // ref-reading nodeColor/linkColor/etc accessors installed below in the same pass.
             graph.refresh?.();
+            refreshHighlight();
         });
         return () => window.cancelAnimationFrame(frame);
     }, [renderedMode, theme]);
+    // Recompute the hover/select "connected neighbor" set from the precomputed adjacency,
+    // then re-trigger the (already-installed, ref-reading) color/width/particle accessors
+    // via the library's own `.prop(.prop())` idiom for a cheap redigest — NOT refresh(),
+    // which would tear down and rebuild every node's label sprite on every mouse move.
+    function refreshHighlight() {
+        const active = hoverNodeRef.current ?? selectedNodeRef.current;
+        const highlightNodes = highlightNodesRef.current;
+        const highlightLinks = highlightLinksRef.current;
+        highlightNodes.clear();
+        highlightLinks.clear();
+        if (active) {
+            highlightNodes.add(active);
+            neighborsByNodeRef.current.get(active)?.forEach(neighbor => highlightNodes.add(neighbor));
+            linksByNodeRef.current.get(active)?.forEach(link => highlightLinks.add(link));
+        }
+        const graph = graphRef.current;
+        if (!graph) {
+            return;
+        }
+        graph.nodeColor(graph.nodeColor());
+        graph.linkColor(graph.linkColor());
+        graph.linkWidth(graph.linkWidth());
+        graph.linkDirectionalParticles(graph.linkDirectionalParticles());
+    }
     useEffect(() => {
         const host = hostRef.current;
         if (!host) {
@@ -116,7 +217,11 @@ export function GraphView() {
         let observer = null;
         void (async () => {
             try {
-                const [{ default: ForceGraph3D }, notes] = await Promise.all([import('3d-force-graph'), loadVault()]);
+                const [{ default: ForceGraph3D }, { default: SpriteText }, notes] = await Promise.all([
+                    import('3d-force-graph'),
+                    import('three-spritetext'),
+                    loadVault()
+                ]);
                 if (disposed) {
                     return;
                 }
@@ -146,6 +251,26 @@ export function GraphView() {
                 for (const display of ghostByLower.values()) {
                     nodes.push({ degree: 1, ghost: true, id: display });
                 }
+                // Direct-neighbor adjacency, built once for this graph load (not re-derived on
+                // every hover/select) — mirrors 3d-force-graph's own "highlight on hover"
+                // reference pattern, but keeps it in side-table Maps instead of mutating the
+                // node/link objects themselves.
+                const neighborsByNode = new Map();
+                const linksByNode = new Map();
+                const nodeById = new Map(nodes.map(node => [node.id, node]));
+                for (const link of links) {
+                    const source = nodeById.get(link.source);
+                    const target = nodeById.get(link.target);
+                    if (!source || !target) {
+                        continue;
+                    }
+                    pushToMap(neighborsByNode, source, target);
+                    pushToMap(neighborsByNode, target, source);
+                    pushToMap(linksByNode, source, link);
+                    pushToMap(linksByNode, target, link);
+                }
+                neighborsByNodeRef.current = neighborsByNode;
+                linksByNodeRef.current = linksByNode;
                 const palette = paletteRef.current ?? readGraphPalette(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
                 paletteRef.current = palette;
                 const instance = new ForceGraph3D(host)
@@ -159,14 +284,40 @@ export function GraphView() {
                         : `<div style="font: 12px sans-serif; color:${paletteRef.current?.label ?? palette.label}">${graphNode.id}</div>`;
                 })
                     .nodeRelSize(controlsRef.current.nodeSize)
-                    .nodeColor((node) => graphNodeColor(node, paletteRef.current ?? palette))
+                    .nodeColor((node) => resolveNodeColor(node, paletteRef.current ?? palette, highlightNodesRef.current, hoverNodeRef.current ?? selectedNodeRef.current))
                     .nodeVal((node) => 1 + node.degree)
                     .nodeOpacity(0.9)
-                    .linkColor(() => paletteRef.current?.link ?? palette.link)
-                    .linkWidth(0.5)
+                    .nodeThreeObject((node) => {
+                    const graphNode = node;
+                    const activePalette = paletteRef.current ?? palette;
+                    const color = graphNode.ghost ? activePalette.ghost : activePalette.label;
+                    const sprite = new SpriteText(truncateLabel(graphNode.id), LABEL_TEXT_HEIGHT, color);
+                    const object3d = sprite;
+                    const radius = Math.cbrt(1 + graphNode.degree) * controlsRef.current.nodeSize;
+                    // Anchor the sprite's bottom edge (not its center) at the offset point, so the
+                    // label grows upward from just outside the sphere instead of straddling it.
+                    object3d.center.set(0.5, 0);
+                    object3d.position.set(0, radius * LABEL_OFFSET_SCALE, 0);
+                    return sprite;
+                })
+                    .nodeThreeObjectExtend(true)
+                    .linkColor((link) => resolveLinkColor(link, paletteRef.current ?? palette, highlightLinksRef.current, hoverNodeRef.current ?? selectedNodeRef.current))
+                    .linkWidth((link) => (highlightLinksRef.current.has(link) ? HIGHLIGHT_LINK_WIDTH : DEFAULT_LINK_WIDTH))
                     .linkOpacity(0.55)
+                    .linkDirectionalParticles((link) => highlightLinksRef.current.has(link) ? HIGHLIGHT_LINK_PARTICLES : 0)
+                    .linkDirectionalParticleWidth(HIGHLIGHT_LINK_PARTICLE_WIDTH)
+                    .onNodeHover((node) => {
+                    const graphNode = node;
+                    if (hoverNodeRef.current === graphNode) {
+                        return;
+                    }
+                    hoverNodeRef.current = graphNode;
+                    refreshHighlight();
+                })
                     .onNodeClick((node) => {
                     const graphNode = node;
+                    selectedNodeRef.current = graphNode;
+                    refreshHighlight();
                     void (async () => {
                         if (graphNode.ghost) {
                             // Materialize the note, then jump into it.
@@ -179,6 +330,10 @@ export function GraphView() {
                         }
                         navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(graphNode.id)}`);
                     })();
+                })
+                    .onBackgroundClick(() => {
+                    selectedNodeRef.current = null;
+                    refreshHighlight();
                 })
                     .graphData({ links, nodes });
                 // Frame the whole graph once the force sim settles (and again as a fallback —
@@ -210,6 +365,12 @@ export function GraphView() {
             disposed = true;
             observer?.disconnect();
             graphRef.current = null;
+            neighborsByNodeRef.current = new Map();
+            linksByNodeRef.current = new Map();
+            hoverNodeRef.current = null;
+            selectedNodeRef.current = null;
+            highlightNodesRef.current = new Set();
+            highlightLinksRef.current = new Set();
             graph?._destructor?.();
         };
     }, [navigate]);

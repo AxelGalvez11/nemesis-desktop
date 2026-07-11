@@ -7,7 +7,7 @@ import { NEMESIS_STUDENT_BUILD, STUDENT_SETTINGS_KEEP } from '@/nemesis';
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes';
 import { useI18n } from '@/i18n';
 import { triggerHaptic } from '@/lib/haptics';
-import { Archive, Bell, Download, Globe, Info, KeyRound, RefreshCw, Settings2, Upload, Wrench, Zap } from '@/lib/icons';
+import { Activity, Archive, Bell, Download, Globe, Info, KeyRound, Link, RefreshCw, Settings2, Upload, Wrench, Zap } from '@/lib/icons';
 import { notifyError } from '@/store/notifications';
 import { useRouteEnumParam } from '../hooks/use-route-enum-param';
 import { OverlayIconButton } from '../overlays/overlay-chrome';
@@ -16,6 +16,8 @@ import { OverlayView } from '../overlays/overlay-view';
 import { SKILLS_ROUTE } from '../routes';
 import { AboutSettings } from './about-settings';
 import { AppearanceSettings } from './appearance-settings';
+import { ConnectionsSettings } from './connections-settings';
+import { UsageSettings } from './usage-settings';
 import { ConfigSettings } from './config-settings';
 import { SECTIONS } from './constants';
 import { GatewaySettings } from './gateway-settings';
@@ -24,6 +26,8 @@ import { NotificationsSettings } from './notifications-settings';
 import { PROVIDER_VIEWS, ProvidersSettings } from './providers-settings';
 import { SessionsSettings } from './sessions-settings';
 const SETTINGS_VIEWS_ALL = [
+    'usage',
+    'connections',
     ...SECTIONS.map(s => `config:${s.id}`),
     'providers',
     'gateway',
@@ -102,10 +106,28 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
         }
     };
     const navGroups = [
-        ...SECTIONS.map(s => {
+        // Student-first entries: your plan usage + connected accounts sit at the top.
+        {
+            active: activeView === 'usage',
+            icon: Activity,
+            id: 'usage',
+            label: 'Usage',
+            onSelect: () => setActiveView('usage')
+        },
+        {
+            active: activeView === 'connections',
+            icon: Link,
+            id: 'connections',
+            label: 'Connections',
+            onSelect: () => setActiveView('connections')
+        },
+        ...SECTIONS.map((s, index) => {
             const view = `config:${s.id}`;
             return {
                 active: activeView === view,
+                // Visually separate the Nemesis-run app settings from the student's own
+                // Usage + Connections above.
+                gapBefore: index === 0,
                 icon: s.icon,
                 id: view,
                 label: t.settings.sections[s.id] ?? s.label,
@@ -196,6 +218,6 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
                         triggerHaptic('warning');
                         void resetConfig();
                     }, children: _jsx(RefreshCw, {}) }) })] }));
-    return (_jsx(OverlayView, { closeLabel: t.settings.closeSettings, onClose: onClose, children: _jsxs(OverlaySplitLayout, { children: [_jsx(OverlayNav, { footer: navFooter, groups: navGroups }), _jsx(OverlayMain, { className: "px-0 pb-0", children: activeView === 'config:appearance' ? (_jsx(AppearanceSettings, {})) : activeView === 'about' ? (_jsx(AboutSettings, {})) : activeView === 'gateway' ? (_jsx(GatewaySettings, {})) : activeView.startsWith('config:') ? (_jsx(ConfigSettings, { activeSectionId: activeView.slice('config:'.length), importInputRef: importInputRef, onConfigSaved: onConfigSaved, onMainModelChanged: onMainModelChanged })) : activeView === 'providers' ? (_jsx(ProvidersSettings, { onClose: onClose, onViewChange: setProviderView, view: providerView })) : activeView === 'keys' ? (_jsx(KeysSettings, { view: keysView })) : activeView === 'notifications' ? (_jsx(NotificationsSettings, {})) : (_jsx(SessionsSettings, {})) })] }) }));
+    return (_jsx(OverlayView, { closeLabel: t.settings.closeSettings, onClose: onClose, children: _jsxs(OverlaySplitLayout, { children: [_jsx(OverlayNav, { footer: navFooter, groups: navGroups }), _jsx(OverlayMain, { className: "px-0 pb-0", children: activeView === 'usage' ? (_jsx(UsageSettings, {})) : activeView === 'connections' ? (_jsx(ConnectionsSettings, { onClose: onClose })) : activeView === 'config:appearance' ? (_jsx(AppearanceSettings, {})) : activeView === 'about' ? (_jsx(AboutSettings, {})) : activeView === 'gateway' ? (_jsx(GatewaySettings, {})) : activeView.startsWith('config:') ? (_jsx(ConfigSettings, { activeSectionId: activeView.slice('config:'.length), importInputRef: importInputRef, onConfigSaved: onConfigSaved, onMainModelChanged: onMainModelChanged })) : activeView === 'providers' ? (_jsx(ProvidersSettings, { onClose: onClose, onViewChange: setProviderView, view: providerView })) : activeView === 'keys' ? (_jsx(KeysSettings, { view: keysView })) : activeView === 'notifications' ? (_jsx(NotificationsSettings, {})) : (_jsx(SessionsSettings, {})) })] }) }));
 }
 export { SettingsView as SettingsPage };

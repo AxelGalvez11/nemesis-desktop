@@ -120,6 +120,8 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   schoolView: {
     getState: () => ipcRenderer.invoke('hermes:schoolView:getState'),
     debugBounds: () => ipcRenderer.invoke('hermes:schoolView:debugBounds'),
+    connectionStatus: origins => ipcRenderer.invoke('hermes:schoolView:connectionStatus', origins),
+    disconnect: origin => ipcRenderer.invoke('hermes:schoolView:disconnect', origin),
     newTab: url => ipcRenderer.invoke('hermes:schoolView:newTab', url),
     closeTab: id => ipcRenderer.invoke('hermes:schoolView:closeTab', id),
     activate: id => ipcRenderer.invoke('hermes:schoolView:activate', id),

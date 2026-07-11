@@ -120,6 +120,8 @@ declare global {
       // rect in CSS px — the main process scales by the live zoomFactor.
       schoolView?: {
         getState: () => Promise<HermesSchoolViewState>
+        connectionStatus: (origins: string[]) => Promise<Record<string, boolean>>
+        disconnect: (origin: string) => Promise<boolean>
         debugBounds: () => Promise<{
           content: { height: number; width: number } | null
           panelRect: { height: number; width: number; x: number; y: number } | null

@@ -2,7 +2,7 @@
 // note). Interaction model deliberately mirrors what health-science students already have
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
-import { IconCards, IconFolderPlus, IconLayoutGrid, IconList, IconPlayerPause } from '@tabler/icons-react'
+import { IconFolderPlus, IconLayoutGrid, IconList, IconPlayerPause, IconSettings } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -17,7 +17,9 @@ import {
 } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
+import { SegmentedControl, type SegmentedControlOption } from '@/components/ui/segmented-control'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -32,9 +34,11 @@ import {
   buildQueue,
   deckStats,
   type DeckStats,
+  DEFAULT_STUDY_SETTINGS,
   deleteCard,
   deleteDeck,
   freshId,
+  getSettings,
   gradeCard,
   groupDecks,
   loadState,
@@ -42,11 +46,14 @@ import {
   type QueueItem,
   reconcileDeckFiles,
   reviewHeatmap,
+  type ReviewOrder,
   saveState,
+  setSettings,
   type StudyCard,
   type StudyDeck,
   studyMotivation,
   type StudyRating,
+  type StudySettings,
   type StudyState,
   toggleSuspendCard,
   updateCard
@@ -62,7 +69,11 @@ const GRADES: { key: string; label: string; rating: StudyRating }[] = [
 type DeckViewMode = 'cards' | 'list'
 
 const VIEW_MODE_KEY = 'nemesis.study.view'
-const FLIP_KEY = 'nemesis.study.flip'
+
+const ORDER_OPTIONS: SegmentedControlOption<ReviewOrder>[] = [
+  { id: 'due', label: 'Due first' },
+  { id: 'random', label: 'Random' }
+]
 
 function loadViewMode(): DeckViewMode {
   try {
@@ -72,16 +83,14 @@ function loadViewMode(): DeckViewMode {
   }
 }
 
-function loadFlip(): boolean {
+// The flip toggle's persisted value now lives in StudySettings (model.ts migrates
+// the old standalone key on load — see LEGACY_FLIP_KEY). This only covers the
+// OS-level accessibility preference, which always overrides the stored setting.
+function prefersReducedMotion(): boolean {
   try {
-    // Default on, but never fight a reduced-motion preference.
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      return false
-    }
-
-    return window.localStorage.getItem(FLIP_KEY) !== 'off'
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
   } catch {
-    return true
+    return false
   }
 }
 
@@ -94,8 +103,9 @@ export function StudyView() {
   const [importOpen, setImportOpen] = useState(false)
   const [newDeckSection, setNewDeckSection] = useState<null | string>(null)
   const [newSectionOpen, setNewSectionOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [view, setView] = useState<DeckViewMode>(() => loadViewMode())
-  const [flip, setFlip] = useState(() => loadFlip())
+  const [reducedMotion] = useState(() => prefersReducedMotion())
   const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
   const [done, setDone] = useState(0)
   const [autoImported, setAutoImported] = useState<string[]>([])
@@ -104,10 +114,14 @@ export function StudyView() {
   const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now])
   const current: QueueItem | undefined = queue[0]
   const totals = deckStats(state, null, now)
+
   const sections = useMemo(
     () => groupDecks(state, now).map(group => group.course).filter(course => course.toLocaleLowerCase() !== 'other'),
     [now, state]
   )
+
+  const settings = getSettings(state)
+  const flip = settings.flip && !reducedMotion
 
   const update = useCallback((next: StudyState) => {
     setState(next)
@@ -258,20 +272,6 @@ export function StudyView() {
     }
   }, [])
 
-  const toggleFlip = useCallback(() => {
-    setFlip(current => {
-      const next = !current
-
-      try {
-        window.localStorage.setItem(FLIP_KEY, next ? 'on' : 'off')
-      } catch {
-        // persistence is best-effort
-      }
-
-      return next
-    })
-  }, [])
-
   const startMatch = useCallback(
     (deckId: string) => {
       setBrowseDeckId(null)
@@ -393,15 +393,13 @@ export function StudyView() {
                 </button>
               </div>
               <button
-                className={cn(
-                  'rounded-md border border-border px-2 py-1.5 transition-colors',
-                  flip ? 'text-(--theme-primary)' : 'text-muted-foreground hover:text-foreground'
-                )}
-                onClick={toggleFlip}
-                title={flip ? 'Flip animation on' : 'Flip animation off'}
+                aria-label="Study settings"
+                className="rounded-md border border-border px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => setSettingsOpen(true)}
+                title="Study settings"
                 type="button"
               >
-                <IconCards size={14} />
+                <IconSettings size={14} />
               </button>
               <Button onClick={() => setNewSectionOpen(true)} size="sm" variant="outline">
                 <IconFolderPlus size={14} />
@@ -448,6 +446,7 @@ export function StudyView() {
             onReveal={() => setRevealed(true)}
             remaining={queue.length}
             revealed={revealed}
+            showIntervalHints={settings.showIntervalHints}
           />
         ) : (
           <EmptyState
@@ -495,6 +494,12 @@ export function StudyView() {
           sections={sections}
         />
       )}
+      <StudySettingsDialog
+        onChange={patch => update(setSettings(state, patch))}
+        onOpenChange={setSettingsOpen}
+        open={settingsOpen}
+        settings={settings}
+      />
     </div>
   )
 }
@@ -626,6 +631,106 @@ function NewSectionDialog({
           </Button>
           <Button disabled={!valid} onClick={() => onCreate(name)}>
             Create section
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function SettingRow({
+  children,
+  description,
+  label
+}: {
+  children: React.ReactNode
+  description?: string
+  label: string
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5">
+      <div className="min-w-0 pr-2">
+        <div className="text-sm font-medium text-foreground">{label}</div>
+        {description && <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
+/** Cast + clamp a raw number-input string to a non-negative integer. Empty or
+ *  non-numeric input becomes 0 (== unlimited), never NaN or negative. */
+function parseDailyCap(raw: string): number {
+  const parsed = Math.round(Number(raw))
+
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+}
+
+function StudySettingsDialog({
+  onChange,
+  onOpenChange,
+  open,
+  settings
+}: {
+  onChange: (patch: Partial<StudySettings>) => void
+  onOpenChange: (open: boolean) => void
+  open: boolean
+  settings: StudySettings
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Study settings</DialogTitle>
+          <DialogDescription>Limits and behavior for review sessions. Changes apply immediately.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col divide-y divide-border">
+          <SettingRow description="Cards introduced for the first time. 0 = unlimited." label="New cards per day">
+            <Input
+              className="w-20 text-right"
+              inputMode="numeric"
+              min={0}
+              onChange={event => onChange({ newPerDay: parseDailyCap(event.target.value) })}
+              step={1}
+              type="number"
+              value={settings.newPerDay}
+            />
+          </SettingRow>
+          <SettingRow description="Cards already in review rotation. 0 = unlimited." label="Reviews per day">
+            <Input
+              className="w-20 text-right"
+              inputMode="numeric"
+              min={0}
+              onChange={event => onChange({ reviewsPerDay: parseDailyCap(event.target.value) })}
+              step={1}
+              type="number"
+              value={settings.reviewsPerDay}
+            />
+          </SettingRow>
+          <SettingRow label="Review order">
+            <SegmentedControl onChange={order => onChange({ order })} options={ORDER_OPTIONS} value={settings.order} />
+          </SettingRow>
+          <SettingRow label="Card flip animation">
+            <Switch
+              aria-label="Card flip animation"
+              checked={settings.flip}
+              onCheckedChange={flip => onChange({ flip })}
+            />
+          </SettingRow>
+          <SettingRow description="The estimated interval shown on each grade button." label="Next-interval hints">
+            <Switch
+              aria-label="Show next-interval hints"
+              checked={settings.showIntervalHints}
+              onCheckedChange={showIntervalHints => onChange({ showIntervalHints })}
+            />
+          </SettingRow>
+        </div>
+        <DialogFooter className="sm:justify-between">
+          <Button onClick={() => onChange(DEFAULT_STUDY_SETTINGS)} size="sm" variant="text">
+            Reset to defaults
+          </Button>
+          <Button onClick={() => onOpenChange(false)} size="sm" variant="outline">
+            Done
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1199,7 +1304,9 @@ function buildMatchTiles(deck: StudyDeck, size: number): MatchTile[] {
 
   for (let i = pool.length - 1; i > 0; i--) {
     const j = ((seed >> (i % 16)) ^ (i * 2654435761)) % (i + 1)
+
     const k = j < 0 ? -j : j
+
     ;[pool[i], pool[k]] = [pool[k], pool[i]]
   }
 
@@ -1213,7 +1320,9 @@ function buildMatchTiles(deck: StudyDeck, size: number): MatchTile[] {
 
   for (let i = tiles.length - 1; i > 0; i--) {
     const j = ((seed >> ((i + 3) % 16)) ^ (i * 40503)) % (i + 1)
+
     const k = j < 0 ? -j : j
+
     ;[tiles[i], tiles[k]] = [tiles[k], tiles[i]]
   }
 
@@ -1364,7 +1473,8 @@ function ReviewSurface({
   onGrade,
   onReveal,
   remaining,
-  revealed
+  revealed,
+  showIntervalHints
 }: {
   done: number
   flip: boolean
@@ -1374,6 +1484,7 @@ function ReviewSurface({
   onReveal: () => void
   remaining: number
   revealed: boolean
+  showIntervalHints: boolean
 }) {
   const total = done + remaining
   const progress = total > 0 ? Math.round((done / total) * 100) : 0
@@ -1456,9 +1567,11 @@ function ReviewSurface({
                   variant="secondary"
                 >
                   <span>{option.label}</span>
-                  <span className="text-[10px] opacity-60">
-                    {intervals[option.rating]} · {option.key}
-                  </span>
+                  {showIntervalHints && (
+                    <span className="text-[10px] opacity-60">
+                      {intervals[option.rating]} · {option.key}
+                    </span>
+                  )}
                 </Button>
               ))}
             </div>

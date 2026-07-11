@@ -151,6 +151,36 @@ export function dateKey(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
+// --- View-switching date math ---------------------------------------------------------
+// Day/Week/Month/Year navigation all step a single `cursor: Date` anchor (see index.tsx).
+// Month/year steps clamp the day-of-month into the target month's range instead of
+// letting the Date constructor roll over — `new Date(y, 1, 31)` in a non-leap year
+// silently becomes March 3, which would turn "next month" from Jan 31 into March.
+
+export function addDays(date: Date, delta: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + delta)
+}
+
+export function addWeeks(date: Date, delta: number): Date {
+  return addDays(date, delta * 7)
+}
+
+export function addMonths(date: Date, delta: number): Date {
+  const first = new Date(date.getFullYear(), date.getMonth() + delta, 1)
+  const lastDayOfTarget = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
+
+  return new Date(first.getFullYear(), first.getMonth(), Math.min(date.getDate(), lastDayOfTarget))
+}
+
+export function addYears(date: Date, delta: number): Date {
+  return addMonths(date, delta * 12)
+}
+
+/** The Sunday that starts `date`'s week — matches monthGrid's Sunday-first layout. */
+export function startOfWeek(date: Date): Date {
+  return addDays(date, -date.getDay())
+}
+
 export interface MonthDay {
   date: Date
   key: string
@@ -172,6 +202,20 @@ export function monthGrid(year: number, month: number, today: Date): MonthDay[] 
   }
 
   return days
+}
+
+/** 7 consecutive days (Sun–Sat) covering `anchor`'s week — the Week view's columns.
+ *  `inMonth` is always true here (the field is meaningless outside the month grid); it's
+ *  kept so week days share MonthDay's shape instead of introducing a near-duplicate type. */
+export function weekGrid(anchor: Date, today: Date): MonthDay[] {
+  const start = startOfWeek(anchor)
+  const todayKey = dateKey(today)
+
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = addDays(start, i)
+
+    return { date, inMonth: true, isToday: dateKey(date) === todayKey, key: dateKey(date) }
+  })
 }
 
 /** Group events by date key for O(1) lookup while rendering the grid; each day's events
@@ -201,4 +245,16 @@ export function upcomingEvents(events: CalendarEvent[], from: Date, days: number
   return events
     .filter(event => event.date >= fromKey && event.date <= toKey)
     .sort((a, b) => (a.date === b.date ? (a.time ?? '').localeCompare(b.time ?? '') : a.date.localeCompare(b.date)))
+}
+
+/** Events on exactly `date`: timed events first (soonest first), then untimed — the Day
+ *  view's timeline order. The opposite of eventsByDate's untimed-first sort, which is
+ *  tuned for the month grid's cramped chips instead. */
+export function dayEvents(events: CalendarEvent[], date: Date): CalendarEvent[] {
+  const key = dateKey(date)
+  const onDate = events.filter(event => event.date === key)
+  const timed = onDate.filter(event => event.time).sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''))
+  const untimed = onDate.filter(event => !event.time)
+
+  return [...timed, ...untimed]
 }

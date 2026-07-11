@@ -409,8 +409,12 @@ function NativeBrowserPanel() {
 
       {/* Placeholder: the main process composites the WebContentsView exactly
           over this box (reportBounds keeps it told where the box sits). The
-          hint below is only ever visible before the first state lands. */}
-      <div className="relative min-h-0 flex-1" ref={placeholderRef}>
+          hint below is only ever visible before the first state lands.
+          ml-1 keeps the pane's resize sash (a 4px strip straddling the rail's
+          left boundary, see pane-shell SASH) clear of the native view — the
+          view floats above ALL DOM, so without this gutter the sash's inner
+          half is unreachable and the rail can't be resized in Browser mode. */}
+      <div className="relative ml-1 min-h-0 flex-1" ref={placeholderRef}>
         {tabs.length === 0 && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center text-[0.72rem] text-(--ui-text-tertiary)">
             Opening the browser…

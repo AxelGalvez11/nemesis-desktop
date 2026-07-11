@@ -1,4 +1,4 @@
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import { jsxs as _jsxs, jsx as _jsx, Fragment as _Fragment } from "react/jsx-runtime";
 // Saved recordings — inline master/detail. The list (left) is everything under
 // ~/Documents/Nemesis Recordings; selecting one (right) shows its audio playback, the
 // "AI notes" Nemesis wrote when asked to enhance it, and the raw transcript — all pulled
@@ -15,16 +15,18 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 // seeking — the same mechanism chat's audio/video attachments already use.
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { mediaStreamUrl } from '@/lib/media';
 import { setComposerDraft } from '@/store/composer';
 import { useRefreshHotkey } from '../hooks/use-refresh-hotkey';
 import { loadFolderNotes, saveNote } from '../library/vault';
-import { PanelAction, PanelBody, PanelDetail, PanelEmpty, PanelList, PanelListRow, PanelPill, PanelSectionLabel } from '../overlays/panel';
+import { PanelAction, PanelBody, PanelDetail, PanelEmpty, PanelList, PanelListRow, PanelPill, PanelRowMenu, PanelSectionLabel } from '../overlays/panel';
 import { NEW_CHAT_ROUTE } from '../routes';
 import { correctPharmTerms } from './pharm-lexicon';
+import { LECTURE_FOLDER, RECORDINGS_DIR } from './service';
 import { transcribeAudio } from './transcribe';
-export const RECORDINGS_DIR = '~/Documents/Nemesis Recordings';
-export const LECTURE_FOLDER = 'Lectures';
+export { LECTURE_FOLDER, RECORDINGS_DIR } from './service';
 const AUDIO_FILE_RE = /\.(webm|m4a|wav)$/i;
 function audioMarker(fileName) {
     return `Audio: ${fileName} (Nemesis Recordings)`;
@@ -54,9 +56,7 @@ function recordingTime(name) {
         return '';
     }
     const date = new Date(2000, 0, 1, Number(match[1]), Number(match[2]));
-    return Number.isNaN(date.getTime())
-        ? ''
-        : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 /** Load saved recordings and best-effort match each to its auto-saved Library note. */
 export async function loadRecordingFiles() {
@@ -129,6 +129,8 @@ export function RecordingArchive({ reloadToken }) {
     const [corrections, setCorrections] = useState({});
     const [transcribingStatus, setTranscribingStatus] = useState({});
     const [savedNote, setSavedNote] = useState({});
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleteCompanionNote, setDeleteCompanionNote] = useState(false);
     const reload = useCallback(async () => {
         try {
             setRecordings(await loadRecordingFiles());
@@ -190,17 +192,46 @@ export function RecordingArchive({ reloadToken }) {
         await saveNote(title, `# ${title}\n\n*Transcribed by Nemesis — review before relying on it.*\n\n${transcript}\n`);
         setSavedNote(current => ({ ...current, [file.path]: true }));
     }, []);
+    const requestDelete = useCallback((file) => {
+        setDeleteCompanionNote(false);
+        setDeleteTarget(file);
+    }, []);
+    const deleteRecording = useCallback(async () => {
+        if (!deleteTarget) {
+            return;
+        }
+        const trash = window.hermesDesktop?.trashPath;
+        if (!trash) {
+            throw new Error('Moving files to Trash is unavailable in this build.');
+        }
+        const audioMoved = await trash(deleteTarget.path);
+        if (!audioMoved) {
+            throw new Error('The audio file could not be moved to Trash.');
+        }
+        if (deleteCompanionNote && deleteTarget.note) {
+            const noteMoved = await trash(deleteTarget.note.path);
+            if (!noteMoved) {
+                await reload();
+                throw new Error('The audio was moved to Trash, but its lecture note could not be moved.');
+            }
+        }
+        setSelectedPath(current => (current === deleteTarget.path ? null : current));
+        await reload();
+    }, [deleteCompanionNote, deleteTarget, reload]);
+    const deleteDialog = (_jsx(ConfirmDialog, { busyLabel: "Moving to Trash\u2026", confirmLabel: "Move to Trash", description: deleteTarget ? (_jsxs("span", { className: "block space-y-3", children: [_jsxs("span", { className: "block", children: ["The audio file \u201C", deleteTarget.name, "\u201D will move to the system Trash, where it can still be recovered."] }), deleteTarget.note ? (_jsxs("label", { className: "flex cursor-pointer items-start gap-2 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) p-3 text-left text-foreground", children: [_jsx(Checkbox, { checked: deleteCompanionNote, className: "mt-0.5", onCheckedChange: checked => setDeleteCompanionNote(checked === true) }), _jsxs("span", { children: [_jsx("span", { className: "block text-xs font-medium", children: "Also move its lecture note to Trash" }), _jsxs("span", { className: "mt-0.5 block text-[0.6875rem] text-muted-foreground", children: [deleteTarget.note.title, ".md in Library / ", LECTURE_FOLDER] })] })] })) : null] })) : null, destructive: true, doneLabel: "Moved to Trash", onClose: () => setDeleteTarget(null), onConfirm: deleteRecording, open: Boolean(deleteTarget), title: "Move recording to Trash?" }));
     if (recordings.length === 0) {
-        return (_jsxs("div", { className: "rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-7", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)", children: "Nothing captured" }), _jsx("p", { className: "mt-1 text-xs text-muted-foreground", children: "Recordings save to Documents / Nemesis Recordings as ordinary audio files." })] }));
+        return (_jsxs(_Fragment, { children: [_jsxs("div", { className: "grid min-h-40 place-content-center rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-8 text-center", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Archive ready" }), _jsx("p", { className: "mt-1 text-sm font-medium text-foreground", children: "Your first recording will appear here" }), _jsx("p", { className: "mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground", children: "Captures stay in Documents / Nemesis Recordings as ordinary audio files you control." })] }), deleteDialog] }));
     }
-    return (_jsx("div", { className: "h-[28rem] rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]", children: _jsxs(PanelBody, { children: [_jsx(PanelList, { children: recordings.map(file => (_jsx(PanelListRow, { active: selected?.path === file.path, icon: "mic", meta: recordingTime(file.name), onSelect: () => setSelectedPath(file.path), rowKey: file.path, title: file.note?.title || recordingLabel(file.name) }, file.path))) }), selected ? (_jsx(RecordingDetail, { corrections: corrections[selected.path] ?? 0, file: selected, navigate: navigate, onDraftFlashcards: draftFlashcards, onSaveTranscriptNote: (file, transcript) => void saveTranscriptNote(file, transcript), onTranscribe: () => void transcribe(selected), savedNote: Boolean(savedNote[selected.path]), transcribingStatus: transcribingStatus[selected.path], transcript: transcripts[selected.path] ?? '' }, selected.path)) : (_jsx(PanelEmpty, { description: "Pick a recording on the left.", icon: "mic", title: "No recording selected" }))] }) }));
+    return (_jsxs(_Fragment, { children: [_jsx("div", { className: "h-[min(34rem,68vh)] min-h-[28rem] min-w-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]", children: _jsxs(PanelBody, { className: "!flex-col !gap-4 lg:!flex-row lg:!gap-5", children: [_jsx(PanelList, { className: "!w-full !max-h-40 lg:!max-h-none lg:!w-56", children: recordings.map(file => (_jsx(PanelListRow, { active: selected?.path === file.path, icon: "mic", menu: _jsx(PanelRowMenu, { items: [
+                                        { icon: 'trash', label: 'Move to Trash', onSelect: () => requestDelete(file), tone: 'danger' }
+                                    ], label: `Actions for ${file.note?.title || recordingLabel(file.name)}` }), meta: recordingTime(file.name), onSelect: () => setSelectedPath(file.path), rowKey: file.path, title: file.note?.title || recordingLabel(file.name) }, file.path))) }), selected ? (_jsx(RecordingDetail, { corrections: corrections[selected.path] ?? 0, file: selected, navigate: navigate, onDelete: () => requestDelete(selected), onDraftFlashcards: draftFlashcards, onSaveTranscriptNote: (file, transcript) => void saveTranscriptNote(file, transcript), onTranscribe: () => void transcribe(selected), savedNote: Boolean(savedNote[selected.path]), transcribingStatus: transcribingStatus[selected.path], transcript: transcripts[selected.path] ?? '' }, selected.path)) : (_jsx(PanelEmpty, { description: "Pick a recording on the left.", icon: "mic", title: "No recording selected" }))] }) }), deleteDialog] }));
 }
-function RecordingDetail({ corrections, file, navigate, onDraftFlashcards, onSaveTranscriptNote, onTranscribe, savedNote, transcribingStatus, transcript }) {
+function RecordingDetail({ corrections, file, navigate, onDelete, onDraftFlashcards, onSaveTranscriptNote, onTranscribe, savedNote, transcribingStatus, transcript }) {
     const [audioFailed, setAudioFailed] = useState(false);
     const sections = file.note ? parseLectureSections(file.note.content) : null;
     const rawTranscript = sections?.transcript || transcript;
     const hasNote = Boolean(file.note);
-    return (_jsxs(PanelDetail, { children: [_jsxs("header", { className: "space-y-1", children: [_jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [_jsx("h3", { className: "min-w-0 truncate text-[0.95rem] font-semibold tracking-tight text-foreground", children: file.note?.title || recordingLabel(file.name) }), !hasNote && _jsx(PanelPill, { children: "No linked note" })] }), _jsx("p", { className: "text-xs text-muted-foreground", children: recordingLabel(file.name) })] }), _jsxs("section", { className: "space-y-1.5", children: [_jsx(PanelSectionLabel, { children: "Audio" }), audioFailed ? (_jsx("p", { className: "rounded bg-destructive/10 p-2.5 text-xs text-destructive", children: "Couldn\u2019t play this recording \u2014 the audio file may have been moved or deleted." })) : (_jsx("audio", { className: "w-full", controls: true, onError: () => setAudioFailed(true), preload: "metadata", src: mediaStreamUrl(file.path) }))] }), _jsxs("section", { className: "space-y-1.5", children: [_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx(PanelSectionLabel, { children: "AI notes" }), hasNote && (_jsx(PanelAction, { icon: "wand", onClick: () => enhanceLectureNote(file.note?.title ?? '', navigate), children: sections?.aiNotes ? 'Re-enhance' : 'Enhance with Nemesis' }))] }), sections?.aiNotes ? (_jsx("p", { className: "whitespace-pre-wrap text-xs leading-relaxed text-foreground", children: sections.aiNotes })) : (_jsx("p", { className: "text-xs text-muted-foreground", children: hasNote
+    return (_jsxs(PanelDetail, { children: [_jsxs("header", { className: "flex min-w-0 items-start justify-between gap-3", children: [_jsxs("div", { className: "min-w-0 space-y-1", children: [_jsxs("div", { className: "flex min-w-0 flex-wrap items-center gap-2", children: [_jsx("h3", { className: "min-w-0 truncate text-[0.95rem] font-semibold tracking-tight text-foreground", children: file.note?.title || recordingLabel(file.name) }), !hasNote && _jsx(PanelPill, { children: "No linked note" })] }), _jsx("p", { className: "truncate text-xs text-muted-foreground", children: recordingLabel(file.name) })] }), _jsx(PanelAction, { icon: "trash", onClick: onDelete, children: "Delete" })] }), _jsxs("section", { className: "space-y-1.5", children: [_jsx(PanelSectionLabel, { children: "Audio" }), audioFailed ? (_jsx("p", { className: "rounded bg-destructive/10 p-2.5 text-xs text-destructive", children: "Couldn\u2019t play this recording \u2014 the audio file may have been moved or deleted." })) : (_jsx("audio", { className: "w-full", controls: true, onError: () => setAudioFailed(true), preload: "metadata", src: mediaStreamUrl(file.path) }))] }), _jsxs("section", { className: "space-y-1.5", children: [_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx(PanelSectionLabel, { children: "AI notes" }), hasNote && (_jsx(PanelAction, { icon: "wand", onClick: () => enhanceLectureNote(file.note?.title ?? '', navigate), children: sections?.aiNotes ? 'Re-enhance' : 'Enhance with Nemesis' }))] }), sections?.aiNotes ? (_jsx("p", { className: "whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90", children: sections.aiNotes })) : (_jsx("p", { className: "text-xs text-muted-foreground", children: hasNote
                             ? 'Not enhanced yet — click "Enhance with Nemesis" to turn your notes and transcript into structured AI notes.'
-                            : 'No notes linked to this recording — it predates note-linking, or its note was moved or deleted.' }))] }), sections?.myNotes ? (_jsxs("section", { className: "space-y-1.5", children: [_jsx(PanelSectionLabel, { children: "My notes" }), _jsx("p", { className: "whitespace-pre-wrap text-xs leading-relaxed text-foreground", children: sections.myNotes })] })) : null, _jsxs("section", { className: "space-y-1.5", children: [_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx(PanelSectionLabel, { children: "Transcript" }), rawTranscript && !transcribingStatus && (_jsxs("div", { className: "flex items-center gap-0.5", children: [_jsx(PanelAction, { icon: "checklist", onClick: () => onDraftFlashcards(rawTranscript), children: "Draft flashcards" }), !hasNote && (_jsx(PanelAction, { disabled: savedNote, icon: "save", onClick: () => onSaveTranscriptNote(file, rawTranscript), children: savedNote ? 'Saved' : 'Save as note' }))] }))] }), transcribingStatus ? (_jsxs("div", { className: "flex items-center gap-1.5 text-xs font-medium text-(--theme-primary)", children: [_jsx("span", { className: "size-1.5 animate-pulse rounded-full bg-(--theme-primary)" }), transcribingStatus] })) : rawTranscript ? (_jsxs(_Fragment, { children: [_jsx("p", { className: "whitespace-pre-wrap text-xs leading-relaxed text-foreground", children: rawTranscript }), corrections > 0 && (_jsxs("p", { className: "text-[10px] text-muted-foreground", children: [corrections, " pharm term", corrections === 1 ? '' : 's', " auto-corrected"] }))] })) : (_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx("p", { className: "text-xs text-muted-foreground", children: "No transcript yet." }), _jsx(PanelAction, { icon: "sparkle", onClick: onTranscribe, children: "Transcribe" })] }))] })] }));
+                            : 'No notes linked to this recording — it predates note-linking, or its note was moved or deleted.' }))] }), sections?.myNotes ? (_jsxs("section", { className: "space-y-1.5", children: [_jsx(PanelSectionLabel, { children: "My notes" }), _jsx("p", { className: "whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90", children: sections.myNotes })] })) : null, _jsxs("section", { className: "space-y-1.5", children: [_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx(PanelSectionLabel, { children: "Transcript" }), rawTranscript && !transcribingStatus && (_jsxs("div", { className: "flex flex-wrap items-center justify-end gap-0.5", children: [_jsx(PanelAction, { icon: "checklist", onClick: () => onDraftFlashcards(rawTranscript), children: "Draft flashcards" }), !hasNote && (_jsx(PanelAction, { disabled: savedNote, icon: "save", onClick: () => onSaveTranscriptNote(file, rawTranscript), children: savedNote ? 'Saved' : 'Save as note' }))] }))] }), transcribingStatus ? (_jsxs("div", { className: "flex items-center gap-1.5 text-xs font-medium text-(--theme-primary)", children: [_jsx("span", { className: "size-1.5 animate-pulse rounded-full bg-(--theme-primary)" }), transcribingStatus] })) : rawTranscript ? (_jsxs(_Fragment, { children: [_jsx("p", { className: "whitespace-pre-wrap border-l-2 border-(--theme-primary)/25 pl-3 text-[0.8125rem] leading-6 text-foreground/90", children: rawTranscript }), corrections > 0 && (_jsxs("p", { className: "text-[10px] text-muted-foreground", children: [corrections, " pharm term", corrections === 1 ? '' : 's', " auto-corrected"] }))] })) : (_jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx("p", { className: "text-xs text-muted-foreground", children: "No transcript yet." }), _jsx(PanelAction, { icon: "sparkle", onClick: onTranscribe, children: "Transcribe" })] }))] })] }));
 }

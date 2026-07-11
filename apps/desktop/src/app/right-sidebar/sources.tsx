@@ -8,7 +8,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Codicon } from '@/components/ui/codicon'
 import { type ChatMessage, chatMessageText } from '@/lib/chat-messages'
 import { cn } from '@/lib/utils'
-import { openBrowserRail } from '@/store/browser-rail'
 import { $messages } from '@/store/session'
 import { $focusedSourceUrl } from '@/store/source-focus'
 
@@ -278,21 +277,13 @@ export function SourcesTab() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-1">
-      {/* Rail header: the label + the agent-browser opener (the live mirror
-          where school-portal logins are typed). */}
-      <div className="flex h-7 shrink-0 items-center justify-between px-2.5">
+      {/* Rail header. (The Browser opener that used to live here is gone — the
+          Sources | Browser segmented control above the rail already covers it,
+          and two "Browser" buttons in one panel read as a bug.) */}
+      <div className="flex h-7 shrink-0 items-center px-2.5">
         <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70">
           Sources
         </span>
-        <button
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.65rem] font-medium text-muted-foreground transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
-          onClick={() => openBrowserRail()}
-          title="Watch and steer the agent's browser"
-          type="button"
-        >
-          <Codicon name="globe" size="0.7rem" />
-          Browser
-        </button>
       </div>
       {sources.length === 0 ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-4 text-center">

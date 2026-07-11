@@ -16,6 +16,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { NavigateFunction } from 'react-router-dom'
 
+import { Checkbox } from '@/components/ui/checkbox'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { mediaStreamUrl } from '@/lib/media'
 import { setComposerDraft } from '@/store/composer'
 
@@ -29,15 +31,16 @@ import {
   PanelList,
   PanelListRow,
   PanelPill,
+  PanelRowMenu,
   PanelSectionLabel
 } from '../overlays/panel'
 import { NEW_CHAT_ROUTE } from '../routes'
 
 import { correctPharmTerms } from './pharm-lexicon'
+import { LECTURE_FOLDER, RECORDINGS_DIR } from './service'
 import { transcribeAudio } from './transcribe'
 
-export const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
-export const LECTURE_FOLDER = 'Lectures'
+export { LECTURE_FOLDER, RECORDINGS_DIR } from './service'
 
 const AUDIO_FILE_RE = /\.(webm|m4a|wav)$/i
 
@@ -86,9 +89,7 @@ function recordingTime(name: string): string {
 
   const date = new Date(2000, 0, 1, Number(match[1]), Number(match[2]))
 
-  return Number.isNaN(date.getTime())
-    ? ''
-    : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
 /** Load saved recordings and best-effort match each to its auto-saved Library note. */
@@ -176,7 +177,11 @@ function draftFlashcardsPrompt(transcript: string): string {
   )
 }
 
-export function RecordingArchive({ reloadToken }: { reloadToken: number }) {
+interface RecordingArchiveProps {
+  reloadToken: number
+}
+
+export function RecordingArchive({ reloadToken }: RecordingArchiveProps) {
   const navigate = useNavigate()
   const [recordings, setRecordings] = useState<RecordingFile[]>([])
   const [selectedPath, setSelectedPath] = useState<null | string>(null)
@@ -184,6 +189,8 @@ export function RecordingArchive({ reloadToken }: { reloadToken: number }) {
   const [corrections, setCorrections] = useState<Record<string, number>>({})
   const [transcribingStatus, setTranscribingStatus] = useState<Record<string, string>>({})
   const [savedNote, setSavedNote] = useState<Record<string, boolean>>({})
+  const [deleteTarget, setDeleteTarget] = useState<null | RecordingFile>(null)
+  const [deleteCompanionNote, setDeleteCompanionNote] = useState(false)
 
   const reload = useCallback(async () => {
     try {
@@ -262,74 +269,170 @@ export function RecordingArchive({ reloadToken }: { reloadToken: number }) {
     setSavedNote(current => ({ ...current, [file.path]: true }))
   }, [])
 
+  const requestDelete = useCallback((file: RecordingFile) => {
+    setDeleteCompanionNote(false)
+    setDeleteTarget(file)
+  }, [])
+
+  const deleteRecording = useCallback(async () => {
+    if (!deleteTarget) {
+      return
+    }
+
+    const trash = window.hermesDesktop?.trashPath
+
+    if (!trash) {
+      throw new Error('Moving files to Trash is unavailable in this build.')
+    }
+
+    const audioMoved = await trash(deleteTarget.path)
+
+    if (!audioMoved) {
+      throw new Error('The audio file could not be moved to Trash.')
+    }
+
+    if (deleteCompanionNote && deleteTarget.note) {
+      const noteMoved = await trash(deleteTarget.note.path)
+
+      if (!noteMoved) {
+        await reload()
+        throw new Error('The audio was moved to Trash, but its lecture note could not be moved.')
+      }
+    }
+
+    setSelectedPath(current => (current === deleteTarget.path ? null : current))
+    await reload()
+  }, [deleteCompanionNote, deleteTarget, reload])
+
+  const deleteDialog = (
+    <ConfirmDialog
+      busyLabel="Moving to Trash…"
+      confirmLabel="Move to Trash"
+      description={
+        deleteTarget ? (
+          <span className="block space-y-3">
+            <span className="block">
+              The audio file “{deleteTarget.name}” will move to the system Trash, where it can still be recovered.
+            </span>
+            {deleteTarget.note ? (
+              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) p-3 text-left text-foreground">
+                <Checkbox
+                  checked={deleteCompanionNote}
+                  className="mt-0.5"
+                  onCheckedChange={checked => setDeleteCompanionNote(checked === true)}
+                />
+                <span>
+                  <span className="block text-xs font-medium">Also move its lecture note to Trash</span>
+                  <span className="mt-0.5 block text-[0.6875rem] text-muted-foreground">
+                    {deleteTarget.note.title}.md in Library / {LECTURE_FOLDER}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+          </span>
+        ) : null
+      }
+      destructive
+      doneLabel="Moved to Trash"
+      onClose={() => setDeleteTarget(null)}
+      onConfirm={deleteRecording}
+      open={Boolean(deleteTarget)}
+      title="Move recording to Trash?"
+    />
+  )
+
   if (recordings.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-7">
-        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">Nothing captured</p>
-        <p className="mt-1 text-xs text-muted-foreground">Recordings save to Documents / Nemesis Recordings as ordinary audio files.</p>
-      </div>
+      <>
+        <div className="grid min-h-40 place-content-center rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-8 text-center">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
+            Archive ready
+          </p>
+          <p className="mt-1 text-sm font-medium text-foreground">Your first recording will appear here</p>
+          <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+            Captures stay in Documents / Nemesis Recordings as ordinary audio files you control.
+          </p>
+        </div>
+        {deleteDialog}
+      </>
     )
   }
 
   return (
-    <div className="h-[28rem] rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-      <PanelBody>
-        <PanelList>
-          {recordings.map(file => (
-            <PanelListRow
-              active={selected?.path === file.path}
-              icon="mic"
-              key={file.path}
-              meta={recordingTime(file.name)}
-              onSelect={() => setSelectedPath(file.path)}
-              rowKey={file.path}
-              title={file.note?.title || recordingLabel(file.name)}
-            />
-          ))}
-        </PanelList>
+    <>
+      <div className="h-[min(34rem,68vh)] min-h-[28rem] min-w-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+        <PanelBody className="!flex-col !gap-4 lg:!flex-row lg:!gap-5">
+          <PanelList className="!w-full !max-h-40 lg:!max-h-none lg:!w-56">
+            {recordings.map(file => (
+              <PanelListRow
+                active={selected?.path === file.path}
+                icon="mic"
+                key={file.path}
+                menu={
+                  <PanelRowMenu
+                    items={[
+                      { icon: 'trash', label: 'Move to Trash', onSelect: () => requestDelete(file), tone: 'danger' }
+                    ]}
+                    label={`Actions for ${file.note?.title || recordingLabel(file.name)}`}
+                  />
+                }
+                meta={recordingTime(file.name)}
+                onSelect={() => setSelectedPath(file.path)}
+                rowKey={file.path}
+                title={file.note?.title || recordingLabel(file.name)}
+              />
+            ))}
+          </PanelList>
 
-        {selected ? (
-          <RecordingDetail
-            corrections={corrections[selected.path] ?? 0}
-            file={selected}
-            key={selected.path}
-            navigate={navigate}
-            onDraftFlashcards={draftFlashcards}
-            onSaveTranscriptNote={(file, transcript) => void saveTranscriptNote(file, transcript)}
-            onTranscribe={() => void transcribe(selected)}
-            savedNote={Boolean(savedNote[selected.path])}
-            transcribingStatus={transcribingStatus[selected.path]}
-            transcript={transcripts[selected.path] ?? ''}
-          />
-        ) : (
-          <PanelEmpty description="Pick a recording on the left." icon="mic" title="No recording selected" />
-        )}
-      </PanelBody>
-    </div>
+          {selected ? (
+            <RecordingDetail
+              corrections={corrections[selected.path] ?? 0}
+              file={selected}
+              key={selected.path}
+              navigate={navigate}
+              onDelete={() => requestDelete(selected)}
+              onDraftFlashcards={draftFlashcards}
+              onSaveTranscriptNote={(file, transcript) => void saveTranscriptNote(file, transcript)}
+              onTranscribe={() => void transcribe(selected)}
+              savedNote={Boolean(savedNote[selected.path])}
+              transcribingStatus={transcribingStatus[selected.path]}
+              transcript={transcripts[selected.path] ?? ''}
+            />
+          ) : (
+            <PanelEmpty description="Pick a recording on the left." icon="mic" title="No recording selected" />
+          )}
+        </PanelBody>
+      </div>
+      {deleteDialog}
+    </>
   )
 }
 
-function RecordingDetail({
-  corrections,
-  file,
-  navigate,
-  onDraftFlashcards,
-  onSaveTranscriptNote,
-  onTranscribe,
-  savedNote,
-  transcribingStatus,
-  transcript
-}: {
+interface RecordingDetailProps {
   corrections: number
   file: RecordingFile
   navigate: NavigateFunction
+  onDelete: () => void
   onDraftFlashcards: (transcript: string) => void
   onSaveTranscriptNote: (file: RecordingFile, transcript: string) => void
   onTranscribe: () => void
   savedNote: boolean
   transcribingStatus?: string
   transcript: string
-}) {
+}
+
+function RecordingDetail({
+  corrections,
+  file,
+  navigate,
+  onDelete,
+  onDraftFlashcards,
+  onSaveTranscriptNote,
+  onTranscribe,
+  savedNote,
+  transcribingStatus,
+  transcript
+}: RecordingDetailProps) {
   const [audioFailed, setAudioFailed] = useState(false)
   const sections = file.note ? parseLectureSections(file.note.content) : null
   const rawTranscript = sections?.transcript || transcript
@@ -337,14 +440,19 @@ function RecordingDetail({
 
   return (
     <PanelDetail>
-      <header className="space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="min-w-0 truncate text-[0.95rem] font-semibold tracking-tight text-foreground">
-            {file.note?.title || recordingLabel(file.name)}
-          </h3>
-          {!hasNote && <PanelPill>No linked note</PanelPill>}
+      <header className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="min-w-0 truncate text-[0.95rem] font-semibold tracking-tight text-foreground">
+              {file.note?.title || recordingLabel(file.name)}
+            </h3>
+            {!hasNote && <PanelPill>No linked note</PanelPill>}
+          </div>
+          <p className="truncate text-xs text-muted-foreground">{recordingLabel(file.name)}</p>
         </div>
-        <p className="text-xs text-muted-foreground">{recordingLabel(file.name)}</p>
+        <PanelAction icon="trash" onClick={onDelete}>
+          Delete
+        </PanelAction>
       </header>
 
       <section className="space-y-1.5">
@@ -374,7 +482,7 @@ function RecordingDetail({
           )}
         </div>
         {sections?.aiNotes ? (
-          <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{sections.aiNotes}</p>
+          <p className="whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90">{sections.aiNotes}</p>
         ) : (
           <p className="text-xs text-muted-foreground">
             {hasNote
@@ -387,7 +495,7 @@ function RecordingDetail({
       {sections?.myNotes ? (
         <section className="space-y-1.5">
           <PanelSectionLabel>My notes</PanelSectionLabel>
-          <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{sections.myNotes}</p>
+          <p className="whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90">{sections.myNotes}</p>
         </section>
       ) : null}
 
@@ -395,7 +503,7 @@ function RecordingDetail({
         <div className="flex items-center justify-between gap-3">
           <PanelSectionLabel>Transcript</PanelSectionLabel>
           {rawTranscript && !transcribingStatus && (
-            <div className="flex items-center gap-0.5">
+            <div className="flex flex-wrap items-center justify-end gap-0.5">
               <PanelAction icon="checklist" onClick={() => onDraftFlashcards(rawTranscript)}>
                 Draft flashcards
               </PanelAction>
@@ -414,7 +522,9 @@ function RecordingDetail({
           </div>
         ) : rawTranscript ? (
           <>
-            <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{rawTranscript}</p>
+            <p className="whitespace-pre-wrap border-l-2 border-(--theme-primary)/25 pl-3 text-[0.8125rem] leading-6 text-foreground/90">
+              {rawTranscript}
+            </p>
             {corrections > 0 && (
               <p className="text-[10px] text-muted-foreground">
                 {corrections} pharm term{corrections === 1 ? '' : 's'} auto-corrected

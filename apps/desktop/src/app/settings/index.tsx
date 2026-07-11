@@ -7,7 +7,21 @@ import { NEMESIS_STUDENT_BUILD, STUDENT_SETTINGS_KEEP } from '@/nemesis'
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
-import { Archive, Bell, Download, Globe, Info, KeyRound, RefreshCw, Settings2, Upload, Wrench, Zap } from '@/lib/icons'
+import {
+  Activity,
+  Archive,
+  Bell,
+  Download,
+  Globe,
+  Info,
+  KeyRound,
+  Link,
+  RefreshCw,
+  Settings2,
+  Upload,
+  Wrench,
+  Zap
+} from '@/lib/icons'
 import { notifyError } from '@/store/notifications'
 
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
@@ -18,6 +32,8 @@ import { SKILLS_ROUTE } from '../routes'
 
 import { AboutSettings } from './about-settings'
 import { AppearanceSettings } from './appearance-settings'
+import { ConnectionsSettings } from './connections-settings'
+import { UsageSettings } from './usage-settings'
 import { ConfigSettings } from './config-settings'
 import { SECTIONS } from './constants'
 import { GatewaySettings } from './gateway-settings'
@@ -28,6 +44,8 @@ import { SessionsSettings } from './sessions-settings'
 import type { SettingsPageProps, SettingsView as SettingsViewId } from './types'
 
 const SETTINGS_VIEWS_ALL: readonly SettingsViewId[] = [
+  'usage',
+  'connections',
   ...SECTIONS.map(s => `config:${s.id}` as SettingsViewId),
   'providers',
   'gateway',
@@ -123,11 +141,29 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
   }
 
   const navGroups: OverlayNavGroup[] = [
-    ...SECTIONS.map(s => {
+    // Student-first entries: your plan usage + connected accounts sit at the top.
+    {
+      active: activeView === 'usage',
+      icon: Activity,
+      id: 'usage',
+      label: 'Usage',
+      onSelect: () => setActiveView('usage')
+    },
+    {
+      active: activeView === 'connections',
+      icon: Link,
+      id: 'connections',
+      label: 'Connections',
+      onSelect: () => setActiveView('connections')
+    },
+    ...SECTIONS.map((s, index) => {
       const view = `config:${s.id}` as SettingsViewId
 
       return {
         active: activeView === view,
+        // Visually separate the Nemesis-run app settings from the student's own
+        // Usage + Connections above.
+        gapBefore: index === 0,
         icon: s.icon,
         id: view,
         label: t.settings.sections[s.id] ?? s.label,
@@ -249,7 +285,11 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
         <OverlayNav footer={navFooter} groups={navGroups} />
 
         <OverlayMain className="px-0 pb-0">
-          {activeView === 'config:appearance' ? (
+          {activeView === 'usage' ? (
+            <UsageSettings />
+          ) : activeView === 'connections' ? (
+            <ConnectionsSettings onClose={onClose} />
+          ) : activeView === 'config:appearance' ? (
             <AppearanceSettings />
           ) : activeView === 'about' ? (
             <AboutSettings />

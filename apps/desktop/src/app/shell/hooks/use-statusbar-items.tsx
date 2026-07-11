@@ -1,9 +1,10 @@
 import { useStore } from '@nanostores/react'
 import { useCallback, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
 
 import type { CommandCenterSection } from '@/app/command-center'
+import { $elapsedMs, $paused, $recording, formatElapsed } from '@/app/recorder/service'
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
-import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis'
 import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
 import { Codicon } from '@/components/ui/codicon'
@@ -14,6 +15,7 @@ import type { RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { contextBarLabel, LiveDuration, usageContextLabel } from '@/lib/statusbar'
 import { cn } from '@/lib/utils'
 import { setGlobalYolo, setSessionYolo } from '@/lib/yolo-session'
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis'
 import {
   $activeSessionId,
   $busy,
@@ -36,7 +38,7 @@ import {
 } from '@/store/updates'
 import type { StatusResponse } from '@/types/hermes'
 
-import { CRON_ROUTE } from '../../routes'
+import { CRON_ROUTE, RECORDER_ROUTE } from '../../routes'
 import type { StatusbarItem, StatusbarSelectModifiers } from '../statusbar-controls'
 
 interface StatusbarItemsOptions {
@@ -87,6 +89,10 @@ export function useStatusbarItems({
   const backendUpdateApply = useStore($backendUpdateApply)
   const desktopVersion = useStore($desktopVersion)
   const connection = useStore($connection)
+  const recorderState = useStore($recording)
+  const recorderPaused = useStore($paused)
+  const recorderElapsedMs = useStore($elapsedMs)
+  const location = useLocation()
 
   const contextUsage = useMemo(() => usageContextLabel(currentUsage), [currentUsage])
   const contextBar = useMemo(() => contextBarLabel(currentUsage), [currentUsage])
@@ -276,6 +282,17 @@ export function useStatusbarItems({
   const coreLeftStatusbarItems = useMemo<readonly StatusbarItem[]>(
     () => [
       {
+        className: 'font-semibold tabular-nums text-(--theme-primary) hover:text-(--theme-primary)',
+        detail: formatElapsed(recorderElapsedMs),
+        hidden: recorderState !== 'recording' || location.pathname === RECORDER_ROUTE,
+        icon: <span className={cn('size-1.5 rounded-full bg-(--theme-primary)', !recorderPaused && 'animate-pulse')} />,
+        id: 'active-recording',
+        label: recorderPaused ? 'PAUSED' : 'REC',
+        title: recorderPaused ? 'Recording paused — return to Recorder' : 'Recording in progress — return to Recorder',
+        to: RECORDER_ROUTE,
+        variant: 'action'
+      },
+      {
         className: `w-7 justify-center px-0${commandCenterOpen ? ' bg-accent/55 text-foreground' : ''}`,
         icon: <Command className="size-3.5" />,
         id: 'command-center',
@@ -345,6 +362,10 @@ export function useStatusbarItems({
       inferenceReady,
       inferenceStatus?.reason,
       openAgents,
+      location.pathname,
+      recorderElapsedMs,
+      recorderPaused,
+      recorderState,
       subagentsFailed,
       subagentsRunning,
       toggleCommandCenter
@@ -437,7 +458,10 @@ export function useStatusbarItems({
   )
 
   const statusbarItems = useMemo(
-    () => [...extraRightItems, ...coreRightStatusbarItems].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)),
+    () =>
+      [...extraRightItems, ...coreRightStatusbarItems].filter(
+        item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)
+      ),
     [coreRightStatusbarItems, extraRightItems]
   )
 

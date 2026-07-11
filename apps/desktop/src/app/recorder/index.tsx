@@ -1,12 +1,8 @@
-// Recorder — consent-first lecture capture with LIVE on-device captions. The deliberate
-// ANTI-Cluely: user-initiated only, a large persistent ON-AIR indicator while recording,
-// nothing hidden from screen shares. Captures the microphone plus system audio (Electron
-// 39+ loopback via the macOS CoreAudio tap), mixes both into one Opus/WebM file under
-// ~/Documents/Nemesis Recordings — and, while recording, streams ~8s chunks of the live
-// mix through the local Whisper model so the transcript scrolls in as the lecture happens.
-// On stop, the transcript auto-saves as a Library note (Lectures folder).
-import { IconCheck, IconLock, IconMicrophone, IconSparkles } from '@tabler/icons-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+// Recorder UI. The capture engine lives in service.ts so this view is only a binder:
+// navigating away can unmount every element below without touching an active recording.
+import { useStore } from '@nanostores/react'
+import { IconCheck, IconLock, IconMicrophone, IconPlayerPause, IconPlayerPlay, IconSparkles } from '@tabler/icons-react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
@@ -15,224 +11,141 @@ import { cn } from '@/lib/utils'
 import { setComposerDraft } from '@/store/composer'
 
 import { NoteEditor } from '../library/note-editor'
-import { createFolder, saveNote } from '../library/vault'
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes'
 
-import { enhanceLectureNote, LECTURE_FOLDER, RecordingArchive, RECORDINGS_DIR } from './archive'
-import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
-import { preloadTranscriber, transcribeSamples } from './transcribe'
+import { enhanceLectureNote, RecordingArchive } from './archive'
+import {
+  $elapsedMs,
+  $liveCaptionsEnabled,
+  $liveInsights,
+  $liveStatus,
+  $liveTranscript,
+  $notepadDraft,
+  $paused,
+  $recentLectureNote,
+  $recording,
+  $recordingError,
+  $recordingsVersion,
+  $recordingTitle,
+  $starting,
+  $systemAudioEnabled,
+  formatElapsed,
+  getRecordingAnalyser,
+  LECTURE_FOLDER,
+  setLiveCaptionsEnabled,
+  setNotepadDraft,
+  setRecordingPaused,
+  setRecordingTitle,
+  setSystemAudioEnabled,
+  startRecording,
+  stopRecording,
+  toggleLiveInsight
+} from './service'
 
-const LIVE_CHUNK_SECONDS = 8
-const WHISPER_RATE = 16_000
-// Backlog cap: if transcription falls behind the lecture, keep only the newest 30s per
-// pass (the saved audio file still has everything — Transcribe later covers gaps).
-const MAX_LIVE_WINDOW = WHISPER_RATE * 30
-
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
-
-function concatSamples(chunks: Float32Array[]): Float32Array {
-  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
-  const out = new Float32Array(total)
-  let offset = 0
-
-  for (const chunk of chunks) {
-    out.set(chunk, offset)
-    offset += chunk.length
-  }
-
-  return out
-}
-
-/** Linear resample to Whisper's 16 kHz. */
-function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
-  if (inputRate === WHISPER_RATE) {
-    return input
-  }
-
-  const ratio = inputRate / WHISPER_RATE
-  const length = Math.floor(input.length / ratio)
-  const out = new Float32Array(length)
-
-  for (let i = 0; i < length; i++) {
-    const pos = i * ratio
-    const left = Math.floor(pos)
-    const frac = pos - left
-    const a = input[left] ?? 0
-    const b = input[left + 1] ?? a
-    out[i] = a + (b - a) * frac
-  }
-
-  return out
-}
-
-function rmsOf(samples: Float32Array): number {
-  let sum = 0
-
-  for (let i = 0; i < samples.length; i++) {
-    sum += samples[i] * samples[i]
-  }
-
-  return Math.sqrt(sum / Math.max(1, samples.length))
-}
-
-/** Whisper on near-silence hallucinates fillers ("you", "[BLANK_AUDIO]") — drop those. */
-function isRealSpeech(text: string): boolean {
-  const letters = text.replace(/[^a-z]/gi, '')
-
-  return letters.length >= 3 && !/^\[?blank[_ ]?audio\]?$/i.test(text.trim())
-}
-
-function lectureNoteTitle(date: Date): string {
-  const day = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(/:/g, '.')
-
-  return `Lecture ${day} ${time}`
-}
-
-type RecorderState = 'idle' | 'recording' | 'saving'
-
-export function RecorderView() {
-  const [state, setState] = useState<RecorderState>('idle')
-  const [error, setError] = useState<null | string>(null)
-  const [elapsed, setElapsed] = useState(0)
-  const [withSystemAudio, setWithSystemAudio] = useState(true)
-  const [liveCaptions, setLiveCaptions] = useState(true)
-  const [liveSegments, setLiveSegments] = useState<string[]>([])
-  const [liveStatus, setLiveStatus] = useState('')
-  const [lectureNote, setLectureNote] = useState<null | string>(null)
-  // Live insights: drugs the lecture just touched (lexicon spotting, fully on-device).
-  // Tapping queues them; after Stop, one click asks Nemesis about the whole queue.
-  const [insights, setInsights] = useState<{ term: string; at: string; queued: boolean }[]>([])
-  // Hyprnote-style notepad: the student TYPES while it listens; typed notes and the
-  // transcript both land in the saved note (separate sections).
-  const [title, setTitle] = useState('')
-  const titleRef = useRef('')
-  titleRef.current = title
-  const notesRef = useRef('')
-  const onNotesChange = useCallback((value: string) => {
-    notesRef.current = value
-  }, [])
-
-  // Bumped after a recording finishes saving so <RecordingArchive> (which owns its own
-  // list state) re-reads the Recordings folder and picks up the new file.
-  const [recordingsVersion, setRecordingsVersion] = useState(0)
-  const navigate = useNavigate()
-
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const streamsRef = useRef<MediaStream[]>([])
-  const chunksRef = useRef<Blob[]>([])
-  const tickRef = useRef<null | ReturnType<typeof setInterval>>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const rafRef = useRef<number | null>(null)
+function useLiveWaveform(recording: boolean) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const contextRef = useRef<AudioContext | null>(null)
-  const processorRef = useRef<ScriptProcessorNode | null>(null)
-  const liveBuffersRef = useRef<Float32Array[]>([])
-  const liveSampleCountRef = useRef(0)
-  const livePendingRef = useRef<Float32Array[]>([])
-  const livePumpingRef = useRef(false)
-  const liveFailedRef = useRef(false)
-  const liveSegmentsRef = useRef<string[]>([])
-  const liveScrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    return () => stopEverything()
-  }, [])
+    if (!recording) {
+      return
+    }
 
-  // Keep the live transcript pinned to its newest line.
+    const canvas = canvasRef.current
+    const analyser = getRecordingAnalyser()
+
+    if (!canvas || !analyser) {
+      return
+    }
+
+    const context = canvas.getContext('2d')
+
+    if (!context) {
+      return
+    }
+
+    const buffer = new Uint8Array(analyser.frequencyBinCount)
+    let animationFrame = 0
+
+    const render = () => {
+      animationFrame = requestAnimationFrame(render)
+      const pixelRatio = window.devicePixelRatio || 1
+      const width = Math.max(1, Math.round(canvas.clientWidth * pixelRatio))
+      const height = Math.max(1, Math.round(canvas.clientHeight * pixelRatio))
+
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width
+        canvas.height = height
+      }
+
+      analyser.getByteTimeDomainData(buffer)
+      const rootStyle = getComputedStyle(document.documentElement)
+
+      const accent =
+        rootStyle.getPropertyValue('--theme-primary').trim() || rootStyle.getPropertyValue('--ui-text-primary').trim()
+
+      context.clearRect(0, 0, width, height)
+      context.lineWidth = Math.max(1.5, pixelRatio * 1.5)
+      context.strokeStyle = accent
+      context.beginPath()
+      const slice = width / Math.max(1, buffer.length - 1)
+
+      for (let index = 0; index < buffer.length; index++) {
+        const y = (buffer[index] / 255) * height
+        index === 0 ? context.moveTo(0, y) : context.lineTo(index * slice, y)
+      }
+
+      context.stroke()
+    }
+
+    render()
+
+    return () => cancelAnimationFrame(animationFrame)
+  }, [recording])
+
+  return canvasRef
+}
+
+export function RecorderView() {
+  const recording = useStore($recording)
+  const starting = useStore($starting)
+  const paused = useStore($paused)
+  const elapsedMs = useStore($elapsedMs)
+  const liveTranscript = useStore($liveTranscript)
+  const liveInsights = useStore($liveInsights)
+  const liveStatus = useStore($liveStatus)
+  const title = useStore($recordingTitle)
+  const notepadDraft = useStore($notepadDraft)
+  const withSystemAudio = useStore($systemAudioEnabled)
+  const liveCaptions = useStore($liveCaptionsEnabled)
+  const lectureNote = useStore($recentLectureNote)
+  const recordingsVersion = useStore($recordingsVersion)
+  const error = useStore($recordingError)
+  const navigate = useNavigate()
+  const liveScrollRef = useRef<HTMLDivElement | null>(null)
+  const canvasRef = useLiveWaveform(recording === 'recording')
+
   useEffect(() => {
     const host = liveScrollRef.current
 
     if (host) {
       host.scrollTop = host.scrollHeight
     }
-  }, [liveSegments])
+  }, [liveTranscript])
 
-  // Live waveform: draw the ACTUAL captured signal (mic + system mix) — honest, since it
-  // reflects real audio, unlike faking live transcript text.
-  const drawWave = useCallback(() => {
-    const analyser = analyserRef.current
-    const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
-
-    if (!analyser || !canvas || !ctx) {
-      return
+  const enhanceNote = () => {
+    if (lectureNote) {
+      enhanceLectureNote(lectureNote, navigate)
     }
+  }
 
-    const buffer = new Uint8Array(analyser.frequencyBinCount)
-    const rootStyle = getComputedStyle(document.documentElement)
-    const accent =
-      rootStyle.getPropertyValue('--theme-primary').trim() || rootStyle.getPropertyValue('--ui-text-primary').trim()
-
-    const render = () => {
-      rafRef.current = requestAnimationFrame(render)
-      analyser.getByteTimeDomainData(buffer)
-      const { height, width } = canvas
-      ctx.clearRect(0, 0, width, height)
-      ctx.lineWidth = 2
-      ctx.strokeStyle = accent
-      ctx.beginPath()
-      const slice = width / buffer.length
-
-      for (let i = 0; i < buffer.length; i++) {
-        const y = (buffer[i] / 128) * (height / 2)
-        i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * slice, y)
-      }
-
-      ctx.stroke()
-    }
-
-    render()
-  }, [])
-
-  // --- Live caption pipeline ------------------------------------------------
-  // ScriptProcessor taps the mixed signal; every ~8s the buffered audio is resampled to
-  // 16 kHz and fed to the local Whisper model. One transcription runs at a time; pending
-  // chunks merge so a slow pass never queues unbounded work.
-
-  const appendLiveSegment = useCallback((text: string) => {
-    liveSegmentsRef.current = [...liveSegmentsRef.current, text]
-    setLiveSegments(liveSegmentsRef.current)
-
-    const terms = detectPharmTerms(text)
-
-    if (terms.length) {
-      const at = new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-      setInsights(current => {
-        const known = new Set(current.map(insight => insight.term))
-        const fresh = terms.filter(term => !known.has(term)).map(term => ({ at, queued: false, term }))
-
-        return fresh.length ? [...fresh, ...current].slice(0, 30) : current
-      })
-    }
-  }, [])
-
-  const toggleQueued = useCallback((term: string) => {
-    setInsights(current =>
-      current.map(insight => (insight.term === term ? { ...insight, queued: !insight.queued } : insight))
-    )
-  }, [])
-
-  // Granola/Hyprnote's signature move: after the lecture, the agent turns rough notes +
-  // transcript into structured AI notes in the SAME Library file while preserving the
-  // raw transcript as the durable source material. Shared with the archive's detail view
-  // (archive.tsx) so any past recording can be enhanced the same way, not just this one.
-  const enhanceNote = useCallback(() => {
-    if (!lectureNote) {
-      return
-    }
-
-    enhanceLectureNote(lectureNote, navigate)
-  }, [lectureNote, navigate])
-
-  const askQueued = useCallback(() => {
-    const queued = insights.filter(insight => insight.queued).map(insight => insight.term)
+  const askQueued = () => {
+    const queued = liveInsights.filter(insight => insight.queued).map(insight => insight.term)
 
     if (!queued.length) {
       return
     }
 
-    const context = liveSegmentsRef.current.slice(-6).join(' ').slice(-1200)
+    const context = liveTranscript.slice(-6).join(' ').slice(-1200)
     setComposerDraft(
       `These drugs came up in the lecture I just recorded: ${queued.join(', ')}. ` +
         'For each, give me the exam-relevant rundown: drug class, mechanism in one line, the classic adverse effect, ' +
@@ -240,382 +153,123 @@ export function RecorderView() {
         (context ? `\n\nTranscript context:\n"${context}"` : '')
     )
     navigate(NEW_CHAT_ROUTE)
-  }, [insights, navigate])
-
-  const pumpLive = useCallback(async () => {
-    if (livePumpingRef.current || liveFailedRef.current) {
-      return
-    }
-
-    livePumpingRef.current = true
-
-    try {
-      while (livePendingRef.current.length > 0) {
-        let merged = concatSamples(livePendingRef.current.splice(0))
-        const lagging = merged.length > MAX_LIVE_WINDOW
-
-        if (lagging) {
-          merged = merged.subarray(merged.length - MAX_LIVE_WINDOW)
-        }
-
-        // Skip sub-second or silent chunks — nothing to say, and Whisper hallucinates on them.
-        if (merged.length < WHISPER_RATE * 0.8 || rmsOf(merged) < 0.004) {
-          continue
-        }
-
-        try {
-          const text = await transcribeSamples(merged, update => {
-            setLiveStatus(
-              update.stage === 'loading-model'
-                ? `Loading speech model… ${Math.round(update.progress ?? 0)}%`
-                : 'Transcribing…'
-            )
-          })
-          const { corrected } = correctPharmTerms(text)
-
-          if (corrected && isRealSpeech(corrected)) {
-            appendLiveSegment(lagging ? `… ${corrected}` : corrected)
-          }
-        } catch {
-          liveFailedRef.current = true
-          setLiveStatus('Live captions unavailable — audio still recording')
-
-          return
-        }
-      }
-
-      setLiveStatus('Listening…')
-    } finally {
-      livePumpingRef.current = false
-    }
-  }, [appendLiveSegment])
-
-  const flushLiveChunk = useCallback(
-    (sampleRate: number) => {
-      if (liveSampleCountRef.current === 0) {
-        return
-      }
-
-      const raw = concatSamples(liveBuffersRef.current)
-      liveBuffersRef.current = []
-      liveSampleCountRef.current = 0
-      livePendingRef.current.push(downsampleTo16k(raw, sampleRate))
-      void pumpLive()
-    },
-    [pumpLive]
-  )
-
-  /** Persist path: flush what's buffered, then wait (bounded) for the pump to drain. */
-  const drainLive = useCallback(
-    async (sampleRate: number) => {
-      flushLiveChunk(sampleRate)
-
-      const deadline = Date.now() + 45_000
-
-      while ((livePumpingRef.current || livePendingRef.current.length > 0) && Date.now() < deadline) {
-        await sleep(250)
-      }
-    },
-    [flushLiveChunk]
-  )
-
-  const stopEverything = () => {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
-    }
-
-    analyserRef.current = null
-
-    if (processorRef.current) {
-      processorRef.current.onaudioprocess = null
-
-      try {
-        processorRef.current.disconnect()
-      } catch {
-        // already torn down
-      }
-
-      processorRef.current = null
-    }
-
-    if (contextRef.current) {
-      void contextRef.current.close().catch(() => {})
-      contextRef.current = null
-    }
-
-    if (tickRef.current) {
-      clearInterval(tickRef.current)
-      tickRef.current = null
-    }
-
-    for (const stream of streamsRef.current) {
-      for (const track of stream.getTracks()) {
-        track.stop()
-      }
-    }
-
-    streamsRef.current = []
   }
 
-  const sampleRateRef = useRef(48_000)
-
-  const start = useCallback(async () => {
-    setError(null)
-    chunksRef.current = []
-    liveBuffersRef.current = []
-    liveSampleCountRef.current = 0
-    livePendingRef.current = []
-    liveFailedRef.current = false
-    liveSegmentsRef.current = []
-    setLiveSegments([])
-    setLiveStatus('')
-    setLectureNote(null)
-    setInsights([])
-    notesRef.current = ''
-    setTitle(lectureNoteTitle(new Date()))
-
-    try {
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamsRef.current.push(mic)
-
-      const context = new AudioContext()
-      contextRef.current = context
-      sampleRateRef.current = context.sampleRate
-
-      // One mix bus feeds everything: the recorder, the waveform, the live captions.
-      // (A MediaStreamAudioDestinationNode has no outputs, so it can't be tapped directly.)
-      const mix = context.createGain()
-      const destination = context.createMediaStreamDestination()
-      mix.connect(destination)
-      context.createMediaStreamSource(mic).connect(mix)
-
-      if (withSystemAudio) {
-        // The main process answers this with the primary screen + loopback audio.
-        // macOS shows its own Screen & System Audio Recording prompt on first use —
-        // that OS-level consent gate is a feature, not a bug.
-        const display = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true })
-        streamsRef.current.push(display)
-
-        // Audio-only capture: the mandatory video track is dropped immediately.
-        for (const track of display.getVideoTracks()) {
-          track.stop()
-          display.removeTrack(track)
-        }
-
-        if (display.getAudioTracks().length) {
-          context.createMediaStreamSource(display).connect(mix)
-        }
-      }
-
-      // Waveform tap (analyser has no output path — display only).
-      const analyser = context.createAnalyser()
-      analyser.fftSize = 1024
-      mix.connect(analyser)
-      analyserRef.current = analyser
-
-      if (liveCaptions) {
-        // Live-caption tap. The processor's output buffer stays zeroed (silence), so
-        // connecting it to the speakers keeps the node clocked WITHOUT audible echo.
-        setLiveStatus('Loading speech model…')
-        void preloadTranscriber(update => {
-          if (update.stage === 'loading-model') {
-            setLiveStatus(`Loading speech model… ${Math.round(update.progress ?? 0)}%`)
-          }
-        }).then(() => setLiveStatus(current => (current.startsWith('Loading') ? 'Listening…' : current)))
-
-        const processor = context.createScriptProcessor(4096, 1, 1)
-        processor.onaudioprocess = event => {
-          const data = event.inputBuffer.getChannelData(0)
-          liveBuffersRef.current.push(new Float32Array(data))
-          liveSampleCountRef.current += data.length
-
-          if (liveSampleCountRef.current >= context.sampleRate * LIVE_CHUNK_SECONDS) {
-            flushLiveChunk(context.sampleRate)
-          }
-        }
-        mix.connect(processor)
-        processor.connect(context.destination)
-        processorRef.current = processor
-      }
-
-      const recorder = new MediaRecorder(destination.stream, { mimeType: 'audio/webm;codecs=opus' })
-      recorder.ondataavailable = event => {
-        if (event.data.size) {
-          chunksRef.current.push(event.data)
-        }
-      }
-      recorder.onstop = () => void persist()
-      recorder.start(1000)
-      recorderRef.current = recorder
-
-      setElapsed(0)
-      tickRef.current = setInterval(() => setElapsed(count => count + 1), 1000)
-      setState('recording')
-      requestAnimationFrame(() => drawWave())
-    } catch (err) {
-      stopEverything()
-      setState('idle')
-      setError(
-        err instanceof Error && err.name === 'NotAllowedError'
-          ? 'Permission was declined. macOS Settings → Privacy & Security → Screen & System Audio Recording → allow Nemesis, then try again.'
-          : err instanceof Error
-            ? err.message
-            : 'Could not start recording.'
-      )
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawWave, flushLiveChunk, liveCaptions, withSystemAudio])
-
-  const stop = useCallback(() => {
-    setState('saving')
-
-    // Freeze live capture at the click so nothing accumulates while we drain the queue.
-    if (processorRef.current) {
-      processorRef.current.onaudioprocess = null
-    }
-
-    flushLiveChunk(sampleRateRef.current)
-    recorderRef.current?.stop()
-
-    if (tickRef.current) {
-      clearInterval(tickRef.current)
-      tickRef.current = null
-    }
-  }, [flushLiveChunk])
-
-  const persist = async () => {
-    try {
-      const at = new Date()
-      const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-      const buffer = new Uint8Array(await blob.arrayBuffer())
-      let base64 = ''
-
-      for (let i = 0; i < buffer.length; i += 0x8000) {
-        base64 += String.fromCharCode(...buffer.subarray(i, i + 0x8000))
-      }
-
-      const stamp = at.toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const write = window.hermesDesktop?.writeBinaryFile
-
-      if (!write) {
-        throw new Error('Saving is unavailable in this build.')
-      }
-
-      const fileName = `lecture-${stamp}.webm`
-      await write(`${RECORDINGS_DIR}/${fileName}`, btoa(base64))
-
-      // Let in-flight transcription finish (bounded), then auto-save the companion
-      // Library note. Even a silent capture gets a durable placeholder beside its audio.
-      setLiveStatus('Finishing transcript…')
-      await drainLive(sampleRateRef.current)
-      const transcript = liveSegmentsRef.current.join(' ').replace(/\s+/g, ' ').trim()
-      const typedNotes = notesRef.current.trim()
-      const noteTitle = titleRef.current.trim() || lectureNoteTitle(at)
-      await createFolder(LECTURE_FOLDER)
-      await saveNote(
-        noteTitle,
-        `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`,
-        LECTURE_FOLDER
-      )
-      setLectureNote(noteTitle)
-
-      setLiveStatus('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the recording.')
-    } finally {
-      stopEverything()
-      setState('idle')
-      // The audio file (and, usually, its companion note) landed on disk above — tell
-      // the archive to re-read the folder even if the note-save step above threw.
-      setRecordingsVersion(v => v + 1)
-    }
-  }
-
-  const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0')
-  const seconds = String(elapsed % 60).padStart(2, '0')
-
-  // Recording = a full-page notepad workspace (Hyprnote/Granola pattern: an AI notepad
-  // that listens while you write). Idle = the start card + saved recordings.
-  if (state === 'recording') {
+  if (recording === 'recording') {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-(--ui-editor-surface-background) px-5 pb-5 pt-4">
-        <div className="mb-4 flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-4 py-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-          <span className="relative flex size-3 shrink-0">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-(--theme-primary) opacity-50" />
+      <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background) px-4 pb-5 pt-4 sm:px-5 xl:overflow-hidden">
+        <header className="mb-4 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-4 py-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+          <span aria-hidden="true" className="relative flex size-3 shrink-0">
+            {!paused && (
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-(--theme-primary) opacity-45" />
+            )}
             <span className="relative inline-flex size-3 rounded-full bg-(--theme-primary)" />
           </span>
-          <span className="shrink-0 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">On air</span>
+          <span className="shrink-0 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">
+            {paused ? 'Paused' : 'On air'}
+          </span>
           <input
             aria-label="Lecture title"
-            className="min-w-40 flex-1 border-none bg-transparent text-lg font-semibold tracking-tight outline-none placeholder:text-muted-foreground/50"
-            onChange={event => setTitle(event.target.value)}
+            className="order-last min-w-0 basis-full border-none bg-transparent text-base font-semibold tracking-tight outline-none placeholder:text-muted-foreground/50 sm:order-none sm:min-w-44 sm:flex-1 sm:basis-auto sm:text-lg"
+            onChange={event => setRecordingTitle(event.target.value)}
             placeholder="Lecture title"
             value={title}
           />
-          <span className="shrink-0 rounded-full bg-(--ui-bg-quaternary) px-3 py-1 text-sm font-semibold tabular-nums text-(--ui-text-secondary)">
-            {minutes}:{seconds}
+          <span className="shrink-0 rounded-full bg-(--ui-bg-quaternary) px-3 py-1 text-base font-semibold tabular-nums tracking-tight text-foreground">
+            {formatElapsed(elapsedMs)}
           </span>
-          <Button className="transition-transform duration-200 ease-out active:scale-[0.98]" onClick={stop} size="sm" variant="destructive">
+          <Button
+            aria-label={paused ? 'Resume recording' : 'Pause recording'}
+            onClick={() => void setRecordingPaused(!paused)}
+            size="icon-sm"
+            variant="outline"
+          >
+            {paused ? <IconPlayerPlay size={14} /> : <IconPlayerPause size={14} />}
+          </Button>
+          <Button className="active:scale-[0.98]" onClick={stopRecording} size="sm" variant="destructive">
             Stop &amp; save
           </Button>
-        </div>
+        </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(19rem,0.82fr)_minmax(0,1.18fr)]">
-          {/* Live capture: waveform, transcript, and insights */}
-          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[minmax(17rem,0.78fr)_minmax(22rem,1.22fr)]">
+          <section
+            aria-label="Live capture"
+            className="flex min-h-0 min-w-0 flex-col gap-3 xl:overflow-y-auto xl:pr-0.5"
+          >
             <div className="shrink-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Audio signal</span>
-                <span className="text-[0.65rem] text-(--ui-text-quaternary)">Mic{withSystemAudio ? ' + system' : ''}</span>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+                  Audio signal
+                </span>
+                <span className="truncate text-[0.65rem] text-(--ui-text-quaternary)">
+                  {paused ? 'Capture paused' : `Mic${withSystemAudio ? ' + system' : ''}`}
+                </span>
               </div>
-              <canvas className="h-16 w-full rounded-xl bg-(--ui-bg-quaternary)" height={64} ref={canvasRef} width={420} />
+              <canvas
+                className={cn('h-16 w-full rounded-xl bg-(--ui-bg-quaternary)', paused && 'opacity-45')}
+                ref={canvasRef}
+              />
             </div>
 
             {liveCaptions ? (
               <>
-                <div className="flex min-h-40 shrink-0 flex-col rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+                <div className="flex min-h-48 shrink-0 flex-col rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)] xl:min-h-56">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
                       Live transcript
                     </span>
-                    <span className="truncate text-[0.65rem] text-muted-foreground">{liveStatus}</span>
+                    <span className="min-w-0 truncate text-[0.65rem] text-muted-foreground">{liveStatus}</span>
                   </div>
-                  <div className="max-h-72 space-y-2 overflow-y-auto text-[13px] leading-relaxed" ref={liveScrollRef}>
-                    {liveSegments.length ? (
-                      liveSegments.map((segment, index) => (
-                        <p className="animate-in fade-in-0 border-l border-(--ui-stroke-quaternary) pl-3 duration-200 ease-out" key={`${index}-${segment.slice(0, 18)}`}>
+                  <div
+                    aria-live="polite"
+                    className="max-h-80 space-y-3 overflow-y-auto pr-1 text-[0.8125rem] leading-6 text-foreground/90"
+                    ref={liveScrollRef}
+                  >
+                    {liveTranscript.length ? (
+                      liveTranscript.map((segment, index) => (
+                        <p
+                          className="animate-in fade-in-0 border-l-2 border-(--theme-primary)/30 pl-3 duration-200"
+                          key={`${index}-${segment.slice(0, 18)}`}
+                        >
                           {segment}
                         </p>
                       ))
                     ) : (
-                      <div>
-                        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">Listening</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Speech will appear here as the lecture continues.</p>
+                      <div className="grid min-h-28 place-content-center text-center">
+                        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
+                          {paused ? 'Capture paused' : 'Listening'}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {paused
+                            ? 'Resume when the lecture continues.'
+                            : 'Speech will appear here as the lecture continues.'}
+                        </p>
                       </div>
                     )}
                   </div>
                 </div>
-                {insights.length > 0 && (
+
+                {liveInsights.length > 0 && (
                   <div className="shrink-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
                     <div className="mb-2.5 flex items-center justify-between gap-3">
                       <span className="inline-flex items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
                         <IconSparkles size={12} />
                         Mentioned
                       </span>
-                      <span className="text-[0.65rem] text-muted-foreground">Tap to queue</span>
+                      <span className="text-[0.65rem] text-muted-foreground">Select drugs to review after class</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {insights.map(insight => (
+                      {liveInsights.map(insight => (
                         <button
+                          aria-pressed={insight.queued}
                           className={cn(
-                            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-[transform,color,border-color,background-color] duration-200 ease-out active:scale-[0.98]',
+                            'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-[transform,color,border-color,background-color] active:scale-[0.98]',
                             insight.queued
                               ? 'border-(--theme-primary)/45 bg-(--ui-bg-primary) text-foreground'
                               : 'border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) text-muted-foreground hover:border-(--theme-primary)/35 hover:text-foreground'
                           )}
                           key={insight.term}
-                          onClick={() => toggleQueued(insight.term)}
+                          onClick={() => toggleLiveInsight(insight.term)}
                           type="button"
                         >
                           {insight.queued && <IconCheck size={11} />}
@@ -629,54 +283,68 @@ export function RecorderView() {
               </>
             ) : (
               <div className="rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4">
-                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">Live transcript off</p>
-                <p className="mt-1 text-xs text-muted-foreground">Audio is still recording and can be transcribed later.</p>
+                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
+                  Live transcript off
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Audio is still recording and can be transcribed later.
+                </p>
               </div>
             )}
+
             <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
               <IconLock size={12} />
               On this device only — nothing joins your call
             </span>
-          </div>
+          </section>
 
-          {/* Notepad — type while it listens */}
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-            <div className="shrink-0 border-b border-(--ui-stroke-tertiary) px-5 py-3">
-              <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
-                My notes · type while it listens
+          <section className="flex min-h-[24rem] min-w-0 flex-col overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)] xl:min-h-0">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-(--ui-stroke-tertiary) px-5 py-3">
+              <div>
+                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
+                  Lecture notepad
+                </p>
+                <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
+                  Write freely while Nemesis listens alongside you.
+                </p>
+              </div>
+              <span className="hidden rounded-full bg-(--ui-bg-quaternary) px-2.5 py-1 text-[0.625rem] text-muted-foreground sm:inline">
+                Auto-saved on stop
               </span>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden px-5">
-              <NoteEditor initialValue="" onChange={onNotesChange} onOpenWikilink={() => {}} />
+              <NoteEditor initialValue={notepadDraft} onChange={setNotepadDraft} onOpenWikilink={() => {}} />
             </div>
-          </div>
+          </section>
         </div>
         {error && <p className="pt-2 text-center text-xs text-destructive">{error}</p>}
-      </div>
+      </main>
     )
   }
 
+  const queuedCount = liveInsights.filter(insight => insight.queued).length
+  const stopping = recording === 'stopping'
+
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background)">
-      <header className="px-6 pb-2 pt-6">
-        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Capture desk</p>
+    <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background)">
+      <header className="px-4 pb-2 pt-5 sm:px-6 sm:pt-6">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">Capture desk</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em]">Recorder</h1>
-        <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-          Records your mic{withSystemAudio ? ' + this computer’s audio (the lecture/Zoom)' : ' only'} — locally, to
-          your own files. You start it, you see it, you keep it. While it records, you get a notepad, a live
-          transcript, and the drugs mentioned — as they happen.
+        <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+          Capture your microphone{withSystemAudio ? ' and this computer’s audio' : ''} locally. Keep a live notepad,
+          review on-device transcription, and collect the pharmacology terms that matter.
         </p>
       </header>
 
-      <section className="mx-6 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-        <div className="grid items-stretch lg:grid-cols-[minmax(0,0.9fr)_minmax(22rem,1.1fr)]">
-          <div className="flex items-center gap-5 border-b border-(--ui-stroke-tertiary) p-6 lg:border-b-0 lg:border-r">
+      <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)] sm:mx-6">
+        <div className="grid items-stretch lg:grid-cols-[minmax(0,0.9fr)_minmax(20rem,1.1fr)]">
+          <div className="flex min-w-0 flex-col items-start gap-5 border-b border-(--ui-stroke-tertiary) p-5 sm:flex-row sm:items-center sm:p-6 lg:border-b-0 lg:border-r">
             <div className="grid size-24 shrink-0 place-items-center rounded-full border border-(--theme-primary)/25 bg-(--ui-bg-primary) shadow-[inset_0_0_0_7px_var(--ui-bg-elevated)]">
               <Button
                 aria-label="Start recording"
-                className="size-20 rounded-full shadow-lg transition-[transform,opacity] duration-200 ease-out active:scale-[0.96]"
-                disabled={state === 'saving'}
-                onClick={() => void start()}
+                className="size-20 rounded-full shadow-lg transition-[transform,opacity] active:scale-[0.96]"
+                disabled={stopping || starting}
+                onClick={() => void startRecording()}
                 size="icon-lg"
               >
                 <IconMicrophone className="size-7" />
@@ -684,44 +352,50 @@ export function RecorderView() {
             </div>
             <div className="min-w-0">
               <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
-                {state === 'saving' ? 'Finishing capture' : 'Ready to record'}
+                {stopping ? 'Finishing capture' : starting ? 'Opening audio capture' : 'Ready to record'}
               </p>
               <h2 className="mt-1 text-lg font-semibold tracking-tight">
-                {state === 'saving' ? 'Saving your lecture' : 'Capture the lecture, keep the context'}
+                {stopping ? 'Saving your lecture' : 'Capture the lecture, keep the context'}
               </h2>
-              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
-                {state === 'saving'
-                  ? (liveStatus || 'Writing audio and notes to disk…')
-                  : 'One click opens a live notepad, waveform, transcript, and pharmacology mentions.'}
+              <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+                {stopping
+                  ? liveStatus || 'Writing audio and notes to disk…'
+                  : 'One click opens the live notepad, audio signal, transcript, and pharmacology mentions.'}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-col justify-center gap-2 p-4">
-            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
+          <div className="flex min-w-0 flex-col justify-center gap-2 p-4">
+            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
               <input
                 checked={withSystemAudio}
                 className="peer sr-only"
-                onChange={event => setWithSystemAudio(event.target.checked)}
+                disabled={starting || stopping}
+                onChange={event => setSystemAudioEnabled(event.target.checked)}
                 type="checkbox"
               />
-              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" />
+              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground peer-disabled:opacity-45" />
               <span className="min-w-0">
                 <span className="block text-xs font-semibold">Computer audio</span>
-                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">Capture the lecture or Zoom audio · macOS asks once</span>
+                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  Capture lecture or meeting audio · macOS asks once
+                </span>
               </span>
             </label>
-            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
+            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
               <input
                 checked={liveCaptions}
                 className="peer sr-only"
-                onChange={event => setLiveCaptions(event.target.checked)}
+                disabled={starting || stopping}
+                onChange={event => setLiveCaptionsEnabled(event.target.checked)}
                 type="checkbox"
               />
-              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" />
+              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground peer-disabled:opacity-45" />
               <span className="min-w-0">
                 <span className="block text-xs font-semibold">Live transcript</span>
-                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">Auto-save a lecture note to the Library</span>
+                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  Process speech on-device and save a linked lecture note
+                </span>
               </span>
             </label>
             <span className="mx-3 mt-1 inline-flex items-center gap-1.5 self-start rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
@@ -733,21 +407,24 @@ export function RecorderView() {
 
         {lectureNote && (
           <div className="flex flex-wrap items-center gap-2 border-t border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-5 py-3 text-xs">
-            <span className="mr-auto inline-flex items-center gap-1.5 font-medium">
-              <IconCheck className="text-(--theme-primary)" size={13} />
-              Transcript note saved to Library / {LECTURE_FOLDER} as {lectureNote}.md
+            <span className="min-w-0 flex-1 basis-full items-center gap-1.5 font-medium sm:inline-flex sm:basis-auto">
+              <IconCheck className="mr-1 inline text-(--theme-primary)" size={13} />
+              Saved to Library / {LECTURE_FOLDER} as {lectureNote}.md
             </span>
-            <Button onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`)} size="xs" variant="outline">
+            <Button
+              onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`)}
+              size="xs"
+              variant="outline"
+            >
               Open note
             </Button>
             <Button onClick={enhanceNote} size="xs" variant="secondary">
               <IconSparkles size={12} />
               Enhance with Nemesis
             </Button>
-            {insights.some(insight => insight.queued) && (
+            {queuedCount > 0 && (
               <Button onClick={askQueued} size="xs" variant="outline">
-                Ask about {insights.filter(insight => insight.queued).length} queued drug
-                {insights.filter(insight => insight.queued).length === 1 ? '' : 's'}
+                Review {queuedCount} queued drug{queuedCount === 1 ? '' : 's'}
               </Button>
             )}
           </div>
@@ -755,13 +432,16 @@ export function RecorderView() {
         {error && <p className="border-t border-(--ui-stroke-tertiary) px-5 py-3 text-xs text-destructive">{error}</p>}
       </section>
 
-      <section className="px-6 pb-8 pt-7">
+      <section className="px-4 pb-8 pt-7 sm:px-6">
         <div className="mb-3">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Archive</p>
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">Archive</p>
           <h2 className="mt-1 text-lg font-semibold tracking-tight">Saved recordings</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Play back, transcribe, enhance, or clean up past captures.
+          </p>
         </div>
         <RecordingArchive reloadToken={recordingsVersion} />
-        <div className="flex items-center gap-1.5 pt-4 text-[0.6875rem] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-1.5 pt-4 text-[0.6875rem] text-muted-foreground">
           <IconLock size={11} />
           <span>Local by design ·</span>
           <Tip
@@ -769,8 +449,8 @@ export function RecorderView() {
             label={
               <span>
                 Recording other people may require their consent where you live — check your school&rsquo;s policy.
-                Nemesis never records on its own and never hides the indicator. Transcription runs on your device
-                (the first run downloads a small model); the text is a draft — review it before you rely on it.
+                Nemesis never records on its own and never hides the indicator. Transcription runs on your device;
+                review the draft before relying on it.
               </span>
             }
             side="top"
@@ -781,6 +461,6 @@ export function RecorderView() {
           </Tip>
         </div>
       </section>
-    </div>
+    </main>
   )
 }

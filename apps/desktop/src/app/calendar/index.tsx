@@ -6,6 +6,7 @@
 import { IconChevronLeft, IconChevronRight, IconPlus, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import {
@@ -19,14 +20,21 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { SegmentedControl, type SegmentedControlOption } from '@/components/ui/segmented-control'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { persistString, storedString } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
 import {
+  addDays,
+  addMonths,
+  addWeeks,
+  addYears,
   type CalendarEvent,
   type CalendarEventKind,
   dateKey,
+  dayEvents,
   eventsByDate,
   freshId,
   loadCalendarState,
@@ -34,7 +42,9 @@ import {
   monthGrid,
   parseDateKey,
   saveCalendarEvents,
-  upcomingEvents
+  startOfWeek,
+  upcomingEvents,
+  weekGrid
 } from './model'
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -48,6 +58,29 @@ const KIND_META: Record<CalendarEventKind, { chip: string; dot: string; label: s
   exam: { chip: 'bg-(--theme-primary)/15 text-(--theme-primary)', dot: 'bg-(--theme-primary)', label: 'Exam' },
   other: { chip: 'bg-(--ui-cyan)/15 text-(--ui-cyan)', dot: 'bg-(--ui-cyan)', label: 'Other' },
   rotation: { chip: 'bg-(--ui-purple)/15 text-(--ui-purple)', dot: 'bg-(--ui-purple)', label: 'Rotation' }
+}
+
+type CalendarViewMode = 'day' | 'week' | 'month' | 'year'
+
+const VIEW_STORAGE_KEY = 'nemesis.calendar.view'
+
+const VIEW_OPTIONS: readonly SegmentedControlOption<CalendarViewMode>[] = [
+  { id: 'day', label: 'Day' },
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
+  { id: 'year', label: 'Year' }
+]
+
+const VIEW_UNIT_LABEL: Record<CalendarViewMode, string> = { day: 'day', month: 'month', week: 'week', year: 'year' }
+
+function isCalendarViewMode(value: null | string): value is CalendarViewMode {
+  return value === 'day' || value === 'week' || value === 'month' || value === 'year'
+}
+
+function loadStoredView(): CalendarViewMode {
+  const raw = storedString(VIEW_STORAGE_KEY)
+
+  return isCalendarViewMode(raw) ? raw : 'month'
 }
 
 type EventFormValues = Omit<CalendarEvent, 'id' | 'source'>
@@ -79,6 +112,47 @@ function formatEventTime(time: string): string {
   return new Date(2000, 0, 1, hour, minute).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
+/** Steps `cursor` by one unit of the active view's granularity — shared by the header's
+ *  prev/next arrows (see goStep in CalendarView). */
+function stepCursor(cursor: Date, view: CalendarViewMode, delta: number): Date {
+  if (view === 'day') {
+    return addDays(cursor, delta)
+  }
+
+  if (view === 'week') {
+    return addWeeks(cursor, delta)
+  }
+
+  if (view === 'month') {
+    return addMonths(cursor, delta)
+  }
+
+  return addYears(cursor, delta)
+}
+
+/** The header's center label, formatted to match the active view's granularity — e.g.
+ *  "Jul 14 – Jul 20, 2026" for week, "July 2026" for month. */
+function viewLabel(view: CalendarViewMode, cursor: Date): string {
+  if (view === 'day') {
+    return cursor.toLocaleDateString(undefined, { day: 'numeric', month: 'short', weekday: 'short', year: 'numeric' })
+  }
+
+  if (view === 'week') {
+    const start = startOfWeek(cursor)
+    const end = addDays(start, 6)
+    const startLabel = start.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+    const endLabel = end.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+
+    return `${startLabel} – ${endLabel}`
+  }
+
+  if (view === 'year') {
+    return String(cursor.getFullYear())
+  }
+
+  return monthLabel(cursor.getFullYear(), cursor.getMonth())
+}
+
 function emptyFormValues(date: string): EventFormValues {
   return { date, kind: 'assignment', title: '' }
 }
@@ -89,11 +163,8 @@ export function CalendarView() {
   const [error, setError] = useState<null | string>(null)
   const [saving, setSaving] = useState(false)
 
-  const [cursor, setCursor] = useState(() => {
-    const now = new Date()
-
-    return { month: now.getMonth(), year: now.getFullYear() }
-  })
+  const [view, setView] = useState<CalendarViewMode>(loadStoredView)
+  const [cursor, setCursor] = useState(() => new Date())
 
   const [dialog, setDialog] = useState<DialogState | null>(null)
 
@@ -123,16 +194,22 @@ export function CalendarView() {
   // The grid/agenda derivations are cheap (a 42-cell grid, a small filter+sort), so
   // there's no perf reason to memo them against a value that changes every render anyway.
   const today = new Date()
-  const grid = monthGrid(cursor.year, cursor.month, today)
+  const grid = monthGrid(cursor.getFullYear(), cursor.getMonth(), today)
   const byDate = eventsByDate(events)
   const upcoming = upcomingEvents(events, today, AGENDA_WINDOW_DAYS)
 
-  const goToMonth = (delta: number) => {
-    setCursor(current => {
-      const next = new Date(current.year, current.month + delta, 1)
+  const changeView = (next: CalendarViewMode) => {
+    setView(next)
+    persistString(VIEW_STORAGE_KEY, next)
+  }
 
-      return { month: next.getMonth(), year: next.getFullYear() }
-    })
+  const goStep = (delta: number) => {
+    setCursor(current => stepCursor(current, view, delta))
+  }
+
+  const openMonth = (year: number, month: number) => {
+    setCursor(new Date(year, month, 1))
+    changeView('month')
   }
 
   const openEvent = (event: CalendarEvent) => {
@@ -191,15 +268,14 @@ export function CalendarView() {
             school accounts — add or fix anything yourself too.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <SegmentedControl onChange={changeView} options={VIEW_OPTIONS} value={view} />
           <div className="flex items-center gap-1 rounded-md border border-border">
-            <Button aria-label="Previous month" onClick={() => goToMonth(-1)} size="icon-xs" variant="ghost">
+            <Button aria-label={`Previous ${VIEW_UNIT_LABEL[view]}`} onClick={() => goStep(-1)} size="icon-xs" variant="ghost">
               <IconChevronLeft size={14} />
             </Button>
-            <span className="min-w-32 px-1 text-center text-xs font-medium tabular-nums">
-              {monthLabel(cursor.year, cursor.month)}
-            </span>
-            <Button aria-label="Next month" onClick={() => goToMonth(1)} size="icon-xs" variant="ghost">
+            <span className="min-w-32 px-1 text-center text-xs font-medium tabular-nums">{viewLabel(view, cursor)}</span>
+            <Button aria-label={`Next ${VIEW_UNIT_LABEL[view]}`} onClick={() => goStep(1)} size="icon-xs" variant="ghost">
               <IconChevronRight size={14} />
             </Button>
           </div>
@@ -211,7 +287,14 @@ export function CalendarView() {
       </header>
 
       <div className="grid flex-1 grid-cols-1 gap-4 px-6 pb-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <MonthGrid days={grid} eventsByDay={byDate} onAddOnDate={openAdd} onOpenEvent={openEvent} />
+        {view === 'day' && (
+          <DayPanel date={cursor} events={dayEvents(events, cursor)} onAddOnDate={openAdd} onOpenEvent={openEvent} today={today} />
+        )}
+        {view === 'week' && (
+          <WeekGrid days={weekGrid(cursor, today)} eventsByDay={byDate} onAddOnDate={openAdd} onOpenEvent={openEvent} />
+        )}
+        {view === 'month' && <MonthGrid days={grid} eventsByDay={byDate} onAddOnDate={openAdd} onOpenEvent={openEvent} />}
+        {view === 'year' && <YearGrid eventsByDay={byDate} onSelectMonth={openMonth} today={today} year={cursor.getFullYear()} />}
         <Agenda events={upcoming} hasAnyEvents={events.length > 0} loaded={loaded} onOpenEvent={openEvent} />
       </div>
 
@@ -347,6 +430,235 @@ function DayCell({
         )}
       </div>
     </div>
+  )
+}
+
+function WeekGrid({
+  days,
+  eventsByDay,
+  onAddOnDate,
+  onOpenEvent
+}: {
+  days: MonthDay[]
+  eventsByDay: Map<string, CalendarEvent[]>
+  onAddOnDate: (date: string) => void
+  onOpenEvent: (event: CalendarEvent) => void
+}) {
+  return (
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="grid shrink-0 grid-cols-7 border-b border-border text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+        {WEEKDAY_LABELS.map(label => (
+          <div className="px-2 py-2 text-center" key={label}>
+            {label}
+          </div>
+        ))}
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-7">
+        {days.map(day => (
+          <WeekDayColumn
+            day={day}
+            events={eventsByDay.get(day.key) ?? []}
+            key={day.key}
+            onAdd={onAddOnDate}
+            onOpenEvent={onOpenEvent}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function WeekDayColumn({
+  day,
+  events,
+  onAdd,
+  onOpenEvent
+}: {
+  day: MonthDay
+  events: CalendarEvent[]
+  onAdd: (date: string) => void
+  onOpenEvent: (event: CalendarEvent) => void
+}) {
+  return (
+    <div className="group flex min-h-0 flex-col gap-1.5 border-r border-border p-1.5 last:border-r-0">
+      <div className="flex shrink-0 items-center justify-between">
+        <span
+          className={cn(
+            'grid size-5 place-items-center rounded-full text-[0.6875rem] font-medium tabular-nums',
+            day.isToday && 'bg-(--theme-primary) text-primary-foreground'
+          )}
+        >
+          {day.date.getDate()}
+        </span>
+        <Button
+          aria-label={`Add event on ${formatEventDate(day.key)}`}
+          className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+          onClick={() => onAdd(day.key)}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <Codicon name="add" size="0.75rem" />
+        </Button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+        {events.length === 0 ? (
+          <p className="px-1 pt-1 text-[0.625rem] text-(--ui-text-quaternary)">No events</p>
+        ) : (
+          events.map(event => (
+            <button
+              className={cn(
+                'truncate rounded px-1.5 py-1 text-left text-[0.6875rem] font-medium leading-tight',
+                KIND_META[event.kind].chip
+              )}
+              key={event.id}
+              onClick={() => onOpenEvent(event)}
+              title={event.title}
+              type="button"
+            >
+              {event.time && <span className="tabular-nums opacity-70">{formatEventTime(event.time)} · </span>}
+              {event.title}
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DayPanel({
+  date,
+  events,
+  onAddOnDate,
+  onOpenEvent,
+  today
+}: {
+  date: Date
+  events: CalendarEvent[]
+  onAddOnDate: (date: string) => void
+  onOpenEvent: (event: CalendarEvent) => void
+  today: Date
+}) {
+  const isToday = dateKey(date) === dateKey(today)
+
+  return (
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="flex shrink-0 items-start justify-between gap-2 border-b border-border px-4 py-3">
+        <div>
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+            {date.toLocaleDateString(undefined, { weekday: 'long' })}
+          </p>
+          <div className="mt-0.5 flex items-center gap-2">
+            <h2 className="text-2xl font-semibold tracking-tight">
+              {date.toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}
+            </h2>
+            {isToday && <Badge>Today</Badge>}
+          </div>
+        </div>
+        <Button
+          aria-label={`Add event on ${formatEventDate(dateKey(date))}`}
+          onClick={() => onAddOnDate(dateKey(date))}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <Codicon name="add" size="0.875rem" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {events.length === 0 ? (
+          <EmptyState className="min-h-40" description="Nothing due today." title="All clear" />
+        ) : (
+          <div className="flex flex-col gap-1">
+            {events.map(event => (
+              <button
+                className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-(--ui-control-hover-background)"
+                key={event.id}
+                onClick={() => onOpenEvent(event)}
+                type="button"
+              >
+                <span className={cn('mt-1.5 size-1.5 shrink-0 rounded-full', KIND_META[event.kind].dot)} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-medium">{event.title}</span>
+                  <span className="block text-[0.6875rem] text-muted-foreground">
+                    {event.time ? formatEventTime(event.time) : 'No time set'}
+                    {event.course ? ` · ${event.course}` : ''}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function YearGrid({
+  eventsByDay,
+  onSelectMonth,
+  today,
+  year
+}: {
+  eventsByDay: Map<string, CalendarEvent[]>
+  onSelectMonth: (year: number, month: number) => void
+  today: Date
+  year: number
+}) {
+  return (
+    <div className="grid min-h-0 grid-cols-2 gap-3 overflow-y-auto rounded-2xl border border-border bg-card p-3 sm:grid-cols-3 xl:grid-cols-4">
+      {Array.from({ length: 12 }, (_, month) => (
+        <MiniMonth
+          days={monthGrid(year, month, today)}
+          eventsByDay={eventsByDay}
+          key={month}
+          month={month}
+          onSelectMonth={onSelectMonth}
+          year={year}
+        />
+      ))}
+    </div>
+  )
+}
+
+function MiniMonth({
+  days,
+  eventsByDay,
+  month,
+  onSelectMonth,
+  year
+}: {
+  days: MonthDay[]
+  eventsByDay: Map<string, CalendarEvent[]>
+  month: number
+  onSelectMonth: (year: number, month: number) => void
+  year: number
+}) {
+  return (
+    <button
+      className="flex flex-col gap-1.5 rounded-xl border border-border p-2 text-left transition-colors hover:border-(--theme-primary)/60 hover:bg-(--ui-control-hover-background)"
+      onClick={() => onSelectMonth(year, month)}
+      type="button"
+    >
+      <p className="px-0.5 text-[0.6875rem] font-semibold">
+        {new Date(year, month, 1).toLocaleDateString(undefined, { month: 'long' })}
+      </p>
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {days.map(day => (
+          <div className={cn('flex flex-col items-center gap-0.5', !day.inMonth && 'opacity-30')} key={day.key}>
+            <span
+              className={cn(
+                'grid size-4 place-items-center rounded-full text-[0.5625rem] tabular-nums text-muted-foreground',
+                day.isToday && 'bg-(--theme-primary) font-semibold text-primary-foreground'
+              )}
+            >
+              {day.date.getDate()}
+            </span>
+            <span
+              className={cn('size-1 rounded-full', (eventsByDay.get(day.key)?.length ?? 0) > 0 && 'bg-(--theme-primary)')}
+            />
+          </div>
+        ))}
+      </div>
+    </button>
   )
 }
 

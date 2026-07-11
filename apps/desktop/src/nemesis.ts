@@ -13,6 +13,8 @@ export const STUDENT_HIDDEN_PALETTE: ReadonlySet<string> = new Set(['nav-termina
 /** Settings sections students see. Everything else (model/providers/keys/gateway/workspace/
  *  voice/memory/advanced) is provisioned by Nemesis — students pay, we run the model. */
 export const STUDENT_SETTINGS_KEEP: ReadonlySet<string> = new Set([
+  'usage',
+  'connections',
   'config:appearance',
   'config:chat',
   'config:safety',

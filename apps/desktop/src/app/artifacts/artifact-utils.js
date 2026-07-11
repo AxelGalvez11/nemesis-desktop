@@ -178,6 +178,29 @@ function collectArtifactsFromMessage(message, pushValue) {
         });
     }
 }
+// The student's vault + recordings live under these roots; Exports is the one
+// vault subfolder whose contents ARE chat deliverables.
+const LIBRARY_ROOT_HINT = '/Documents/Nemesis Library/';
+const LIBRARY_EXPORTS_HINT = '/Documents/Nemesis Library/Exports/';
+const RECORDINGS_ROOT_HINT = '/Documents/Nemesis Recordings/';
+/** True for working files the Library/Recorder pages already surface (notes,
+ *  decks, calendar, captured course files, audio) — everything under the vault
+ *  or recordings EXCEPT vault/Exports, which holds real chat deliverables. */
+export function isLibraryWorkFile(value) {
+    let path = value;
+    if (path.startsWith('file://')) {
+        try {
+            path = decodeURIComponent(path.slice('file://'.length));
+        }
+        catch {
+            path = path.slice('file://'.length);
+        }
+    }
+    if (path.includes(LIBRARY_EXPORTS_HINT)) {
+        return false;
+    }
+    return path.includes(LIBRARY_ROOT_HINT) || path.includes(RECORDINGS_ROOT_HINT);
+}
 export function collectArtifactsForSession(session, messages) {
     const found = new Map();
     const title = artifactSessionTitle(session);
@@ -192,6 +215,15 @@ export function collectArtifactsForSession(session, messages) {
             }
             // Student build: skip plain web links entirely (see ARTIFACT_FILTERS note).
             if (NEMESIS_STUDENT_BUILD && artifactKind(value) === 'link' && /^https?:\/\//.test(value)) {
+                return;
+            }
+            // Student build: the Library pages already own the student's working
+            // files — notes, decks, calendar, captured course files, recordings.
+            // Echoing every vault path the agent touched here made Artifacts a
+            // second, noisier Library. Artifacts = things made FOR the chat, so
+            // vault paths are skipped EXCEPT the Exports folder (where deliverables
+            // — slide decks, reports, handouts — are written).
+            if (NEMESIS_STUDENT_BUILD && isLibraryWorkFile(value)) {
                 return;
             }
             const key = `${session.id}:${value}`;

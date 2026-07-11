@@ -308,6 +308,58 @@ export async function mintDeviceKey(): Promise<string> {
   return data.key
 }
 
+export interface UsageSnapshot {
+  plan: string
+  dailyLimit: number
+  used: number
+  remaining: number
+  periodStart: string
+}
+
+/** Today's token budget for the in-app Usage view. Returns null when there's
+ *  no device key yet (nothing to report) or the proxy/usage endpoint isn't
+ *  reachable — the UI treats null as "usage isn't available", never an error. */
+export async function fetchUsage(): Promise<null | UsageSnapshot> {
+  const key = $deviceKey.get()
+
+  if (!key) {
+    return null
+  }
+
+  try {
+    const response = await fetch(`${LLM_PROXY_URL}/usage`, {
+      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${key}` },
+      method: 'GET'
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const data = (await response.json()) as {
+      plan?: string
+      daily_limit?: number
+      used?: number
+      remaining?: number
+      period_start?: string
+    }
+
+    if (typeof data.daily_limit !== 'number' || typeof data.used !== 'number') {
+      return null
+    }
+
+    return {
+      dailyLimit: data.daily_limit,
+      periodStart: data.period_start ?? '',
+      plan: data.plan ?? 'free',
+      remaining: typeof data.remaining === 'number' ? data.remaining : Math.max(0, data.daily_limit - data.used),
+      used: data.used
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Human label for a plan code: 'health_pro' → 'Health Pro'. */
 export function planLabel(plan: string): string {
   if (!plan || plan === 'free') {

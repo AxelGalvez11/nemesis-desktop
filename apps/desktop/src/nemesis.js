@@ -10,6 +10,8 @@ export const STUDENT_HIDDEN_PALETTE = new Set(['nav-terminal', 'nav-skills', 'na
 /** Settings sections students see. Everything else (model/providers/keys/gateway/workspace/
  *  voice/memory/advanced) is provisioned by Nemesis — students pay, we run the model. */
 export const STUDENT_SETTINGS_KEEP = new Set([
+    'usage',
+    'connections',
     'config:appearance',
     'config:chat',
     'config:safety',

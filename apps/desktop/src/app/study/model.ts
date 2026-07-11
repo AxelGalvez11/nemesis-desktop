@@ -37,6 +37,30 @@ export interface ReviewEntry {
   at: string
 }
 
+export type ReviewOrder = 'due' | 'random'
+
+export interface StudySettings {
+  /** New cards introduced per day. 0 = unlimited. */
+  newPerDay: number
+  /** Already-scheduled review cards per day. 0 = unlimited. */
+  reviewsPerDay: number
+  /** 'due' studies overdue cards before new ones (today's behavior); 'random'
+   *  shuffles the capped queue, stably for the whole day (see buildQueue). */
+  order: ReviewOrder
+  /** 3D flip animation on the review card (vs. a static reveal below a divider). */
+  flip: boolean
+  /** Show the "{interval} · {key}" hint under each grade button. */
+  showIntervalHints: boolean
+}
+
+export const DEFAULT_STUDY_SETTINGS: StudySettings = {
+  newPerDay: 20,
+  reviewsPerDay: 0,
+  order: 'due',
+  flip: true,
+  showIntervalHints: true
+}
+
 export interface StudyState {
   version: 1
   decks: StudyDeck[]
@@ -46,6 +70,10 @@ export interface StudyState {
   schedule: Record<string, StoredSchedule>
   /** Append-only review log that feeds the activity heatmap. */
   reviews: ReviewEntry[]
+  /** Absent (pre-settings state) or partial (old blobs, mid-migration) →
+   *  getSettings() fills the rest from DEFAULT_STUDY_SETTINGS. Never read this
+   *  field directly; call getSettings(). */
+  settings?: Partial<StudySettings>
 }
 
 export type StudyRating = 'again' | 'easy' | 'good' | 'hard'
@@ -61,6 +89,9 @@ export interface QueueItem {
 // demo blob is fine; once real student data exists this needs a migration, not a bump.
 const STORAGE_KEY = 'nemesis.study.v2'
 const QUEUE_LIMIT = 200
+// Pre-settings flip toggle lived in its own key (see study/index.tsx); loadState
+// migrates it into settings.flip once, then this key is never consulted again.
+const LEGACY_FLIP_KEY = 'nemesis.study.flip'
 
 const scheduler = fsrs()
 
@@ -113,6 +144,23 @@ function normalizeSections(sections: string[] | undefined, decks: StudyDeck[]): 
   return names
 }
 
+/** One-time bridge from the pre-settings flip key into settings.flip. Only that
+ *  field is touched — everything else stays absent so getSettings() fills it from
+ *  DEFAULT_STUDY_SETTINGS. Never overwrites an already-migrated (explicit) value. */
+function migrateFlipSetting(settings: Partial<StudySettings> | undefined): Partial<StudySettings> | undefined {
+  if (settings?.flip !== undefined) {
+    return settings
+  }
+
+  try {
+    const legacy = window.localStorage.getItem(LEGACY_FLIP_KEY)
+
+    return legacy === null ? settings : { ...settings, flip: legacy !== 'off' }
+  } catch {
+    return settings
+  }
+}
+
 export function loadState(): StudyState {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -124,7 +172,8 @@ export function loadState(): StudyState {
         return {
           ...parsed,
           reviews: (parsed.reviews ?? []).filter(review => !review.cardId.startsWith('seed#')),
-          sections: normalizeSections(parsed.sections, parsed.decks)
+          sections: normalizeSections(parsed.sections, parsed.decks),
+          settings: migrateFlipSetting(parsed.settings)
         }
       }
     }
@@ -134,7 +183,14 @@ export function loadState(): StudyState {
 
   const decks = seedDecks()
 
-  return { version: 1, decks, sections: normalizeSections([], decks), schedule: {}, reviews: [] }
+  return {
+    version: 1,
+    decks,
+    sections: normalizeSections([], decks),
+    schedule: {},
+    reviews: [],
+    settings: migrateFlipSetting(undefined)
+  }
 }
 
 export function saveState(state: StudyState): void {
@@ -145,9 +201,78 @@ export function saveState(state: StudyState): void {
   }
 }
 
-/** Review queue: due reviews first, then new cards, capped. Pure. */
+// --- Study settings (daily caps, review order, flip, hints) ------------------
+
+/** Effective settings — always fully populated, even for old/partial blobs.
+ *  Callers should never read state.settings directly. */
+export function getSettings(state: StudyState): StudySettings {
+  return { ...DEFAULT_STUDY_SETTINGS, ...state.settings }
+}
+
+/** Patch one or more settings fields. Pure — returns a new StudyState. */
+export function setSettings(state: StudyState, patch: Partial<StudySettings>): StudyState {
+  return { ...state, settings: { ...getSettings(state), ...patch } }
+}
+
+// --- Review queue --------------------------------------------------------------
+
+/** Tiny deterministic string hash (FNV-1a) → a stable pseudo-random rank. */
+function hashSeed(key: string): number {
+  let hash = 0x811c9dc5
+
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+
+  return hash >>> 0
+}
+
+/** Deterministic per-card order for a UTC day key: each card's rank comes from
+ *  hashing (dayKey, its own id), never from the other cards in the queue — so
+ *  grading a card away doesn't reshuffle the rest (a plain Fisher-Yates reseeded
+ *  on every shrinking queue would: the same seed applied to an (n-1)-length array
+ *  is a different permutation, not "the old one minus a card"). A fresh dayKey
+ *  gives every card a fresh rank the next day. */
+function orderForDay(items: QueueItem[], dayKey: string): QueueItem[] {
+  return [...items].sort((a, b) => hashSeed(`${dayKey}:${a.card.id}`) - hashSeed(`${dayKey}:${b.card.id}`))
+}
+
+/** New-vs-review split of everything graded on `dayKey` (UTC yyyy-mm-dd). An entry
+ *  counts as "new" the first time its cardId ever appears in the log — matching the
+ *  isNew: !stored rule below — and as a "review" every time after that. */
+function todayActivity(reviews: ReviewEntry[], dayKey: string): { newCount: number; reviewCount: number } {
+  const seenBefore = new Set<string>()
+  let newCount = 0
+  let reviewCount = 0
+
+  for (const entry of reviews) {
+    const isFirstEver = !seenBefore.has(entry.cardId)
+    seenBefore.add(entry.cardId)
+
+    if (entry.at.slice(0, 10) !== dayKey) {
+      continue
+    }
+
+    if (isFirstEver) {
+      newCount++
+    } else {
+      reviewCount++
+    }
+  }
+
+  return { newCount, reviewCount }
+}
+
+/** Review queue: due reviews first, then new cards (or a day-stable shuffle of
+ *  both, in 'random' order), capped by today's new/review daily limits. Pure. */
 export function buildQueue(state: StudyState, deckId: null | string, now: Date): QueueItem[] {
-  const queue: QueueItem[] = []
+  const settings = getSettings(state)
+  const dayKey = now.toISOString().slice(0, 10)
+  const { newCount, reviewCount } = todayActivity(state.reviews, dayKey)
+
+  const dueItems: QueueItem[] = []
+  const newItems: QueueItem[] = []
 
   for (const deck of state.decks) {
     if (deckId && deck.id !== deckId) {
@@ -161,15 +286,22 @@ export function buildQueue(state: StudyState, deckId: null | string, now: Date):
 
       const stored = state.schedule[card.id]
 
-      if (isDue(stored, now)) {
-        queue.push({ card, deckId: deck.id, deckName: deck.name, isNew: !stored })
+      if (!isDue(stored, now)) {
+        continue
       }
+
+      const item: QueueItem = { card, deckId: deck.id, deckName: deck.name, isNew: !stored }
+
+      ;(item.isNew ? newItems : dueItems).push(item)
     }
   }
 
-  queue.sort((a, b) => (a.isNew ? 1 : 0) - (b.isNew ? 1 : 0))
+  const newCap = settings.newPerDay > 0 ? Math.max(0, settings.newPerDay - newCount) : newItems.length
+  const reviewCap = settings.reviewsPerDay > 0 ? Math.max(0, settings.reviewsPerDay - reviewCount) : dueItems.length
+  const capped = [...dueItems.slice(0, reviewCap), ...newItems.slice(0, newCap)]
+  const ordered = settings.order === 'random' ? orderForDay(capped, dayKey) : capped
 
-  return queue.slice(0, QUEUE_LIMIT)
+  return ordered.slice(0, QUEUE_LIMIT)
 }
 
 export interface DeckStats {
@@ -580,6 +712,7 @@ export function studyMotivation(state: StudyState, todayIso: string, windowDays 
 
   const cutoff = new Date(todayMs - 30 * DAY).toISOString()
   const recent = state.reviews.filter(review => review.at >= cutoff)
+
   const retentionPct = recent.length
     ? Math.round((recent.filter(review => review.rating !== 'again').length / recent.length) * 100)
     : null

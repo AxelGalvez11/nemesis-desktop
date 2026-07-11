@@ -28,7 +28,7 @@ import { profileColor } from '@/lib/profile-color'
 import { sessionMatchesSearch } from '@/lib/session-search'
 import { normalizeSessionSource, sessionSourceLabel } from '@/lib/session-source'
 import { cn } from '@/lib/utils'
-import { $account, $accountDialogOpen, planLabel } from '@/nemesis-account'
+import { $account, planLabel } from '@/nemesis-account'
 import { $cronJobs } from '@/store/cron'
 import {
   $dismissedAutoProjectIds,
@@ -1455,11 +1455,14 @@ function StudentSidebarFooter({ onOpenSettings }: StudentSidebarFooterProps) {
 
   return (
     <SidebarFooter className="sticky bottom-0 shrink-0 gap-1 border-t border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2.5 py-2">
+      {/* One control, one destination: the account row IS the settings opener
+          (owner ask — a separate gear next to it doubled the same journey).
+          Account/plan details live inside Settings, so nothing is lost. */}
       <div className="flex min-w-0 items-center gap-1">
         <Button
-          aria-label="Account & plan"
+          aria-label="Account & settings"
           className="min-w-0 flex-1 justify-start gap-2 overflow-hidden rounded-md px-1.5 py-1 text-left text-(--ui-text-secondary) transition-colors duration-100 ease hover:bg-(--ui-control-hover-background) hover:text-foreground active:scale-[0.99] motion-reduce:active:scale-100"
-          onClick={() => $accountDialogOpen.set(true)}
+          onClick={onOpenSettings}
           size="sm"
           type="button"
           variant="ghost"
@@ -1471,19 +1474,8 @@ function StudentSidebarFooter({ onOpenSettings }: StudentSidebarFooterProps) {
           <span className="max-w-20 shrink truncate rounded-full bg-(--theme-primary)/15 px-1.5 py-0.5 text-[0.6rem] font-semibold text-(--theme-primary)">
             {planLabel(account.plan)}
           </span>
+          <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="settings-gear" size="0.8rem" />
         </Button>
-        <Tip label="Settings" side="top">
-          <Button
-            aria-label="Settings"
-            className="shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100"
-            onClick={onOpenSettings}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          >
-            <Codicon name="settings-gear" size="0.8rem" />
-          </Button>
-        </Tip>
       </div>
     </SidebarFooter>
   )

@@ -5,10 +5,20 @@
 // v1 persistence is a small localStorage JSON blob (same pattern as store/onboarding);
 // the upgrade path is backend/vault storage once Nemesis accounts land.
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
+export const DEFAULT_STUDY_SETTINGS = {
+    newPerDay: 20,
+    reviewsPerDay: 0,
+    order: 'due',
+    flip: true,
+    showIntervalHints: true
+};
 // Bumped to v2 for grouped decks + review activity. Pre-release, so discarding the old
 // demo blob is fine; once real student data exists this needs a migration, not a bump.
 const STORAGE_KEY = 'nemesis.study.v2';
 const QUEUE_LIMIT = 200;
+// Pre-settings flip toggle lived in its own key (see study/index.tsx); loadState
+// migrates it into settings.flip once, then this key is never consulted again.
+const LEGACY_FLIP_KEY = 'nemesis.study.flip';
 const scheduler = fsrs();
 const RATING = {
     again: Rating.Again,
@@ -50,6 +60,21 @@ function normalizeSections(sections, decks) {
     }
     return names;
 }
+/** One-time bridge from the pre-settings flip key into settings.flip. Only that
+ *  field is touched — everything else stays absent so getSettings() fills it from
+ *  DEFAULT_STUDY_SETTINGS. Never overwrites an already-migrated (explicit) value. */
+function migrateFlipSetting(settings) {
+    if (settings?.flip !== undefined) {
+        return settings;
+    }
+    try {
+        const legacy = window.localStorage.getItem(LEGACY_FLIP_KEY);
+        return legacy === null ? settings : { ...settings, flip: legacy !== 'off' };
+    }
+    catch {
+        return settings;
+    }
+}
 export function loadState() {
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -59,7 +84,8 @@ export function loadState() {
                 return {
                     ...parsed,
                     reviews: (parsed.reviews ?? []).filter(review => !review.cardId.startsWith('seed#')),
-                    sections: normalizeSections(parsed.sections, parsed.decks)
+                    sections: normalizeSections(parsed.sections, parsed.decks),
+                    settings: migrateFlipSetting(parsed.settings)
                 };
             }
         }
@@ -68,7 +94,14 @@ export function loadState() {
         // corrupted blob → fall through to a fresh seeded state
     }
     const decks = seedDecks();
-    return { version: 1, decks, sections: normalizeSections([], decks), schedule: {}, reviews: [] };
+    return {
+        version: 1,
+        decks,
+        sections: normalizeSections([], decks),
+        schedule: {},
+        reviews: [],
+        settings: migrateFlipSetting(undefined)
+    };
 }
 export function saveState(state) {
     try {
@@ -78,9 +111,65 @@ export function saveState(state) {
         // quota/private-mode failures are non-fatal; the session keeps working in memory
     }
 }
-/** Review queue: due reviews first, then new cards, capped. Pure. */
+// --- Study settings (daily caps, review order, flip, hints) ------------------
+/** Effective settings — always fully populated, even for old/partial blobs.
+ *  Callers should never read state.settings directly. */
+export function getSettings(state) {
+    return { ...DEFAULT_STUDY_SETTINGS, ...state.settings };
+}
+/** Patch one or more settings fields. Pure — returns a new StudyState. */
+export function setSettings(state, patch) {
+    return { ...state, settings: { ...getSettings(state), ...patch } };
+}
+// --- Review queue --------------------------------------------------------------
+/** Tiny deterministic string hash (FNV-1a) → a stable pseudo-random rank. */
+function hashSeed(key) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < key.length; i++) {
+        hash ^= key.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return hash >>> 0;
+}
+/** Deterministic per-card order for a UTC day key: each card's rank comes from
+ *  hashing (dayKey, its own id), never from the other cards in the queue — so
+ *  grading a card away doesn't reshuffle the rest (a plain Fisher-Yates reseeded
+ *  on every shrinking queue would: the same seed applied to an (n-1)-length array
+ *  is a different permutation, not "the old one minus a card"). A fresh dayKey
+ *  gives every card a fresh rank the next day. */
+function orderForDay(items, dayKey) {
+    return [...items].sort((a, b) => hashSeed(`${dayKey}:${a.card.id}`) - hashSeed(`${dayKey}:${b.card.id}`));
+}
+/** New-vs-review split of everything graded on `dayKey` (UTC yyyy-mm-dd). An entry
+ *  counts as "new" the first time its cardId ever appears in the log — matching the
+ *  isNew: !stored rule below — and as a "review" every time after that. */
+function todayActivity(reviews, dayKey) {
+    const seenBefore = new Set();
+    let newCount = 0;
+    let reviewCount = 0;
+    for (const entry of reviews) {
+        const isFirstEver = !seenBefore.has(entry.cardId);
+        seenBefore.add(entry.cardId);
+        if (entry.at.slice(0, 10) !== dayKey) {
+            continue;
+        }
+        if (isFirstEver) {
+            newCount++;
+        }
+        else {
+            reviewCount++;
+        }
+    }
+    return { newCount, reviewCount };
+}
+/** Review queue: due reviews first, then new cards (or a day-stable shuffle of
+ *  both, in 'random' order), capped by today's new/review daily limits. Pure. */
 export function buildQueue(state, deckId, now) {
-    const queue = [];
+    const settings = getSettings(state);
+    const dayKey = now.toISOString().slice(0, 10);
+    const { newCount, reviewCount } = todayActivity(state.reviews, dayKey);
+    const dueItems = [];
+    const newItems = [];
     for (const deck of state.decks) {
         if (deckId && deck.id !== deckId) {
             continue;
@@ -90,13 +179,18 @@ export function buildQueue(state, deckId, now) {
                 continue;
             }
             const stored = state.schedule[card.id];
-            if (isDue(stored, now)) {
-                queue.push({ card, deckId: deck.id, deckName: deck.name, isNew: !stored });
+            if (!isDue(stored, now)) {
+                continue;
             }
+            const item = { card, deckId: deck.id, deckName: deck.name, isNew: !stored };
+            (item.isNew ? newItems : dueItems).push(item);
         }
     }
-    queue.sort((a, b) => (a.isNew ? 1 : 0) - (b.isNew ? 1 : 0));
-    return queue.slice(0, QUEUE_LIMIT);
+    const newCap = settings.newPerDay > 0 ? Math.max(0, settings.newPerDay - newCount) : newItems.length;
+    const reviewCap = settings.reviewsPerDay > 0 ? Math.max(0, settings.reviewsPerDay - reviewCount) : dueItems.length;
+    const capped = [...dueItems.slice(0, reviewCap), ...newItems.slice(0, newCap)];
+    const ordered = settings.order === 'random' ? orderForDay(capped, dayKey) : capped;
+    return ordered.slice(0, QUEUE_LIMIT);
 }
 export function deckStats(state, deckId, now) {
     let due = 0;

@@ -270,5 +270,5 @@ function NativeBrowserPanel() {
                                 navigate(event.currentTarget.value);
                                 event.currentTarget.blur();
                             }
-                        }, placeholder: "Type a URL and press Enter", spellCheck: false, value: urlDraft ?? activeUrl })] }), _jsx("div", { className: "relative min-h-0 flex-1", ref: placeholderRef, children: tabs.length === 0 && (_jsx("div", { className: "pointer-events-none absolute inset-0 grid place-items-center text-[0.72rem] text-(--ui-text-tertiary)", children: "Opening the browser\u2026" })) })] }));
+                        }, placeholder: "Type a URL and press Enter", spellCheck: false, value: urlDraft ?? activeUrl })] }), _jsx("div", { className: "relative ml-1 min-h-0 flex-1", ref: placeholderRef, children: tabs.length === 0 && (_jsx("div", { className: "pointer-events-none absolute inset-0 grid place-items-center text-[0.72rem] text-(--ui-text-tertiary)", children: "Opening the browser\u2026" })) })] }));
 }
