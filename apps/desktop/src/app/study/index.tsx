@@ -2,7 +2,15 @@
 // note). Interaction model deliberately mirrors what health-science students already have
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
-import { IconFolderPlus, IconLayoutGrid, IconList, IconPlayerPause, IconSettings } from '@tabler/icons-react'
+import {
+  IconChecklist,
+  IconFolderPlus,
+  IconLayoutGrid,
+  IconList,
+  IconPlayerPause,
+  IconSettings,
+  IconSitemap
+} from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -25,7 +33,20 @@ import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 import { importedDeckFileNames, scanAllDeckFiles } from './deck-files'
+import {
+  bestAttempt,
+  groupExtras,
+  lastAttempt,
+  loadTestAttempts,
+  type MindmapFile,
+  scanMindmapFiles,
+  scanTestFiles,
+  type TestAttempt,
+  type TestAttemptsStore,
+  type TestFile
+} from './extras'
 import { parseCardPaste } from './import-cards'
+import { MindmapViewerDialog } from './mindmap-viewer'
 import {
   addCard,
   addSection,
@@ -58,6 +79,7 @@ import {
   toggleSuspendCard,
   updateCard
 } from './model'
+import { TestSurface } from './test-mode'
 
 const GRADES: { key: string; label: string; rating: StudyRating }[] = [
   { key: '1', label: 'Again', rating: 'again' },
@@ -109,6 +131,11 @@ export function StudyView() {
   const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
   const [done, setDone] = useState(0)
   const [autoImported, setAutoImported] = useState<string[]>([])
+  const [mindmaps, setMindmaps] = useState<MindmapFile[]>([])
+  const [tests, setTests] = useState<TestFile[]>([])
+  const [testAttempts, setTestAttempts] = useState<TestAttemptsStore>(() => loadTestAttempts())
+  const [viewingMindmap, setViewingMindmap] = useState<MindmapFile | null>(null)
+  const [takingTest, setTakingTest] = useState<null | TestFile>(null)
 
   const now = useMemo(() => new Date(), [state, reviewing])
   const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now])
@@ -139,9 +166,18 @@ export function StudyView() {
 
     const reconcile = async () => {
       lastRun = Date.now()
-      const candidates = await scanAllDeckFiles()
+      const [candidates, mindmapFiles, testFiles] = await Promise.all([scanAllDeckFiles(), scanMindmapFiles(), scanTestFiles()])
 
-      if (cancelled || !candidates) {
+      if (cancelled) {
+        return
+      }
+
+      // Mind maps/tests carry no schedule state to preserve, so every scan just
+      // replaces the list outright — no reconcile-against-existing-state needed.
+      setMindmaps(mindmapFiles)
+      setTests(testFiles)
+
+      if (!candidates) {
         return
       }
 
@@ -354,12 +390,13 @@ export function StudyView() {
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {reviewing || browseDeckId || matchDeckId ? (
+          {reviewing || browseDeckId || matchDeckId || takingTest ? (
             <Button
               onClick={() => {
                 exitReview()
                 setBrowseDeckId(null)
                 setMatchDeckId(null)
+                setTakingTest(null)
               }}
               size="sm"
               variant="outline"
@@ -467,17 +504,29 @@ export function StudyView() {
           sections={sections}
           state={state}
         />
+      ) : takingTest ? (
+        <TestSurface
+          file={takingTest}
+          onComplete={() => setTestAttempts(loadTestAttempts())}
+          onExit={() => setTakingTest(null)}
+        />
       ) : (
         <DeckBrowser
+          mindmaps={mindmaps}
           onBrowse={setBrowseDeckId}
           onCreateDeck={setNewDeckSection}
           onMatch={startMatch}
+          onOpenMindmap={setViewingMindmap}
+          onStartTest={setTakingTest}
           onStudy={startReview}
           state={state}
+          testAttempts={testAttempts}
+          tests={tests}
           view={view}
         />
       )}
 
+      <MindmapViewerDialog file={viewingMindmap} onOpenChange={open => !open && setViewingMindmap(null)} />
       <ImportDialog onImport={importCards} onOpenChange={setImportOpen} open={importOpen} sections={sections} />
       {newDeckSection !== null && (
         <NewDeckDialog
@@ -738,23 +787,58 @@ function StudySettingsDialog({
   )
 }
 
+// DeckGroup, widened with the section's mind maps/tests (see extras.ts's groupExtras) —
+// a section can now have content even with zero decks, so the "no decks" placard below
+// is suppressed whenever there's something else to show.
+interface StudySectionGroup {
+  course: string
+  decks: StudyDeck[]
+  extras?: { mindmaps: MindmapFile[]; tests: TestFile[] }
+  stats: DeckStats
+}
+
 function DeckBrowser({
+  mindmaps,
   onBrowse,
   onCreateDeck,
   onMatch,
+  onOpenMindmap,
+  onStartTest,
   onStudy,
   state,
+  testAttempts,
+  tests,
   view
 }: {
+  mindmaps: MindmapFile[]
   onBrowse: (deckId: string) => void
   onCreateDeck: (section: string) => void
   onMatch: (deckId: string) => void
+  onOpenMindmap: (file: MindmapFile) => void
+  onStartTest: (file: TestFile) => void
   onStudy: (deckId: string) => void
   state: StudyState
+  testAttempts: TestAttemptsStore
+  tests: TestFile[]
   view: DeckViewMode
 }) {
   const now = new Date()
-  const groups = groupDecks(state, now)
+  const deckGroups = groupDecks(state, now)
+  const extrasByCourse = useMemo(() => groupExtras(state.sections, mindmaps, tests), [mindmaps, state.sections, tests])
+
+  const extraOnlyCourses = [...extrasByCourse.keys()]
+    .filter(course => !deckGroups.some(group => group.course === course))
+    .sort((a, b) => a.localeCompare(b))
+
+  const groups: StudySectionGroup[] = [
+    ...deckGroups.map(group => ({ ...group, extras: extrasByCourse.get(group.course) })),
+    ...extraOnlyCourses.map(course => ({
+      course,
+      decks: [],
+      extras: extrasByCourse.get(course),
+      stats: { due: 0, fresh: 0, total: 0 }
+    }))
+  ]
 
   if (!groups.length) {
     return <EmptyState className="flex-1" description="Create a deck or import cards to get going." title="No decks yet" />
@@ -763,41 +847,121 @@ function DeckBrowser({
   return (
     <div className="pb-10">
       <Heatmap state={state} />
-      {groups.map(group => (
-        <section className="px-8 pt-7" key={group.course}>
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="text-[15px] font-semibold tracking-tight">{group.course}</h2>
-            <span className="text-xs text-muted-foreground">
-              {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} · {group.stats.total} cards
-            </span>
-          </div>
-          {group.decks.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-5">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
-                Empty section
-              </p>
-              <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                <span>No decks yet —</span>
-                <Button onClick={() => onCreateDeck(group.course)} size="inline" variant="textStrong">
-                  add one
-                </Button>
+      {groups.map(group => {
+        const groupMindmaps = group.extras?.mindmaps ?? []
+        const groupTests = group.extras?.tests ?? []
+        const hasExtras = groupMindmaps.length > 0 || groupTests.length > 0
+
+        return (
+          <section className="px-8 pt-7" key={group.course}>
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-[15px] font-semibold tracking-tight">{group.course}</h2>
+              <span className="text-xs text-muted-foreground">
+                {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} · {group.stats.total} cards
+                {groupMindmaps.length > 0 && ` · ${groupMindmaps.length} mind map${groupMindmaps.length === 1 ? '' : 's'}`}
+                {groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`}
+              </span>
+            </div>
+            {group.decks.length === 0 ? (
+              hasExtras ? null : (
+                <div className="rounded-xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-5">
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
+                    Empty section
+                  </p>
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>No decks yet —</span>
+                    <Button onClick={() => onCreateDeck(group.course)} size="inline" variant="textStrong">
+                      add one
+                    </Button>
+                  </div>
+                </div>
+              )
+            ) : view === 'list' ? (
+              <div className="flex flex-col gap-2">
+                {group.decks.map(deck => (
+                  <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
+                ))}
               </div>
-            </div>
-          ) : view === 'list' ? (
-            <div className="flex flex-col gap-2">
-              {group.decks.map(deck => (
-                <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {group.decks.map(deck => (
-                <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
-              ))}
-            </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {group.decks.map(deck => (
+                  <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
+                ))}
+              </div>
+            )}
+            {hasExtras && (
+              <div className="mt-2 flex flex-col gap-2">
+                {groupMindmaps.map(mindmap => (
+                  <MindmapRow key={mindmap.fileName} mindmap={mindmap} onOpen={() => onOpenMindmap(mindmap)} />
+                ))}
+                {groupTests.map(test => (
+                  <TestRow
+                    attempts={testAttempts[test.fileName]?.attempts ?? []}
+                    key={test.fileName}
+                    onStart={() => onStartTest(test)}
+                    test={test}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+function MindmapRow({ mindmap, onOpen }: { mindmap: MindmapFile; onOpen: () => void }) {
+  return (
+    <button
+      className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 text-left transition-colors hover:border-(--theme-primary)/40"
+      onClick={onOpen}
+      type="button"
+    >
+      <IconSitemap className="shrink-0 text-muted-foreground" size={16} />
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">{mindmap.title}</span>
+      <Badge variant="outline">Mind map</Badge>
+    </button>
+  )
+}
+
+function TestRow({
+  attempts,
+  onStart,
+  test
+}: {
+  attempts: TestAttempt[]
+  onStart: () => void
+  test: TestFile
+}) {
+  const best = bestAttempt(attempts)
+  const last = lastAttempt(attempts)
+  const count = test.questions.length
+
+  return (
+    <div className="group flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+      <IconChecklist className="shrink-0 text-muted-foreground" size={16} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{test.title}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+          <span>
+            {count} question{count === 1 ? '' : 's'}
+          </span>
+          {best && (
+            <span>
+              · best {best.score}/{best.total}
+            </span>
           )}
-        </section>
-      ))}
+          {last && last !== best && (
+            <span>
+              · last {last.score}/{last.total}
+            </span>
+          )}
+        </div>
+      </div>
+      <Button onClick={onStart} size="sm" variant="secondary">
+        Take test
+      </Button>
     </div>
   )
 }

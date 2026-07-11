@@ -182,8 +182,10 @@ function MindmapCanvas({ file }: { file: MindmapFile }) {
       markmapRef.current?.destroy()
       markmapRef.current = null
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `file` is stable for the
-    // lifetime of this instance (the parent remounts via `key={file.fileName}`).
+    // `file` is intentionally excluded: this component remounts on file change (the
+    // caller passes `key={file.fileName}`), so re-running this effect for the same
+    // mounted instance would only ever happen for a `file` that hasn't changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (failed) {
