@@ -327,61 +327,59 @@ export function RecorderView() {
 
   return (
     <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background)">
-      {/* Short-viewport compaction (high zoom shrinks the effective window):
-          the record button must sit in the FIRST screenful at every zoom step,
-          so header + hero tighten below ~720px effective height instead of
-          pushing the primary control under the fold. */}
-      <header className="sticky top-0 z-20 flex shrink-0 items-start gap-3 border-b border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background)/95 px-4 pb-2 pt-5 backdrop-blur-sm sm:px-6 sm:pt-6 [@media(max-height:720px)]:pb-2 [@media(max-height:720px)]:pt-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">Capture desk</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] [@media(max-height:720px)]:text-xl">Recorder</h1>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground [@media(max-height:720px)]:hidden">
-            Capture your microphone{withSystemAudio ? ' and this computer’s audio' : ''} locally. Keep a live notepad,
-            review on-device transcription, and collect the pharmacology terms that matter.
-          </p>
+      <header className="sticky top-0 z-20 shrink-0 border-b border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background)/95 backdrop-blur-sm">
+        <div className="mx-auto flex w-full max-w-[960px] items-start gap-4 px-5 pb-4 pt-6 sm:px-7 [@media(max-height:720px)]:pb-3 [@media(max-height:720px)]:pt-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--ui-text-tertiary)">
+              Capture desk
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] [@media(max-height:720px)]:text-xl">
+              Recorder
+            </h1>
+          </div>
+          <Button
+            aria-label="Start recording"
+            className="mt-0.5 bg-(--ui-red) text-white hover:bg-(--ui-red)/90 active:scale-[0.98]"
+            disabled={stopping || starting}
+            onClick={() => void startRecording()}
+            size="sm"
+          >
+            ● Record
+          </Button>
         </div>
-        <Button
-          aria-label="Start recording"
-          className="mt-0.5 shrink-0 active:scale-[0.98]"
-          disabled={stopping || starting}
-          onClick={() => void startRecording()}
-          size="sm"
-        >
-          ● Record
-        </Button>
       </header>
 
-      <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)] sm:mx-6 [@media(max-height:720px)]:mt-2">
-        <div className="grid items-stretch lg:grid-cols-[minmax(0,0.9fr)_minmax(20rem,1.1fr)]">
-          <div className="flex min-w-0 flex-col items-start gap-5 border-b border-(--ui-stroke-tertiary) p-5 sm:flex-row sm:items-center sm:p-6 lg:border-b-0 lg:border-r [@media(max-height:720px)]:gap-3 [@media(max-height:720px)]:p-3">
-            <div className="grid size-24 shrink-0 place-items-center rounded-full border border-(--theme-primary)/25 bg-(--ui-bg-primary) shadow-[inset_0_0_0_7px_var(--ui-bg-elevated)] [@media(max-height:720px)]:size-16 [@media(max-height:720px)]:shadow-[inset_0_0_0_4px_var(--ui-bg-elevated)]">
-              <Button
-                aria-label="Start recording"
-                className="size-20 rounded-full shadow-lg transition-[transform,opacity] active:scale-[0.96] [@media(max-height:720px)]:size-12"
-                disabled={stopping || starting}
-                onClick={() => void startRecording()}
-                size="icon-lg"
-              >
-                <IconMicrophone className="size-7 [@media(max-height:720px)]:size-5" />
-              </Button>
-            </div>
-            <div className="min-w-0">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
-                {stopping ? 'Finishing capture' : starting ? 'Opening audio capture' : 'Ready to record'}
-              </p>
-              <h2 className="mt-1 text-lg font-semibold tracking-tight">
-                {stopping ? 'Saving your lecture' : 'Capture the lecture, keep the context'}
-              </h2>
-              <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-                {stopping
-                  ? liveStatus || 'Writing audio and notes to disk…'
-                  : 'One click opens the live notepad, audio signal, transcript, and pharmacology mentions.'}
-              </p>
-            </div>
-          </div>
+      {/* Height compaction only changes flow and dimensions. Both record controls
+          remain rendered and reachable at every viewport height and zoom level. */}
+      <section className="mx-auto flex w-full max-w-[960px] shrink-0 flex-col items-center gap-5 px-5 pb-9 pt-10 text-center sm:px-7 [@media(max-height:720px)]:gap-3 [@media(max-height:720px)]:py-3 [@media(max-height:720px)_and_(min-width:640px)]:flex-row [@media(max-height:720px)_and_(min-width:640px)]:text-left">
+        <Button
+          aria-label="Start recording"
+          className="group relative size-28 rounded-full bg-(--ui-red) text-white shadow-[0_12px_32px_color-mix(in_srgb,var(--ui-red)_22%,transparent)] transition-[transform,box-shadow,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-full before:ring-1 before:ring-white/25 hover:scale-[1.025] hover:bg-(--ui-red)/95 hover:shadow-[0_14px_38px_color-mix(in_srgb,var(--ui-red)_28%,transparent)] active:scale-[0.97] [@media(max-height:720px)]:size-14 [@media(max-height:720px)]:shadow-[0_7px_18px_color-mix(in_srgb,var(--ui-red)_18%,transparent)]"
+          disabled={stopping || starting}
+          onClick={() => void startRecording()}
+          size="icon-lg"
+        >
+          <span className="pointer-events-none absolute inset-1 rounded-full bg-(--ui-red)/20 opacity-0 group-hover:animate-ping group-hover:opacity-100" />
+          <span className="relative flex flex-col items-center gap-1 [@media(max-height:720px)]:gap-0">
+            <IconMicrophone className="size-8 [@media(max-height:720px)]:size-5" />
+            <span className="text-[0.6875rem] font-semibold tracking-wide [@media(max-height:720px)]:text-[0.55rem]">
+              Record
+            </span>
+          </span>
+        </Button>
 
-          <div className="flex min-w-0 flex-col justify-center gap-2 p-4">
-            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
+        <div className="flex min-w-0 flex-col items-center [@media(max-height:720px)_and_(min-width:640px)]:grid [@media(max-height:720px)_and_(min-width:640px)]:flex-1 [@media(max-height:720px)_and_(min-width:640px)]:grid-cols-[minmax(0,1fr)_auto] [@media(max-height:720px)_and_(min-width:640px)]:items-center [@media(max-height:720px)_and_(min-width:640px)]:gap-x-5">
+          <p className="max-w-2xl text-sm leading-6 text-(--ui-text-secondary) [@media(max-height:720px)_and_(min-width:640px)]:row-span-2">
+            {stopping
+              ? liveStatus || 'Finishing your capture and saving it on this Mac.'
+              : starting
+                ? 'Opening audio capture on this Mac.'
+                : 'Capture the lecture. Notes, transcript, and terms — all on this Mac.'}
+          </p>
+
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 [@media(max-height:720px)]:mt-2 [@media(max-height:720px)_and_(min-width:640px)]:mt-0 [@media(max-height:720px)_and_(min-width:640px)]:justify-end">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-(--ui-text-secondary)">
+              <span>Computer audio</span>
               <input
                 checked={withSystemAudio}
                 className="peer sr-only"
@@ -389,15 +387,10 @@ export function RecorderView() {
                 onChange={event => setSystemAudioEnabled(event.target.checked)}
                 type="checkbox"
               />
-              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground peer-disabled:opacity-45" />
-              <span className="min-w-0">
-                <span className="block text-xs font-semibold">Computer audio</span>
-                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">
-                  Capture lecture or meeting audio · macOS asks once
-                </span>
-              </span>
+              <span className="relative h-4 w-7 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-3 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform peer-focus-visible:ring-2 peer-focus-visible:ring-foreground/20 peer-checked:bg-foreground peer-checked:after:translate-x-3 peer-checked:after:bg-background peer-disabled:opacity-45" />
             </label>
-            <label className="group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)">
+            <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-(--ui-text-secondary)">
+              <span>Live transcript</span>
               <input
                 checked={liveCaptions}
                 className="peer sr-only"
@@ -405,56 +398,48 @@ export function RecorderView() {
                 onChange={event => setLiveCaptionsEnabled(event.target.checked)}
                 type="checkbox"
               />
-              <span className="relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground peer-disabled:opacity-45" />
-              <span className="min-w-0">
-                <span className="block text-xs font-semibold">Live transcript</span>
-                <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">
-                  Process speech on-device and save a linked lecture note
-                </span>
-              </span>
+              <span className="relative h-4 w-7 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-3 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform peer-focus-visible:ring-2 peer-focus-visible:ring-foreground/20 peer-checked:bg-foreground peer-checked:after:translate-x-3 peer-checked:after:bg-background peer-disabled:opacity-45" />
             </label>
-            <span className="mx-3 mt-1 inline-flex items-center gap-1.5 self-start rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-3 py-1.5 text-[0.6875rem] text-muted-foreground">
-              <IconLock size={12} />
-              Nothing joins your call · processed on this device
-            </span>
           </div>
-        </div>
 
-        {lectureNote && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-5 py-3 text-xs">
-            <span className="min-w-0 flex-1 basis-full items-center gap-1.5 font-medium sm:inline-flex sm:basis-auto">
-              <IconCheck className="mr-1 inline text-(--theme-primary)" size={13} />
-              Saved to Library / {LECTURE_FOLDER} as {lectureNote}.md
-            </span>
-            <Button
-              onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`)}
-              size="xs"
-              variant="outline"
-            >
-              Open note
-            </Button>
-            <Button onClick={enhanceNote} size="xs" variant="secondary">
-              <IconSparkles size={12} />
-              Enhance with Nemesis
-            </Button>
-            {queuedCount > 0 && (
-              <Button onClick={askQueued} size="xs" variant="outline">
-                Review {queuedCount} queued drug{queuedCount === 1 ? '' : 's'}
-              </Button>
-            )}
-          </div>
-        )}
-        {error && <p className="border-t border-(--ui-stroke-tertiary) px-5 py-3 text-xs text-destructive">{error}</p>}
+          <span className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-(--ui-stroke-tertiary) px-2.5 py-1 text-[0.65rem] text-(--ui-text-tertiary) [@media(max-height:720px)]:mt-1 [@media(max-height:720px)_and_(min-width:640px)]:justify-self-end">
+            <IconLock size={11} />
+            Nothing joins your call · processed on this device
+          </span>
+        </div>
       </section>
 
-      <section className="px-4 pb-8 pt-7 sm:px-6">
-        <div className="mb-3">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">Archive</p>
-          <h2 className="mt-1 text-lg font-semibold tracking-tight">Saved recordings</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Play back, transcribe, enhance, or clean up past captures.
-          </p>
+      {(lectureNote || error) && (
+        <div className="mx-auto w-full max-w-[960px] px-5 sm:px-7">
+          {lectureNote && (
+            <div className="flex flex-wrap items-center gap-2 border-y border-(--ui-stroke-tertiary) py-3 text-xs">
+              <span className="min-w-0 flex-1 basis-full items-center gap-1.5 font-medium sm:inline-flex sm:basis-auto">
+                <IconCheck className="mr-1 inline" size={13} />
+                Saved to Library / {LECTURE_FOLDER} as {lectureNote}.md
+              </span>
+              <Button
+                onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`)}
+                size="xs"
+                variant="outline"
+              >
+                Open note
+              </Button>
+              <Button onClick={enhanceNote} size="xs" variant="secondary">
+                <IconSparkles size={12} />
+                Enhance with Nemesis
+              </Button>
+              {queuedCount > 0 && (
+                <Button onClick={askQueued} size="xs" variant="outline">
+                  Review {queuedCount} queued drug{queuedCount === 1 ? '' : 's'}
+                </Button>
+              )}
+            </div>
+          )}
+          {error && <p className="border-b border-(--ui-stroke-tertiary) py-3 text-xs text-destructive">{error}</p>}
         </div>
+      )}
+
+      <section className="mx-auto w-full max-w-[960px] px-5 pb-10 pt-7 sm:px-7">
         <RecordingArchive reloadToken={recordingsVersion} />
         <div className="flex flex-wrap items-center gap-1.5 pt-4 text-[0.6875rem] text-muted-foreground">
           <IconLock size={11} />

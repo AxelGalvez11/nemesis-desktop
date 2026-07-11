@@ -1,5 +1,5 @@
-// Saved recordings — inline master/detail. The list (left) is everything under
-// ~/Documents/Nemesis Recordings; selecting one (right) shows its audio playback, the
+// Saved recordings — inline expanding list. The rows are everything under
+// ~/Documents/Nemesis Recordings; selecting one expands its audio playback, the
 // "AI notes" Nemesis wrote when asked to enhance it, and the raw transcript — all pulled
 // from the auto-saved companion Library note when one exists (see `persist()` in
 // index.tsx, which writes `*Audio: <filename> (Nemesis Recordings)*` into every lecture
@@ -12,30 +12,22 @@
 // is hard-capped at 16MB, which a lecture-length recording routinely exceeds. The custom
 // protocol goes through the same path-hardening resolver with no size cap and supports
 // seeking — the same mechanism chat's audio/video attachments already use.
-import { IconPlayerPause, IconPlayerPlay } from '@tabler/icons-react'
+import { IconFileText, IconPlayerPause, IconPlayerPlay, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { NavigateFunction } from 'react-router-dom'
 
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { mediaStreamUrl } from '@/lib/media'
+import { cn } from '@/lib/utils'
 import { setComposerDraft } from '@/store/composer'
 
 import { useRefreshHotkey } from '../hooks/use-refresh-hotkey'
 import { loadFolderNotes, saveNote, type VaultNote } from '../library/vault'
-import {
-  PanelAction,
-  PanelBody,
-  PanelDetail,
-  PanelEmpty,
-  PanelList,
-  PanelListRow,
-  PanelPill,
-  PanelRowMenu,
-  PanelSectionLabel
-} from '../overlays/panel'
-import { NEW_CHAT_ROUTE } from '../routes'
+import { PanelAction, PanelPill, PanelSectionLabel } from '../overlays/panel'
+import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes'
 
 import { correctPharmTerms } from './pharm-lexicon'
 import { LECTURE_FOLDER, RECORDINGS_DIR } from './service'
@@ -81,17 +73,14 @@ export function recordingLabel(name: string): string {
   return name
 }
 
-/** Compact time-only form for the dense row list ("8:28 PM"). */
-function recordingTime(name: string): string {
-  const match = name.match(/T(\d{2})-(\d{2})-(\d{2})/)
-
-  if (!match) {
-    return ''
+function recordingDisplayName(file: RecordingFile): string {
+  if (file.note?.title) {
+    return file.note.title
   }
 
-  const date = new Date(2000, 0, 1, Number(match[1]), Number(match[2]))
+  const stem = file.name.replace(/\.(webm|m4a|wav|aiff?|mp3)$/i, '')
 
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return /^lecture-\d{4}-\d{2}-\d{2}T/.test(stem) ? 'Untitled recording' : stem.replace(/^lecture-/, '')
 }
 
 /** Load saved recordings and best-effort match each to its auto-saved Library note. */
@@ -211,7 +200,7 @@ export function RecordingArchive({ reloadToken }: RecordingArchiveProps) {
   // the selected recording's note snapshot otherwise stays as of the last load.
   useRefreshHotkey(reload)
 
-  const selected = recordings.find(file => file.path === selectedPath) ?? recordings[0] ?? null
+  const selected = recordings.find(file => file.path === selectedPath) ?? null
 
   const transcribe = useCallback(async (file: RecordingFile) => {
     setTranscribingStatus(status => ({ ...status, [file.path]: 'Loading model…' }))
@@ -346,15 +335,9 @@ export function RecordingArchive({ reloadToken }: RecordingArchiveProps) {
   if (recordings.length === 0) {
     return (
       <>
-        <div className="grid min-h-40 place-content-center rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-8 text-center">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
-            Archive ready
-          </p>
-          <p className="mt-1 text-sm font-medium text-foreground">Your first recording will appear here</p>
-          <p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-            Captures stay in Documents / Nemesis Recordings as ordinary audio files you control.
-          </p>
-        </div>
+        <p className="border-t border-(--ui-stroke-tertiary) py-5 text-sm leading-relaxed text-(--ui-text-secondary)">
+          Your first recording will appear here, saved as an ordinary audio file you control.
+        </p>
         {deleteDialog}
       </>
     )
@@ -362,48 +345,47 @@ export function RecordingArchive({ reloadToken }: RecordingArchiveProps) {
 
   return (
     <>
-      <div className="h-[min(34rem,68vh)] min-h-[28rem] min-w-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-        <PanelBody className="!flex-col !gap-4 lg:!flex-row lg:!gap-5">
-          <PanelList className="!w-full !max-h-40 lg:!max-h-none lg:!w-56">
-            {recordings.map(file => (
-              <PanelListRow
-                active={selected?.path === file.path}
-                icon="mic"
-                key={file.path}
-                menu={
-                  <PanelRowMenu
-                    items={[
-                      { icon: 'trash', label: 'Move to Trash', onSelect: () => requestDelete(file), tone: 'danger' }
-                    ]}
-                    label={`Actions for ${file.note?.title || recordingLabel(file.name)}`}
-                  />
-                }
-                meta={recordingTime(file.name)}
-                onSelect={() => setSelectedPath(file.path)}
-                rowKey={file.path}
-                title={file.note?.title || recordingLabel(file.name)}
-              />
-            ))}
-          </PanelList>
+      <div className="mb-3">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--ui-text-tertiary)">Archive</p>
+        <h2 className="mt-1 text-lg font-semibold tracking-tight">Saved recordings</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Play back, transcribe, enhance, or clean up past captures.</p>
+      </div>
+      <div className="min-w-0 border-t border-(--ui-stroke-tertiary)">
+        {recordings.map(file => {
+          const active = selected?.path === file.path
 
-          {selected ? (
-            <RecordingDetail
-              corrections={corrections[selected.path] ?? 0}
-              file={selected}
-              key={selected.path}
-              navigate={navigate}
-              onDelete={() => requestDelete(selected)}
-              onDraftFlashcards={draftFlashcards}
-              onSaveTranscriptNote={(file, transcript) => void saveTranscriptNote(file, transcript)}
-              onTranscribe={() => void transcribe(selected)}
-              savedNote={Boolean(savedNote[selected.path])}
-              transcribingStatus={transcribingStatus[selected.path]}
-              transcript={transcripts[selected.path] ?? ''}
-            />
-          ) : (
-            <PanelEmpty description="Pick a recording on the left." icon="mic" title="No recording selected" />
-          )}
-        </PanelBody>
+          return (
+            <div className="border-b border-(--ui-stroke-tertiary)" key={file.path}>
+              <RecordingListRow
+                active={active}
+                file={file}
+                onDelete={() => requestDelete(file)}
+                onOpenNote={
+                  file.note
+                    ? () => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(file.note?.title ?? '')}`)
+                    : undefined
+                }
+                onSelect={() => setSelectedPath(current => (current === file.path ? null : file.path))}
+              />
+              {active && (
+                <RecordingDetail
+                  corrections={corrections[file.path] ?? 0}
+                  file={file}
+                  navigate={navigate}
+                  onDelete={() => requestDelete(file)}
+                  onDraftFlashcards={draftFlashcards}
+                  onSaveTranscriptNote={(recordingFile, transcript) =>
+                    void saveTranscriptNote(recordingFile, transcript)
+                  }
+                  onTranscribe={() => void transcribe(file)}
+                  savedNote={Boolean(savedNote[file.path])}
+                  transcribingStatus={transcribingStatus[file.path]}
+                  transcript={transcripts[file.path] ?? ''}
+                />
+              )}
+            </div>
+          )
+        })}
       </div>
       {deleteDialog}
     </>
@@ -421,6 +403,121 @@ interface RecordingDetailProps {
   savedNote: boolean
   transcribingStatus?: string
   transcript: string
+}
+
+interface RecordingListRowProps {
+  active: boolean
+  file: RecordingFile
+  onDelete: () => void
+  onOpenNote?: () => void
+  onSelect: () => void
+}
+
+function RecordingListRow({ active, file, onDelete, onOpenNote, onSelect }: RecordingListRowProps) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [duration, setDuration] = useState(0)
+  const [playing, setPlaying] = useState(false)
+
+  const togglePlayback = () => {
+    const audio = audioRef.current
+
+    if (!audio) {
+      return
+    }
+
+    if (audio.paused) {
+      void audio.play().catch(() => setPlaying(false))
+    } else {
+      audio.pause()
+    }
+  }
+
+  return (
+    <article
+      className={cn(
+        'group/recording relative flex min-w-0 flex-col transition-colors sm:flex-row sm:items-center',
+        active ? 'bg-(--ui-bg-quaternary)' : 'hover:bg-(--ui-row-hover-background)'
+      )}
+    >
+      <audio
+        className="sr-only"
+        onDurationChange={event =>
+          setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)
+        }
+        onEnded={() => setPlaying(false)}
+        onPause={() => setPlaying(false)}
+        onPlay={() => setPlaying(true)}
+        preload="metadata"
+        ref={audioRef}
+        src={mediaStreamUrl(file.path)}
+      />
+      <button
+        aria-expanded={active}
+        className="min-w-0 flex-1 px-3 pb-2 pt-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40 sm:py-4 sm:pr-32"
+        onClick={onSelect}
+        type="button"
+      >
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="min-w-0 truncate text-sm font-medium tracking-[-0.01em] text-(--ui-text-primary)">
+            {recordingDisplayName(file)}
+          </span>
+          {file.note && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-(--ui-bg-primary) px-2 py-0.5 text-[0.625rem] font-medium text-(--ui-text-tertiary)">
+              <IconFileText size={11} />
+              Linked note
+            </span>
+          )}
+        </span>
+        <span className="mt-1 block truncate font-mono text-[0.67rem] tabular-nums text-(--ui-text-tertiary)">
+          {recordingLabel(file.name)} · {duration > 0 ? audioTimestamp(duration) : '—:—'}
+        </span>
+      </button>
+
+      <div
+        className={cn(
+          'flex items-center gap-1 px-2 pb-3 sm:absolute sm:right-3 sm:top-1/2 sm:-translate-y-1/2 sm:p-0 sm:transition-opacity',
+          playing
+            ? 'sm:pointer-events-auto sm:opacity-100'
+            : 'sm:pointer-events-none sm:opacity-0 sm:group-focus-within/recording:pointer-events-auto sm:group-focus-within/recording:opacity-100 sm:group-hover/recording:pointer-events-auto sm:group-hover/recording:opacity-100'
+        )}
+      >
+        <Button
+          aria-label={playing ? `Pause ${recordingDisplayName(file)}` : `Play ${recordingDisplayName(file)}`}
+          className={cn(playing && 'bg-(--ui-control-active-background) text-foreground')}
+          onClick={togglePlayback}
+          size="icon-xs"
+          title={playing ? 'Pause' : 'Play inline'}
+          type="button"
+          variant="ghost"
+        >
+          {playing ? <IconPlayerPause /> : <IconPlayerPlay />}
+        </Button>
+        {onOpenNote && (
+          <Button
+            aria-label={`Open linked note for ${recordingDisplayName(file)}`}
+            onClick={onOpenNote}
+            size="icon-xs"
+            title="Open linked note"
+            type="button"
+            variant="ghost"
+          >
+            <IconFileText />
+          </Button>
+        )}
+        <Button
+          aria-label={`Delete ${recordingDisplayName(file)}`}
+          className="hover:text-destructive"
+          onClick={onDelete}
+          size="icon-xs"
+          title="Move to Trash"
+          type="button"
+          variant="ghost"
+        >
+          <IconTrash />
+        </Button>
+      </div>
+    </article>
+  )
 }
 
 function audioTimestamp(seconds: number): string {
@@ -474,9 +571,11 @@ function RecordingAudioPlayer({ onError, src }: { onError: () => void; src: stri
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-2">
+    <div className="flex items-center gap-2 rounded-xl bg-(--ui-bg-quaternary) px-3 py-2.5">
       <audio
-        onDurationChange={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onDurationChange={event =>
+          setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)
+        }
         onEnded={() => setPlaying(false)}
         onError={onError}
         onLoadedMetadata={event => {
@@ -492,7 +591,7 @@ function RecordingAudioPlayer({ onError, src }: { onError: () => void; src: stri
       />
       <button
         aria-label={playing ? 'Pause recording' : 'Play recording'}
-        className="grid size-7 shrink-0 place-items-center rounded-full bg-(--theme-primary) text-primary-foreground transition-transform active:scale-[0.96]"
+        className="grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-background transition-transform active:scale-[0.96]"
         onClick={togglePlayback}
         type="button"
       >
@@ -503,7 +602,7 @@ function RecordingAudioPlayer({ onError, src }: { onError: () => void; src: stri
       </span>
       <input
         aria-label="Recording position"
-        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-(--ui-stroke-primary) accent-(--theme-primary) disabled:cursor-default disabled:opacity-50"
+        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-(--ui-stroke-primary) accent-foreground disabled:cursor-default disabled:opacity-50"
         disabled={duration <= 0}
         max={duration || 0}
         min={0}
@@ -554,101 +653,123 @@ function RecordingDetail({
   useEffect(() => setAudioFailed(false), [file.path])
 
   return (
-    <PanelDetail>
-      <header className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h3 className="min-w-0 truncate text-[0.95rem] font-semibold tracking-tight text-foreground">
-              {file.note?.title || recordingLabel(file.name)}
-            </h3>
-            {!hasNote && <PanelPill>No linked note</PanelPill>}
+    <div className="border-t border-(--ui-stroke-tertiary) px-3 pb-9 pt-5 sm:px-5 sm:pt-6">
+      <div className="space-y-7">
+        <header className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h3 className="min-w-0 truncate text-base font-semibold tracking-[-0.015em] text-foreground">
+                {recordingDisplayName(file)}
+              </h3>
+              {!hasNote && <PanelPill>No linked note</PanelPill>}
+            </div>
+            <p className="truncate font-mono text-[0.67rem] tabular-nums text-(--ui-text-tertiary)">
+              {recordingLabel(file.name)}
+            </p>
           </div>
-          <p className="truncate text-xs text-muted-foreground">{recordingLabel(file.name)}</p>
-        </div>
-        <PanelAction icon="trash" onClick={onDelete}>
-          Delete
-        </PanelAction>
-      </header>
-
-      <section className="space-y-1.5">
-        <PanelSectionLabel>Audio</PanelSectionLabel>
-        {audioFailed ? (
-          <p className="rounded bg-destructive/10 p-2.5 text-xs text-destructive">
-            Couldn&rsquo;t play this recording — the audio file may have been moved or deleted.
-          </p>
-        ) : (
-          <RecordingAudioPlayer onError={() => setAudioFailed(true)} src={mediaStreamUrl(file.path)} />
-        )}
-      </section>
-
-      <section className="space-y-1.5">
-        <div className="flex items-center justify-between gap-3">
-          <PanelSectionLabel>AI notes</PanelSectionLabel>
-          {hasNote && (
-            <PanelAction icon="wand" onClick={() => enhanceLectureNote(file.note?.title ?? '', navigate)}>
-              {sections?.aiNotes ? 'Re-enhance' : 'Enhance with Nemesis'}
-            </PanelAction>
-          )}
-        </div>
-        {sections?.aiNotes ? (
-          <p className="whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90">{sections.aiNotes}</p>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            {hasNote
-              ? 'Not enhanced yet — click "Enhance with Nemesis" to turn your notes and transcript into structured AI notes.'
-              : 'No notes linked to this recording — it predates note-linking, or its note was moved or deleted.'}
-          </p>
-        )}
-      </section>
-
-      {sections?.myNotes ? (
-        <section className="space-y-1.5">
-          <PanelSectionLabel>My notes</PanelSectionLabel>
-          <p className="whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90">{sections.myNotes}</p>
-        </section>
-      ) : null}
-
-      <section className="space-y-1.5">
-        <div className="flex items-center justify-between gap-3">
-          <PanelSectionLabel>Transcript</PanelSectionLabel>
-          {rawTranscript && !transcribingStatus && (
-            <div className="flex flex-wrap items-center justify-end gap-0.5">
-              <PanelAction icon="checklist" onClick={() => onDraftFlashcards(rawTranscript)}>
-                Draft flashcards
+          <div className="flex items-center gap-1">
+            {file.note && (
+              <PanelAction
+                icon="go-to-file"
+                onClick={() => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(file.note?.title ?? '')}`)}
+              >
+                Open note
               </PanelAction>
-              {!hasNote && (
-                <PanelAction disabled={savedNote} icon="save" onClick={() => onSaveTranscriptNote(file, rawTranscript)}>
-                  {savedNote ? 'Saved' : 'Save as note'}
+            )}
+            <PanelAction icon="trash" onClick={onDelete}>
+              Delete
+            </PanelAction>
+          </div>
+        </header>
+
+        <section className="space-y-2.5">
+          <PanelSectionLabel className="text-(--ui-text-tertiary)">Audio</PanelSectionLabel>
+          {audioFailed ? (
+            <p className="rounded bg-destructive/10 p-2.5 text-xs text-destructive">
+              Couldn&rsquo;t play this recording — the audio file may have been moved or deleted.
+            </p>
+          ) : (
+            <RecordingAudioPlayer onError={() => setAudioFailed(true)} src={mediaStreamUrl(file.path)} />
+          )}
+        </section>
+
+        <section className="space-y-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <PanelSectionLabel className="text-(--ui-text-tertiary)">AI notes</PanelSectionLabel>
+            {hasNote && (
+              <PanelAction icon="wand" onClick={() => enhanceLectureNote(file.note?.title ?? '', navigate)}>
+                {sections?.aiNotes ? 'Re-enhance' : 'Enhance with Nemesis'}
+              </PanelAction>
+            )}
+          </div>
+          {sections?.aiNotes ? (
+            <p className="max-w-3xl whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90">
+              {sections.aiNotes}
+            </p>
+          ) : (
+            <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+              {hasNote
+                ? 'Not enhanced yet — click "Enhance with Nemesis" to turn your notes and transcript into structured AI notes.'
+                : 'No notes linked to this recording — it predates note-linking, or its note was moved or deleted.'}
+            </p>
+          )}
+        </section>
+
+        {sections?.myNotes ? (
+          <section className="space-y-2.5">
+            <PanelSectionLabel className="text-(--ui-text-tertiary)">My notes</PanelSectionLabel>
+            <p className="max-w-3xl whitespace-pre-wrap text-[0.8125rem] leading-6 text-foreground/90">
+              {sections.myNotes}
+            </p>
+          </section>
+        ) : null}
+
+        <section className="space-y-2.5">
+          <div className="flex items-center justify-between gap-3">
+            <PanelSectionLabel className="text-(--ui-text-tertiary)">Transcript</PanelSectionLabel>
+            {rawTranscript && !transcribingStatus && (
+              <div className="flex flex-wrap items-center justify-end gap-0.5">
+                <PanelAction icon="checklist" onClick={() => onDraftFlashcards(rawTranscript)}>
+                  Draft flashcards
                 </PanelAction>
+                {!hasNote && (
+                  <PanelAction
+                    disabled={savedNote}
+                    icon="save"
+                    onClick={() => onSaveTranscriptNote(file, rawTranscript)}
+                  >
+                    {savedNote ? 'Saved' : 'Save as note'}
+                  </PanelAction>
+                )}
+              </div>
+            )}
+          </div>
+          {transcribingStatus ? (
+            <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+              <span className="size-1.5 animate-pulse rounded-full bg-foreground" />
+              {transcribingStatus}
+            </div>
+          ) : rawTranscript ? (
+            <>
+              <p className="max-w-3xl whitespace-pre-wrap border-l-2 border-(--ui-stroke-secondary) pl-4 text-[0.8125rem] leading-6 text-foreground/90">
+                {rawTranscript}
+              </p>
+              {corrections > 0 && (
+                <p className="text-[10px] text-muted-foreground">
+                  {corrections} pharm term{corrections === 1 ? '' : 's'} auto-corrected
+                </p>
               )}
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">No transcript yet.</p>
+              <PanelAction icon="sparkle" onClick={onTranscribe}>
+                Transcribe
+              </PanelAction>
             </div>
           )}
-        </div>
-        {transcribingStatus ? (
-          <div className="flex items-center gap-1.5 text-xs font-medium text-(--theme-primary)">
-            <span className="size-1.5 animate-pulse rounded-full bg-(--theme-primary)" />
-            {transcribingStatus}
-          </div>
-        ) : rawTranscript ? (
-          <>
-            <p className="whitespace-pre-wrap border-l-2 border-(--theme-primary)/25 pl-3 text-[0.8125rem] leading-6 text-foreground/90">
-              {rawTranscript}
-            </p>
-            {corrections > 0 && (
-              <p className="text-[10px] text-muted-foreground">
-                {corrections} pharm term{corrections === 1 ? '' : 's'} auto-corrected
-              </p>
-            )}
-          </>
-        ) : (
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">No transcript yet.</p>
-            <PanelAction icon="sparkle" onClick={onTranscribe}>
-              Transcribe
-            </PanelAction>
-          </div>
-        )}
-      </section>
-    </PanelDetail>
+        </section>
+      </div>
+    </div>
   )
 }
