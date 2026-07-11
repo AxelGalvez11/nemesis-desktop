@@ -9,10 +9,60 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Switch } from '@/components/ui/switch';
+import { useTheme } from '@/themes/context';
 import { LIBRARY_ROUTE } from '../routes';
 import { buildIndex, extractWikilinks, loadVault, saveNote } from '../library/vault';
 const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1';
 const DEFAULT_CONTROLS = { nodeSize: 4, repulsion: 40, rotate: true, spread: 34 };
+// Chrome resolves CSS custom properties to the CSS Color-4 `color(srgb r g b / a)`
+// syntax, which three.js (the 3d-force-graph renderer) CANNOT parse — it silently
+// falls back to black, making nodes invisible on a dark background. Normalize every
+// resolved value to an opaque `rgb(r, g, b)` string that three.js parses reliably.
+function normalizeToRgb(computed) {
+    if (!computed) {
+        return null;
+    }
+    const rgb = computed.match(/rgba?\(([^)]+)\)/i);
+    if (rgb) {
+        const [r, g, b] = rgb[1].split(/[,/]/).map(part => Math.round(parseFloat(part.trim())));
+        return Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b) ? `rgb(${r}, ${g}, ${b})` : null;
+    }
+    const srgb = computed.match(/color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+    if (srgb) {
+        const [r, g, b] = [srgb[1], srgb[2], srgb[3]].map(part => Math.round(parseFloat(part) * 255));
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+    // Already a hex / named color three.js understands.
+    return computed;
+}
+function resolveCssColor(value, fallback) {
+    const probe = document.createElement('span');
+    probe.style.color = value;
+    probe.style.display = 'none';
+    document.body.appendChild(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return normalizeToRgb(resolved) || fallback;
+}
+function readGraphPalette(mode) {
+    const dark = mode === 'dark';
+    return {
+        accent: resolveCssColor('var(--theme-primary)', '#b3382e'),
+        background: resolveCssColor('var(--ui-bg-editor)', dark ? '#0e0e0e' : '#fafafa'),
+        ghost: resolveCssColor('color-mix(in srgb, var(--ui-text-primary) 38%, transparent)', dark ? 'rgba(232,232,232,0.38)' : 'rgba(28,28,30,0.38)'),
+        label: resolveCssColor('var(--ui-text-primary)', dark ? '#eeeeee' : '#1c1c1e'),
+        link: resolveCssColor('color-mix(in srgb, var(--ui-text-primary) 32%, transparent)', dark ? 'rgba(232,232,232,0.32)' : 'rgba(28,28,30,0.32)'),
+        node: resolveCssColor('var(--ui-text-secondary)', dark ? '#c8c8c8' : '#3f3f43')
+    };
+}
+function graphNodeColor(node, palette) {
+    const graphNode = node;
+    if (graphNode.ghost) {
+        return palette.ghost;
+    }
+    return graphNode.degree >= 2 ? palette.accent : palette.node;
+}
 function loadControls() {
     try {
         const raw = window.localStorage.getItem(GRAPH_SETTINGS_KEY);
@@ -26,7 +76,7 @@ function loadControls() {
     return DEFAULT_CONTROLS;
 }
 function ControlSlider({ label, max, min, onChange, step, value }) {
-    return (_jsxs("label", { className: "mb-2 block", children: [_jsxs("span", { className: "flex items-center justify-between text-xs text-muted-foreground", children: [label, _jsx("span", { className: "tabular-nums", children: value })] }), _jsx("input", { className: "w-full accent-(--theme-primary)", max: max, min: min, onChange: event => onChange(Number(event.target.value)), step: step, type: "range", value: value })] }));
+    return (_jsxs("label", { className: "block space-y-1.5", children: [_jsxs("span", { className: "flex items-center justify-between text-xs font-medium text-(--ui-text-primary)", children: [label, _jsx("span", { className: "rounded bg-(--ui-bg-quaternary) px-1.5 py-0.5 text-[0.6875rem] font-semibold tabular-nums text-(--ui-text-secondary)", children: value })] }), _jsx("input", { className: "h-1.5 w-full cursor-pointer appearance-none rounded-full bg-(--ui-stroke-primary) accent-(--theme-primary) [&::-moz-range-thumb]:size-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-(--theme-primary) [&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-(--theme-primary)", max: max, min: min, onChange: event => onChange(Number(event.target.value)), step: step, type: "range", value: value })] }));
 }
 export function GraphView() {
     const hostRef = useRef(null);
@@ -37,8 +87,25 @@ export function GraphView() {
     const [ghostCount, setGhostCount] = useState(0);
     const [controls, setControls] = useState(() => loadControls());
     const [panelOpen, setPanelOpen] = useState(false);
+    const { renderedMode, theme } = useTheme();
     const controlsRef = useRef(controls);
+    const paletteRef = useRef(null);
     controlsRef.current = controls;
+    useEffect(() => {
+        const frame = window.requestAnimationFrame(() => {
+            const palette = readGraphPalette(renderedMode);
+            paletteRef.current = palette;
+            const graph = graphRef.current;
+            if (!graph) {
+                return;
+            }
+            graph.backgroundColor(palette.background);
+            graph.nodeColor(node => graphNodeColor(node, palette));
+            graph.linkColor(() => palette.link);
+            graph.refresh?.();
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [renderedMode, theme]);
     useEffect(() => {
         const host = hostRef.current;
         if (!host) {
@@ -79,29 +146,23 @@ export function GraphView() {
                 for (const display of ghostByLower.values()) {
                     nodes.push({ degree: 1, ghost: true, id: display });
                 }
-                const accent = getComputedStyle(document.documentElement).getPropertyValue('--theme-midground').trim() || '#b3382e';
-                // A graph is a viz surface: keep it dark for node contrast even in light mode.
+                const palette = paletteRef.current ?? readGraphPalette(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+                paletteRef.current = palette;
                 const instance = new ForceGraph3D(host)
-                    .backgroundColor('#0e0e0e')
+                    .backgroundColor(palette.background)
                     .width(host.clientWidth || host.offsetWidth || 800)
                     .height(host.clientHeight || host.offsetHeight || 600)
                     .nodeLabel((node) => {
                     const graphNode = node;
                     return graphNode.ghost
-                        ? `<div style="font: 12px sans-serif; color:#aaa">${graphNode.id} — click to create this note</div>`
-                        : `<div style="font: 12px sans-serif; color:#eee">${graphNode.id}</div>`;
+                        ? `<div style="font: 12px sans-serif; color:${paletteRef.current?.label ?? palette.label}">${graphNode.id} — click to create this note</div>`
+                        : `<div style="font: 12px sans-serif; color:${paletteRef.current?.label ?? palette.label}">${graphNode.id}</div>`;
                 })
                     .nodeRelSize(controlsRef.current.nodeSize)
-                    .nodeColor((node) => {
-                    const graphNode = node;
-                    if (graphNode.ghost) {
-                        return 'rgba(170,170,170,0.35)';
-                    }
-                    return graphNode.degree >= 2 ? accent : '#c8c8c8';
-                })
+                    .nodeColor((node) => graphNodeColor(node, paletteRef.current ?? palette))
                     .nodeVal((node) => 1 + node.degree)
                     .nodeOpacity(0.9)
-                    .linkColor(() => '#4a4a4a')
+                    .linkColor(() => paletteRef.current?.link ?? palette.link)
                     .linkWidth(0.5)
                     .linkOpacity(0.55)
                     .onNodeClick((node) => {
@@ -173,5 +234,5 @@ export function GraphView() {
     }, [controls, status]);
     return (_jsxs("div", { className: "relative flex h-full min-h-0 flex-col", children: [_jsxs("header", { className: "pointer-events-none absolute left-6 top-5 z-10", children: [_jsx("h1", { className: "text-lg font-semibold", children: "Graph" }), _jsx("p", { className: "text-xs text-muted-foreground", children: status === 'ready'
                             ? `${noteCount} notes${ghostCount > 0 ? ` · ${ghostCount} to create` : ''} — click any node`
-                            : '' }), status === 'ready' && ghostCount > 0 && (_jsx("p", { className: "text-[11px] text-muted-foreground/70", children: "Dim nodes are [[links]] with no note yet \u2014 click one to create it." }))] }), status === 'ready' && (_jsxs("div", { className: "absolute right-6 top-5 z-10 flex flex-col items-end gap-2", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { "aria-label": "Graph settings", onClick: () => setPanelOpen(value => !value), size: "sm", variant: panelOpen ? 'secondary' : 'outline', children: _jsx(IconAdjustmentsHorizontal, { size: 14 }) }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?create=note`), size: "sm", variant: "outline", children: "+ New note" })] }), panelOpen && (_jsxs("div", { className: "w-60 rounded-lg border border-border bg-card/95 p-3 backdrop-blur", children: [_jsx(ControlSlider, { label: "Node size", max: 10, min: 1, onChange: nodeSize => setControls(current => ({ ...current, nodeSize })), step: 0.5, value: controls.nodeSize }), _jsx(ControlSlider, { label: "Spread", max: 120, min: 10, onChange: spread => setControls(current => ({ ...current, spread })), step: 2, value: controls.spread }), _jsx(ControlSlider, { label: "Repulsion", max: 140, min: 0, onChange: repulsion => setControls(current => ({ ...current, repulsion })), step: 5, value: controls.repulsion }), _jsxs("label", { className: "mt-2 flex cursor-pointer items-center justify-between text-xs text-muted-foreground", children: ["Slow auto-rotate", _jsx("input", { checked: controls.rotate, className: "accent-(--theme-primary)", onChange: event => setControls(current => ({ ...current, rotate: event.target.checked })), type: "checkbox" })] }), _jsx("button", { className: "mt-2 text-[11px] text-muted-foreground underline-offset-2 hover:underline", onClick: () => setControls(DEFAULT_CONTROLS), type: "button", children: "Reset to defaults" })] }))] })), status === 'error' && (_jsx(EmptyState, { className: "flex-1", description: "Could not read the Library vault.", title: "Graph unavailable" })), status === 'empty' && (_jsx(EmptyState, { className: "flex-1", description: "Write linked notes in the Library first.", title: "Nothing to map yet" })), _jsx("div", { className: status === 'ready' || status === 'loading' ? 'min-h-0 flex-1' : 'hidden', ref: hostRef })] }));
+                            : '' }), status === 'ready' && ghostCount > 0 && (_jsx("p", { className: "text-[11px] text-muted-foreground/70", children: "Dim nodes are [[links]] with no note yet \u2014 click one to create it." }))] }), status === 'ready' && (_jsxs("div", { className: "absolute right-6 top-5 z-10 flex flex-col items-end gap-2", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { "aria-label": "Graph settings", className: "active:scale-[0.97] motion-reduce:transition-none", onClick: () => setPanelOpen(value => !value), size: "sm", variant: panelOpen ? 'secondary' : 'outline', children: _jsx(IconAdjustmentsHorizontal, { size: 14 }) }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?create=note`), size: "sm", variant: "outline", children: "+ New note" })] }), panelOpen && (_jsxs("div", { className: "w-64 rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated) p-4 text-(--ui-text-primary) shadow-lg", children: [_jsxs("div", { className: "mb-4", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Graph controls" }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: "Tune the map without changing your notes." })] }), _jsxs("div", { className: "space-y-4", children: [_jsx(ControlSlider, { label: "Node size", max: 10, min: 1, onChange: nodeSize => setControls(current => ({ ...current, nodeSize })), step: 0.5, value: controls.nodeSize }), _jsx(ControlSlider, { label: "Spread", max: 120, min: 10, onChange: spread => setControls(current => ({ ...current, spread })), step: 2, value: controls.spread }), _jsx(ControlSlider, { label: "Repulsion", max: 140, min: 0, onChange: repulsion => setControls(current => ({ ...current, repulsion })), step: 5, value: controls.repulsion })] }), _jsxs("label", { className: "mt-4 flex cursor-pointer items-center justify-between border-t border-(--ui-stroke-tertiary) pt-3 text-xs font-medium text-(--ui-text-primary)", children: ["Slow auto-rotate", _jsx(Switch, { checked: controls.rotate, onCheckedChange: rotate => setControls(current => ({ ...current, rotate })), size: "xs" })] }), _jsx(Button, { className: "mt-3", onClick: () => setControls(DEFAULT_CONTROLS), size: "inline", variant: "text", children: "Reset to defaults" })] }))] })), status === 'error' && (_jsx(EmptyState, { className: "flex-1", description: "Could not read the Library vault.", title: "Graph unavailable" })), status === 'empty' && (_jsx(EmptyState, { className: "flex-1", description: "Write linked notes in the Library first.", title: "Nothing to map yet" })), _jsx("div", { className: status === 'ready' || status === 'loading' ? 'min-h-0 flex-1' : 'hidden', ref: hostRef })] }));
 }

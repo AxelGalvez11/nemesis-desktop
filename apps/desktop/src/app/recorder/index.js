@@ -10,17 +10,15 @@ import { IconCheck, IconLock, IconMicrophone, IconSparkles } from '@tabler/icons
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Codicon } from '@/components/ui/codicon';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { setComposerDraft } from '@/store/composer';
 import { NoteEditor } from '../library/note-editor';
 import { createFolder, saveNote } from '../library/vault';
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes';
+import { enhanceLectureNote, LECTURE_FOLDER, RecordingArchive, RECORDINGS_DIR } from './archive';
 import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon';
-import { preloadTranscriber, transcribeAudio, transcribeSamples } from './transcribe';
-const RECORDINGS_DIR = '~/Documents/Nemesis Recordings';
-const LECTURE_FOLDER = 'Lectures';
+import { preloadTranscriber, transcribeSamples } from './transcribe';
 const LIVE_CHUNK_SECONDS = 8;
 const WHISPER_RATE = 16_000;
 // Backlog cap: if transcription falls behind the lecture, keep only the newest 30s per
@@ -72,24 +70,6 @@ function lectureNoteTitle(date) {
     const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(/:/g, '.');
     return `Lecture ${day} ${time}`;
 }
-/** "lecture-2026-07-09T20-28-01.webm" → "Jul 9, 2026 · 8:28 PM"; else the raw name. */
-function recordingLabel(name) {
-    const match = name.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
-    if (match) {
-        const [, y, mo, d, h, mi] = match;
-        const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi));
-        if (!Number.isNaN(date.getTime())) {
-            return date.toLocaleString(undefined, {
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-                month: 'short',
-                year: 'numeric'
-            });
-        }
-    }
-    return name;
-}
 export function RecorderView() {
     const [state, setState] = useState('idle');
     const [error, setError] = useState(null);
@@ -111,12 +91,9 @@ export function RecorderView() {
     const onNotesChange = useCallback((value) => {
         notesRef.current = value;
     }, []);
-    const [recordings, setRecordings] = useState([]);
-    const [playing, setPlaying] = useState(null);
-    const [transcripts, setTranscripts] = useState({});
-    const [corrections, setCorrections] = useState({});
-    const [transcribingStatus, setTranscribingStatus] = useState({});
-    const [savedNote, setSavedNote] = useState({});
+    // Bumped after a recording finishes saving so <RecordingArchive> (which owns its own
+    // list state) re-reads the Recordings folder and picks up the new file.
+    const [recordingsVersion, setRecordingsVersion] = useState(0);
     const navigate = useNavigate();
     const recorderRef = useRef(null);
     const streamsRef = useRef([]);
@@ -134,23 +111,8 @@ export function RecorderView() {
     const liveFailedRef = useRef(false);
     const liveSegmentsRef = useRef([]);
     const liveScrollRef = useRef(null);
-    const refreshList = useCallback(async () => {
-        try {
-            const dir = await window.hermesDesktop?.readDir?.(RECORDINGS_DIR);
-            const files = (dir?.entries ?? [])
-                .filter(entry => !entry.isDirectory && /\.(webm|m4a|wav)$/i.test(entry.name))
-                .map(entry => ({ name: entry.name, path: entry.path }))
-                .sort((a, b) => b.name.localeCompare(a.name));
-            setRecordings(files);
-        }
-        catch {
-            // listing is best-effort; recording itself reports its own errors
-        }
-    }, []);
     useEffect(() => {
-        void refreshList();
         return () => stopEverything();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     // Keep the live transcript pinned to its newest line.
     useEffect(() => {
@@ -208,18 +170,15 @@ export function RecorderView() {
     const toggleQueued = useCallback((term) => {
         setInsights(current => current.map(insight => (insight.term === term ? { ...insight, queued: !insight.queued } : insight)));
     }, []);
-    // Granola/Hyprnote's signature move: after the lecture, the agent merges rough notes +
-    // transcript into a clean study note — and since Nemesis has file tools over the vault,
-    // it updates the SAME Library file in place.
+    // Granola/Hyprnote's signature move: after the lecture, the agent turns rough notes +
+    // transcript into structured AI notes in the SAME Library file while preserving the
+    // raw transcript as the durable source material. Shared with the archive's detail view
+    // (archive.tsx) so any past recording can be enhanced the same way, not just this one.
     const enhanceNote = useCallback(() => {
         if (!lectureNote) {
             return;
         }
-        setComposerDraft(`Open my lecture note "${lectureNote}.md" in ~/Documents/Nemesis Library/${LECTURE_FOLDER}/ and rewrite it into a clean, structured study note. ` +
-            'Merge the "My notes" section with the "Transcript" section: keep my wording where it is good, fix transcription garbles against pharmacology vocabulary, ' +
-            'organize with headings and bullets, and keep the header lines about the recording date and audio file. Update that same file with the result. ' +
-            'At the end add a "Flashcard candidates" section with 5 exam-style Q&A pairs from this lecture. Tell me when the file is updated.');
-        navigate(NEW_CHAT_ROUTE);
+        enhanceLectureNote(lectureNote, navigate);
     }, [lectureNote, navigate]);
     const askQueued = useCallback(() => {
         const queued = insights.filter(insight => insight.queued).map(insight => insight.term);
@@ -444,19 +403,16 @@ export function RecorderView() {
             }
             const fileName = `lecture-${stamp}.webm`;
             await write(`${RECORDINGS_DIR}/${fileName}`, btoa(base64));
-            await refreshList();
-            // Let in-flight transcription finish (bounded), then auto-save the lecture note:
-            // the student's typed notes and the transcript, as separate sections.
+            // Let in-flight transcription finish (bounded), then auto-save the companion
+            // Library note. Even a silent capture gets a durable placeholder beside its audio.
             setLiveStatus('Finishing transcript…');
             await drainLive(sampleRateRef.current);
             const transcript = liveSegmentsRef.current.join(' ').replace(/\s+/g, ' ').trim();
             const typedNotes = notesRef.current.trim();
-            if (transcript || typedNotes) {
-                const noteTitle = titleRef.current.trim() || lectureNoteTitle(at);
-                await createFolder(LECTURE_FOLDER);
-                await saveNote(noteTitle, `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`, LECTURE_FOLDER);
-                setLectureNote(noteTitle);
-            }
+            const noteTitle = titleRef.current.trim() || lectureNoteTitle(at);
+            await createFolder(LECTURE_FOLDER);
+            await saveNote(noteTitle, `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`, LECTURE_FOLDER);
+            setLectureNote(noteTitle);
             setLiveStatus('');
         }
         catch (err) {
@@ -465,80 +421,11 @@ export function RecorderView() {
         finally {
             stopEverything();
             setState('idle');
+            // The audio file (and, usually, its companion note) landed on disk above — tell
+            // the archive to re-read the folder even if the note-save step above threw.
+            setRecordingsVersion(v => v + 1);
         }
     };
-    const play = useCallback(async (file) => {
-        if (playing?.path === file.path) {
-            setPlaying(null);
-            return;
-        }
-        const read = await window.hermesDesktop?.readFileDataUrl?.(file.path);
-        const src = typeof read === 'string' ? read : read?.dataUrl;
-        if (src) {
-            setPlaying({ path: file.path, src });
-        }
-    }, [playing]);
-    const readAudioBuffer = async (file) => {
-        const read = await window.hermesDesktop?.readFileDataUrl?.(file.path);
-        const src = typeof read === 'string' ? read : read?.dataUrl;
-        if (!src) {
-            throw new Error('Could not read the recording file.');
-        }
-        return (await fetch(src)).arrayBuffer();
-    };
-    const transcribe = useCallback(async (file) => {
-        setTranscribingStatus(status => ({ ...status, [file.path]: 'Loading model…' }));
-        try {
-            const buffer = await readAudioBuffer(file);
-            const text = await transcribeAudio(buffer, update => setTranscribingStatus(status => ({
-                ...status,
-                [file.path]: update.stage === 'loading-model'
-                    ? `Loading model… ${Math.round(update.progress ?? 0)}%`
-                    : update.stage === 'decoding'
-                        ? 'Decoding audio…'
-                        : 'Transcribing…'
-            })));
-            // Deterministic pharm-vocabulary pass: fixes garbled drug names ("Lycinepral" →
-            // lisinopril) without any cloud call. See pharm-lexicon.ts.
-            const { changes, corrected } = correctPharmTerms(text || '');
-            setTranscripts(current => ({ ...current, [file.path]: corrected || '(No speech detected.)' }));
-            setCorrections(current => ({ ...current, [file.path]: changes.length }));
-        }
-        catch (err) {
-            setTranscripts(current => ({
-                ...current,
-                [file.path]: `Transcription failed: ${err instanceof Error ? err.message : 'unknown error'}`
-            }));
-        }
-        finally {
-            setTranscribingStatus(status => {
-                const next = { ...status };
-                delete next[file.path];
-                return next;
-            });
-        }
-    }, []);
-    const draftFlashcards = useCallback((file) => {
-        const text = transcripts[file.path];
-        if (!text) {
-            return;
-        }
-        setComposerDraft('Turn this lecture transcript into 8-15 exam-quality flashcards for a pharmacy/health-sciences student. ' +
-            'Application-level questions (mechanisms, adverse effects, interactions, monitoring), one concept per card, no "what is X" filler. ' +
-            'Reply with ONLY tab-separated lines, one card per line: front<TAB>back. No headers, no numbering, no commentary — ' +
-            "I'll paste your reply straight into Study → Import cards.\n\nTranscript:\n" +
-            text);
-        navigate(NEW_CHAT_ROUTE);
-    }, [navigate, transcripts]);
-    const saveTranscriptNote = useCallback(async (file) => {
-        const text = transcripts[file.path];
-        if (!text) {
-            return;
-        }
-        const title = `Lecture ${file.name.replace(/\.(webm|m4a|wav|aiff?|mp3)$/i, '').replace(/^lecture-/, '')}`;
-        await saveNote(title, `# ${title}\n\n*Transcribed by Nemesis — review before relying on it.*\n\n${text}\n`);
-        setSavedNote(current => ({ ...current, [file.path]: true }));
-    }, [transcripts]);
     const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
     const seconds = String(elapsed % 60).padStart(2, '0');
     // Recording = a full-page notepad workspace (Hyprnote/Granola pattern: an AI notepad
@@ -550,9 +437,5 @@ export function RecorderView() {
     }
     return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background)", children: [_jsxs("header", { className: "px-6 pb-2 pt-6", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Capture desk" }), _jsx("h1", { className: "mt-1 text-2xl font-semibold tracking-[-0.025em]", children: "Recorder" }), _jsxs("p", { className: "mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground", children: ["Records your mic", withSystemAudio ? ' + this computer’s audio (the lecture/Zoom)' : ' only', " \u2014 locally, to your own files. You start it, you see it, you keep it. While it records, you get a notepad, a live transcript, and the drugs mentioned \u2014 as they happen."] })] }), _jsxs("section", { className: "mx-6 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]", children: [_jsxs("div", { className: "grid items-stretch lg:grid-cols-[minmax(0,0.9fr)_minmax(22rem,1.1fr)]", children: [_jsxs("div", { className: "flex items-center gap-5 border-b border-(--ui-stroke-tertiary) p-6 lg:border-b-0 lg:border-r", children: [_jsx("div", { className: "grid size-24 shrink-0 place-items-center rounded-full border border-(--theme-primary)/25 bg-(--ui-bg-primary) shadow-[inset_0_0_0_7px_var(--ui-bg-elevated)]", children: _jsx(Button, { "aria-label": "Start recording", className: "size-20 rounded-full shadow-lg transition-[transform,opacity] duration-200 ease-out active:scale-[0.96]", disabled: state === 'saving', onClick: () => void start(), size: "icon-lg", children: _jsx(IconMicrophone, { className: "size-7" }) }) }), _jsxs("div", { className: "min-w-0", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: state === 'saving' ? 'Finishing capture' : 'Ready to record' }), _jsx("h2", { className: "mt-1 text-lg font-semibold tracking-tight", children: state === 'saving' ? 'Saving your lecture' : 'Capture the lecture, keep the context' }), _jsx("p", { className: "mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground", children: state === 'saving'
                                                     ? (liveStatus || 'Writing audio and notes to disk…')
-                                                    : 'One click opens a live notepad, waveform, transcript, and pharmacology mentions.' })] })] }), _jsxs("div", { className: "flex flex-col justify-center gap-2 p-4", children: [_jsxs("label", { className: "group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)", children: [_jsx("input", { checked: withSystemAudio, className: "peer sr-only", onChange: event => setWithSystemAudio(event.target.checked), type: "checkbox" }), _jsx("span", { className: "relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" }), _jsxs("span", { className: "min-w-0", children: [_jsx("span", { className: "block text-xs font-semibold", children: "Computer audio" }), _jsx("span", { className: "block text-[0.6875rem] leading-relaxed text-muted-foreground", children: "Capture the lecture or Zoom audio \u00B7 macOS asks once" })] })] }), _jsxs("label", { className: "group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)", children: [_jsx("input", { checked: liveCaptions, className: "peer sr-only", onChange: event => setLiveCaptions(event.target.checked), type: "checkbox" }), _jsx("span", { className: "relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" }), _jsxs("span", { className: "min-w-0", children: [_jsx("span", { className: "block text-xs font-semibold", children: "Live transcript" }), _jsx("span", { className: "block text-[0.6875rem] leading-relaxed text-muted-foreground", children: "Auto-save a lecture note to the Library" })] })] }), _jsxs("span", { className: "mx-3 mt-1 inline-flex items-center gap-1.5 self-start rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-3 py-1.5 text-[0.6875rem] text-muted-foreground", children: [_jsx(IconLock, { size: 12 }), "Nothing joins your call \u00B7 processed on this device"] })] })] }), lectureNote && (_jsxs("div", { className: "flex flex-wrap items-center gap-2 border-t border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-5 py-3 text-xs", children: [_jsxs("span", { className: "mr-auto inline-flex items-center gap-1.5 font-medium", children: [_jsx(IconCheck, { className: "text-(--theme-primary)", size: 13 }), "Lecture note saved to Library \u2192 ", LECTURE_FOLDER] }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`), size: "xs", variant: "outline", children: "Open note" }), _jsxs(Button, { onClick: enhanceNote, size: "xs", variant: "secondary", children: [_jsx(IconSparkles, { size: 12 }), "Enhance with Nemesis"] }), insights.some(insight => insight.queued) && (_jsxs(Button, { onClick: askQueued, size: "xs", variant: "outline", children: ["Ask about ", insights.filter(insight => insight.queued).length, " queued drug", insights.filter(insight => insight.queued).length === 1 ? '' : 's'] }))] })), error && _jsx("p", { className: "border-t border-(--ui-stroke-tertiary) px-5 py-3 text-xs text-destructive", children: error })] }), _jsxs("section", { className: "px-6 pb-8 pt-7", children: [_jsxs("div", { className: "mb-3 flex items-end justify-between gap-3", children: [_jsxs("div", { children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Archive" }), _jsx("h2", { className: "mt-1 text-lg font-semibold tracking-tight", children: "Saved recordings" })] }), _jsxs("span", { className: "rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 text-[0.6875rem] font-medium tabular-nums text-muted-foreground", children: [recordings.length, " recording", recordings.length === 1 ? '' : 's'] })] }), recordings.length ? (_jsx("ul", { className: "flex flex-col gap-2", children: recordings.map(file => {
-                            const status = transcribingStatus[file.path];
-                            const transcript = transcripts[file.path];
-                            return (_jsxs("li", { className: "group flex flex-col gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 transition-[transform,border-color] duration-200 ease-out hover:border-(--theme-primary)/25 active:scale-[0.995]", children: [_jsxs("div", { className: "flex items-center justify-between gap-4", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-3", children: [_jsx("div", { className: "grid size-10 shrink-0 place-items-center rounded-xl border border-(--ui-stroke-quaternary) bg-(--ui-bg-quaternary) text-(--theme-primary)", children: _jsx(IconMicrophone, { size: 17 }) }), _jsxs("div", { className: "min-w-0", children: [_jsx("div", { className: "truncate text-sm font-semibold", children: "Lecture recording" }), _jsx("div", { className: "truncate text-[0.6875rem] tabular-nums text-muted-foreground", children: recordingLabel(file.name) }), status && (_jsxs("div", { className: "mt-1 inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-(--theme-primary)", children: [_jsx("span", { className: "size-1.5 animate-pulse rounded-full bg-(--theme-primary)" }), status] }))] })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-1", children: [_jsx(Tip, { label: transcript ? 'Re-transcribe' : 'Transcribe', children: _jsx(Button, { "aria-label": transcript ? 'Re-transcribe' : 'Transcribe', className: "transition-transform duration-200 ease-out active:scale-[0.98]", disabled: Boolean(status), onClick: () => void transcribe(file), size: "icon-sm", variant: "outline", children: _jsx(Codicon, { name: "sparkle" }) }) }), _jsx(Tip, { label: playing?.path === file.path ? 'Hide player' : 'Play', children: _jsx(Button, { "aria-label": playing?.path === file.path ? 'Hide player' : 'Play', className: "transition-transform duration-200 ease-out active:scale-[0.98]", onClick: () => void play(file), size: "icon-sm", variant: "outline", children: _jsx(Codicon, { name: playing?.path === file.path ? 'debug-pause' : 'play' }) }) })] })] }), transcript && (_jsxs("div", { className: "rounded-xl border border-(--ui-stroke-quaternary) bg-(--ui-bg-quaternary) p-3", children: [_jsx("p", { className: "mb-2 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground", children: "Transcript" }), _jsx("p", { className: "whitespace-pre-wrap text-xs leading-relaxed text-foreground", children: transcript }), _jsxs("div", { className: "mt-2 flex flex-wrap items-center gap-2", children: [_jsx(Button, { disabled: savedNote[file.path], onClick: () => void saveTranscriptNote(file), size: "sm", variant: "secondary", children: savedNote[file.path] ? 'Saved to Library ✓' : 'Save as note' }), _jsx(Button, { onClick: () => draftFlashcards(file), size: "sm", variant: "secondary", children: "Draft flashcards" }), (corrections[file.path] ?? 0) > 0 && (_jsxs("span", { className: "text-[10px] text-muted-foreground", children: [corrections[file.path], " pharm term", corrections[file.path] === 1 ? '' : 's', " auto-corrected"] }))] })] }))] }, file.path));
-                        }) })) : (_jsxs("div", { className: "rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-7", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)", children: "Nothing captured" }), _jsx("p", { className: "mt-1 text-xs text-muted-foreground", children: "Recordings save to Documents / Nemesis Recordings as ordinary audio files." })] })), playing && _jsx("audio", { autoPlay: true, className: "mt-3 w-full", controls: true, src: playing.src }), _jsxs("div", { className: "flex items-center gap-1.5 pt-4 text-[0.6875rem] text-muted-foreground", children: [_jsx(IconLock, { size: 11 }), _jsx("span", { children: "Local by design \u00B7" }), _jsx(Tip, { className: "max-w-sm whitespace-normal text-left leading-relaxed", label: _jsx("span", { children: "Recording other people may require their consent where you live \u2014 check your school\u2019s policy. Nemesis never records on its own and never hides the indicator. Transcription runs on your device (the first run downloads a small model); the text is a draft \u2014 review it before you rely on it." }), side: "top", children: _jsx("button", { className: "underline decoration-current/30 underline-offset-2 hover:text-foreground", type: "button", children: "Consent & transcription details" }) })] })] })] }));
+                                                    : 'One click opens a live notepad, waveform, transcript, and pharmacology mentions.' })] })] }), _jsxs("div", { className: "flex flex-col justify-center gap-2 p-4", children: [_jsxs("label", { className: "group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)", children: [_jsx("input", { checked: withSystemAudio, className: "peer sr-only", onChange: event => setWithSystemAudio(event.target.checked), type: "checkbox" }), _jsx("span", { className: "relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" }), _jsxs("span", { className: "min-w-0", children: [_jsx("span", { className: "block text-xs font-semibold", children: "Computer audio" }), _jsx("span", { className: "block text-[0.6875rem] leading-relaxed text-muted-foreground", children: "Capture the lecture or Zoom audio \u00B7 macOS asks once" })] })] }), _jsxs("label", { className: "group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors duration-200 ease-out hover:border-(--ui-stroke-tertiary) hover:bg-(--ui-bg-quaternary)", children: [_jsx("input", { checked: liveCaptions, className: "peer sr-only", onChange: event => setLiveCaptions(event.target.checked), type: "checkbox" }), _jsx("span", { className: "relative h-5 w-9 shrink-0 rounded-full bg-(--ui-bg-primary) shadow-[inset_0_0_0_1px_var(--ui-stroke-secondary)] transition-colors duration-200 ease-out after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-(--ui-text-quaternary) after:transition-transform after:duration-200 after:ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-(--theme-primary)/35 peer-checked:bg-(--theme-primary) peer-checked:after:translate-x-4 peer-checked:after:bg-primary-foreground" }), _jsxs("span", { className: "min-w-0", children: [_jsx("span", { className: "block text-xs font-semibold", children: "Live transcript" }), _jsx("span", { className: "block text-[0.6875rem] leading-relaxed text-muted-foreground", children: "Auto-save a lecture note to the Library" })] })] }), _jsxs("span", { className: "mx-3 mt-1 inline-flex items-center gap-1.5 self-start rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-3 py-1.5 text-[0.6875rem] text-muted-foreground", children: [_jsx(IconLock, { size: 12 }), "Nothing joins your call \u00B7 processed on this device"] })] })] }), lectureNote && (_jsxs("div", { className: "flex flex-wrap items-center gap-2 border-t border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-5 py-3 text-xs", children: [_jsxs("span", { className: "mr-auto inline-flex items-center gap-1.5 font-medium", children: [_jsx(IconCheck, { className: "text-(--theme-primary)", size: 13 }), "Transcript note saved to Library / ", LECTURE_FOLDER, " as ", lectureNote, ".md"] }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?note=${encodeURIComponent(lectureNote)}`), size: "xs", variant: "outline", children: "Open note" }), _jsxs(Button, { onClick: enhanceNote, size: "xs", variant: "secondary", children: [_jsx(IconSparkles, { size: 12 }), "Enhance with Nemesis"] }), insights.some(insight => insight.queued) && (_jsxs(Button, { onClick: askQueued, size: "xs", variant: "outline", children: ["Ask about ", insights.filter(insight => insight.queued).length, " queued drug", insights.filter(insight => insight.queued).length === 1 ? '' : 's'] }))] })), error && _jsx("p", { className: "border-t border-(--ui-stroke-tertiary) px-5 py-3 text-xs text-destructive", children: error })] }), _jsxs("section", { className: "px-6 pb-8 pt-7", children: [_jsxs("div", { className: "mb-3", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Archive" }), _jsx("h2", { className: "mt-1 text-lg font-semibold tracking-tight", children: "Saved recordings" })] }), _jsx(RecordingArchive, { reloadToken: recordingsVersion }), _jsxs("div", { className: "flex items-center gap-1.5 pt-4 text-[0.6875rem] text-muted-foreground", children: [_jsx(IconLock, { size: 11 }), _jsx("span", { children: "Local by design \u00B7" }), _jsx(Tip, { className: "max-w-sm whitespace-normal text-left leading-relaxed", label: _jsx("span", { children: "Recording other people may require their consent where you live \u2014 check your school\u2019s policy. Nemesis never records on its own and never hides the indicator. Transcription runs on your device (the first run downloads a small model); the text is a draft \u2014 review it before you rely on it." }), side: "top", children: _jsx("button", { className: "underline decoration-current/30 underline-offset-2 hover:text-foreground", type: "button", children: "Consent & transcription details" }) })] })] })] }));
 }

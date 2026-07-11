@@ -425,3 +425,143 @@ class TestCleanupClearsOriginTabs:
             browser_tool._origin_tabs.pop("task-9", None)
             browser_tool._active_sessions.pop("task-9", None)
             browser_tool._session_last_activity.pop("task-9", None)
+
+
+def _tab_list_response(tabs):
+    return {"success": True, "data": {"tabs": tabs}, "error": None}
+
+
+class TestNativeModeFallback:
+    """Electron CDP hosts (the desktop app's native school browser) reject
+    Target.createTarget, so 'tab new' fails and tabs are created app-side via
+    window.open() — _native_fallback_new_tab pairs with school-view.ts's
+    setWindowOpenHandler. These cover the parser, the appshell filter, the
+    fallback orchestration, and the sentinel re-switch path."""
+
+    def setup_method(self):
+        import tools.browser_tool as browser_tool
+
+        browser_tool._origin_tabs.clear()
+
+    def test_is_appshell_url_filters_app_and_devtools_targets_only(self):
+        from tools.browser_tool import _is_appshell_url
+
+        assert _is_appshell_url("file:///x/app.asar/dist/index.html#/chat")
+        assert _is_appshell_url("devtools://devtools/bundled/inspector.html")
+        assert _is_appshell_url("chrome://gpu")
+        assert not _is_appshell_url("https://blackboard.uthsc.edu/")
+        assert not _is_appshell_url("about:blank")
+        assert not _is_appshell_url("")
+
+    def test_native_tab_list_parses_daemon_json(self):
+        from tools import browser_tool
+
+        payload = _tab_list_response(
+            [
+                {"active": True, "index": 0, "title": "Nemesis", "type": "page", "url": "file:///app/index.html"},
+                {"active": False, "index": 1, "title": "Bb", "type": "page", "url": "https://blackboard.uthsc.edu/x"},
+            ]
+        )
+        with patch.object(browser_tool, "_run_browser_command", return_value=payload):
+            tabs = browser_tool._native_tab_list("s1")
+
+        assert tabs == [
+            {"active": True, "index": 0, "url": "file:///app/index.html"},
+            {"active": False, "index": 1, "url": "https://blackboard.uthsc.edu/x"},
+        ]
+
+    def test_native_tab_list_returns_empty_on_failure_or_garbage(self):
+        from tools import browser_tool
+
+        with patch.object(
+            browser_tool, "_run_browser_command", return_value={"success": False, "data": None, "error": "boom"}
+        ):
+            assert browser_tool._native_tab_list("s1") == []
+
+        with patch.object(
+            browser_tool, "_run_browser_command", return_value={"success": True, "data": {"tabs": "nope"}, "error": None}
+        ):
+            assert browser_tool._native_tab_list("s1") == []
+
+    def test_tab_new_failure_falls_back_to_window_open_and_records_sentinel(self):
+        from tools import browser_tool
+
+        calls = []
+
+        def fake(session_key, command, args=None, timeout=None):
+            args = list(args or [])
+            calls.append((command, tuple(args)))
+            if command == "tab" and args[:1] == ["new"]:
+                return {"success": False, "data": None, "error": "CDP error (Target.createTarget): Not supported"}
+            if command == "tab" and not args:
+                tabs = [
+                    {"active": True, "index": 0, "url": "file:///app/index.html"},
+                    {"active": False, "index": 1, "url": "https://www.google.com/"},
+                ]
+                if any(c == "eval" for c, _a in calls):
+                    tabs.append({"active": False, "index": 2, "url": "about:blank"})
+                return _tab_list_response(tabs)
+            if command == "tab":
+                return {"success": True, "data": {"index": int(args[0])}, "error": None}
+            if command == "eval":
+                return {"success": True, "data": {"result": None}, "error": None}
+            raise AssertionError(f"unexpected command {command} {args}")
+
+        with patch.object(browser_tool, "_run_browser_command", side_effect=fake):
+            browser_tool._ensure_origin_tab("s-native", "https://blackboard.uthsc.edu/ultra")
+
+        assert (
+            browser_tool._origin_tabs["s-native"]["https://blackboard.uthsc.edu"]
+            == browser_tool._NATIVE_TAB_SENTINEL
+        )
+        # Steered off the app-shell target before eval'ing window.open, then
+        # switched onto the freshly-created tab.
+        assert ("tab", ("1",)) in calls
+        assert ("eval", ("window.open('about:blank')",)) in calls
+        assert calls[-1] == ("tab", ("2",))
+
+    def test_second_navigation_to_native_origin_switches_by_url_match(self):
+        from tools import browser_tool
+
+        browser_tool._origin_tabs["s-native"] = {
+            "https://blackboard.uthsc.edu": browser_tool._NATIVE_TAB_SENTINEL
+        }
+        calls = []
+
+        def fake(session_key, command, args=None, timeout=None):
+            args = list(args or [])
+            calls.append((command, tuple(args)))
+            if command == "tab" and not args:
+                return _tab_list_response(
+                    [
+                        {"active": True, "index": 0, "url": "file:///app/index.html"},
+                        {"active": False, "index": 1, "url": "https://blackboard.uthsc.edu/ultra/courses"},
+                    ]
+                )
+            if command == "tab":
+                return {"success": True, "data": {"index": int(args[0])}, "error": None}
+            raise AssertionError(f"unexpected command {command} {args}")
+
+        with patch.object(browser_tool, "_run_browser_command", side_effect=fake):
+            browser_tool._ensure_origin_tab("s-native", "https://blackboard.uthsc.edu/other-page")
+
+        assert ("tab", ("1",)) in calls
+        assert not any(c == "eval" for c, _a in calls)
+        assert not any(a[:1] == ("new",) for c, a in calls if c == "tab")
+
+    def test_no_host_tab_available_gives_up_without_recording(self):
+        from tools import browser_tool
+
+        def fake(session_key, command, args=None, timeout=None):
+            args = list(args or [])
+            if command == "tab" and args[:1] == ["new"]:
+                return {"success": False, "data": None, "error": "CDP error (Target.createTarget): Not supported"}
+            if command == "tab" and not args:
+                # Only the app shell is exposed — nothing safe to window.open from.
+                return _tab_list_response([{"active": True, "index": 0, "url": "file:///app/index.html"}])
+            return {"success": True, "data": None, "error": None}
+
+        with patch.object(browser_tool, "_run_browser_command", side_effect=fake):
+            browser_tool._ensure_origin_tab("s-native", "https://blackboard.uthsc.edu/ultra")
+
+        assert "https://blackboard.uthsc.edu" not in browser_tool._origin_tabs.get("s-native", {})

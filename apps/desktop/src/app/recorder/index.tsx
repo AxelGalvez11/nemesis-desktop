@@ -10,7 +10,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
-import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { setComposerDraft } from '@/store/composer'
@@ -18,11 +17,11 @@ import { setComposerDraft } from '@/store/composer'
 import { NoteEditor } from '../library/note-editor'
 import { createFolder, saveNote } from '../library/vault'
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes'
-import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
-import { preloadTranscriber, transcribeAudio, transcribeSamples } from './transcribe'
 
-const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
-const LECTURE_FOLDER = 'Lectures'
+import { enhanceLectureNote, LECTURE_FOLDER, RecordingArchive, RECORDINGS_DIR } from './archive'
+import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
+import { preloadTranscriber, transcribeSamples } from './transcribe'
+
 const LIVE_CHUNK_SECONDS = 8
 const WHISPER_RATE = 16_000
 // Backlog cap: if transcription falls behind the lecture, keep only the newest 30s per
@@ -90,33 +89,6 @@ function lectureNoteTitle(date: Date): string {
   return `Lecture ${day} ${time}`
 }
 
-/** "lecture-2026-07-09T20-28-01.webm" → "Jul 9, 2026 · 8:28 PM"; else the raw name. */
-function recordingLabel(name: string): string {
-  const match = name.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/)
-
-  if (match) {
-    const [, y, mo, d, h, mi] = match
-    const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi))
-
-    if (!Number.isNaN(date.getTime())) {
-      return date.toLocaleString(undefined, {
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      })
-    }
-  }
-
-  return name
-}
-
-interface RecordingFile {
-  name: string
-  path: string
-}
-
 type RecorderState = 'idle' | 'recording' | 'saving'
 
 export function RecorderView() {
@@ -140,12 +112,10 @@ export function RecorderView() {
   const onNotesChange = useCallback((value: string) => {
     notesRef.current = value
   }, [])
-  const [recordings, setRecordings] = useState<RecordingFile[]>([])
-  const [playing, setPlaying] = useState<null | { path: string; src: string }>(null)
-  const [transcripts, setTranscripts] = useState<Record<string, string>>({})
-  const [corrections, setCorrections] = useState<Record<string, number>>({})
-  const [transcribingStatus, setTranscribingStatus] = useState<Record<string, string>>({})
-  const [savedNote, setSavedNote] = useState<Record<string, boolean>>({})
+
+  // Bumped after a recording finishes saving so <RecordingArchive> (which owns its own
+  // list state) re-reads the Recordings folder and picks up the new file.
+  const [recordingsVersion, setRecordingsVersion] = useState(0)
   const navigate = useNavigate()
 
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -165,24 +135,8 @@ export function RecorderView() {
   const liveSegmentsRef = useRef<string[]>([])
   const liveScrollRef = useRef<HTMLDivElement | null>(null)
 
-  const refreshList = useCallback(async () => {
-    try {
-      const dir = await window.hermesDesktop?.readDir?.(RECORDINGS_DIR)
-      const files = (dir?.entries ?? [])
-        .filter(entry => !entry.isDirectory && /\.(webm|m4a|wav)$/i.test(entry.name))
-        .map(entry => ({ name: entry.name, path: entry.path }))
-        .sort((a, b) => b.name.localeCompare(a.name))
-      setRecordings(files)
-    } catch {
-      // listing is best-effort; recording itself reports its own errors
-    }
-  }, [])
-
   useEffect(() => {
-    void refreshList()
-
     return () => stopEverything()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Keep the live transcript pinned to its newest line.
@@ -261,19 +215,14 @@ export function RecorderView() {
 
   // Granola/Hyprnote's signature move: after the lecture, the agent turns rough notes +
   // transcript into structured AI notes in the SAME Library file while preserving the
-  // raw transcript as the durable source material.
+  // raw transcript as the durable source material. Shared with the archive's detail view
+  // (archive.tsx) so any past recording can be enhanced the same way, not just this one.
   const enhanceNote = useCallback(() => {
     if (!lectureNote) {
       return
     }
 
-    setComposerDraft(
-      `Open my lecture note "${lectureNote}.md" in ~/Documents/Nemesis Library/${LECTURE_FOLDER}/ and add a clean, structured "AI notes" section immediately above the existing "Transcript" section. ` +
-        'Use both "My notes" and "Transcript" as source material: keep my wording where it is good, fix transcription garbles against pharmacology vocabulary, ' +
-        'and organize the AI notes with useful headings and bullets. Preserve the original Transcript section, My notes section, and the header lines about the recording date and audio file. Update that same file with the result. ' +
-        'At the end add a "Flashcard candidates" section with 5 exam-style Q&A pairs from this lecture. Tell me when the file is updated.'
-    )
-    navigate(NEW_CHAT_ROUTE)
+    enhanceLectureNote(lectureNote, navigate)
   }, [lectureNote, navigate])
 
   const askQueued = useCallback(() => {
@@ -555,7 +504,6 @@ export function RecorderView() {
 
       const fileName = `lecture-${stamp}.webm`
       await write(`${RECORDINGS_DIR}/${fileName}`, btoa(base64))
-      await refreshList()
 
       // Let in-flight transcription finish (bounded), then auto-save the companion
       // Library note. Even a silent capture gets a durable placeholder beside its audio.
@@ -578,108 +526,11 @@ export function RecorderView() {
     } finally {
       stopEverything()
       setState('idle')
+      // The audio file (and, usually, its companion note) landed on disk above — tell
+      // the archive to re-read the folder even if the note-save step above threw.
+      setRecordingsVersion(v => v + 1)
     }
   }
-
-  const play = useCallback(
-    async (file: RecordingFile) => {
-      if (playing?.path === file.path) {
-        setPlaying(null)
-
-        return
-      }
-
-      const read = await window.hermesDesktop?.readFileDataUrl?.(file.path)
-      const src = typeof read === 'string' ? read : (read as { dataUrl?: string } | undefined)?.dataUrl
-
-      if (src) {
-        setPlaying({ path: file.path, src })
-      }
-    },
-    [playing]
-  )
-
-  const readAudioBuffer = async (file: RecordingFile): Promise<ArrayBuffer> => {
-    const read = await window.hermesDesktop?.readFileDataUrl?.(file.path)
-    const src = typeof read === 'string' ? read : (read as { dataUrl?: string } | undefined)?.dataUrl
-
-    if (!src) {
-      throw new Error('Could not read the recording file.')
-    }
-
-    return (await fetch(src)).arrayBuffer()
-  }
-
-  const transcribe = useCallback(async (file: RecordingFile) => {
-    setTranscribingStatus(status => ({ ...status, [file.path]: 'Loading model…' }))
-
-    try {
-      const buffer = await readAudioBuffer(file)
-      const text = await transcribeAudio(buffer, update =>
-        setTranscribingStatus(status => ({
-          ...status,
-          [file.path]:
-            update.stage === 'loading-model'
-              ? `Loading model… ${Math.round(update.progress ?? 0)}%`
-              : update.stage === 'decoding'
-                ? 'Decoding audio…'
-                : 'Transcribing…'
-        }))
-      )
-      // Deterministic pharm-vocabulary pass: fixes garbled drug names ("Lycinepral" →
-      // lisinopril) without any cloud call. See pharm-lexicon.ts.
-      const { changes, corrected } = correctPharmTerms(text || '')
-      setTranscripts(current => ({ ...current, [file.path]: corrected || '(No speech detected.)' }))
-      setCorrections(current => ({ ...current, [file.path]: changes.length }))
-    } catch (err) {
-      setTranscripts(current => ({
-        ...current,
-        [file.path]: `Transcription failed: ${err instanceof Error ? err.message : 'unknown error'}`
-      }))
-    } finally {
-      setTranscribingStatus(status => {
-        const next = { ...status }
-        delete next[file.path]
-
-        return next
-      })
-    }
-  }, [])
-
-  const draftFlashcards = useCallback(
-    (file: RecordingFile) => {
-      const text = transcripts[file.path]
-
-      if (!text) {
-        return
-      }
-
-      setComposerDraft(
-        'Turn this lecture transcript into 8-15 exam-quality flashcards for a pharmacy/health-sciences student. ' +
-          'Application-level questions (mechanisms, adverse effects, interactions, monitoring), one concept per card, no "what is X" filler. ' +
-          'Reply with ONLY tab-separated lines, one card per line: front<TAB>back. No headers, no numbering, no commentary — ' +
-          "I'll paste your reply straight into Study → Import cards.\n\nTranscript:\n" +
-          text
-      )
-      navigate(NEW_CHAT_ROUTE)
-    },
-    [navigate, transcripts]
-  )
-
-  const saveTranscriptNote = useCallback(
-    async (file: RecordingFile) => {
-      const text = transcripts[file.path]
-
-      if (!text) {
-        return
-      }
-
-      const title = `Lecture ${file.name.replace(/\.(webm|m4a|wav|aiff?|mp3)$/i, '').replace(/^lecture-/, '')}`
-      await saveNote(title, `# ${title}\n\n*Transcribed by Nemesis — review before relying on it.*\n\n${text}\n`)
-      setSavedNote(current => ({ ...current, [file.path]: true }))
-    },
-    [transcripts]
-  )
 
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const seconds = String(elapsed % 60).padStart(2, '0')
@@ -905,100 +756,11 @@ export function RecorderView() {
       </section>
 
       <section className="px-6 pb-8 pt-7">
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Archive</p>
-            <h2 className="mt-1 text-lg font-semibold tracking-tight">Saved recordings</h2>
-          </div>
-          <span className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 text-[0.6875rem] font-medium tabular-nums text-muted-foreground">
-            {recordings.length} recording{recordings.length === 1 ? '' : 's'}
-          </span>
+        <div className="mb-3">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Archive</p>
+          <h2 className="mt-1 text-lg font-semibold tracking-tight">Saved recordings</h2>
         </div>
-        {recordings.length ? (
-          <ul className="flex flex-col gap-2">
-            {recordings.map(file => {
-              const status = transcribingStatus[file.path]
-              const transcript = transcripts[file.path]
-
-              return (
-                <li className="group flex flex-col gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 transition-[transform,border-color] duration-200 ease-out hover:border-(--theme-primary)/25 active:scale-[0.995]" key={file.path}>
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-(--ui-stroke-quaternary) bg-(--ui-bg-quaternary) text-(--theme-primary)">
-                        <IconMicrophone size={17} />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">Lecture recording</div>
-                        <div className="truncate text-[0.6875rem] tabular-nums text-muted-foreground">{recordingLabel(file.name)}</div>
-                        {status && (
-                          <div className="mt-1 inline-flex items-center gap-1.5 text-[0.6875rem] font-medium text-(--theme-primary)">
-                            <span className="size-1.5 animate-pulse rounded-full bg-(--theme-primary)" />
-                            {status}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Tip label={transcript ? 'Re-transcribe' : 'Transcribe'}>
-                        <Button
-                          aria-label={transcript ? 'Re-transcribe' : 'Transcribe'}
-                          className="transition-transform duration-200 ease-out active:scale-[0.98]"
-                          disabled={Boolean(status)}
-                          onClick={() => void transcribe(file)}
-                          size="icon-sm"
-                          variant="outline"
-                        >
-                          <Codicon name="sparkle" />
-                        </Button>
-                      </Tip>
-                      <Tip label={playing?.path === file.path ? 'Hide player' : 'Play'}>
-                        <Button
-                          aria-label={playing?.path === file.path ? 'Hide player' : 'Play'}
-                          className="transition-transform duration-200 ease-out active:scale-[0.98]"
-                          onClick={() => void play(file)}
-                          size="icon-sm"
-                          variant="outline"
-                        >
-                          <Codicon name={playing?.path === file.path ? 'debug-pause' : 'play'} />
-                        </Button>
-                      </Tip>
-                    </div>
-                  </div>
-                  {transcript && (
-                    <div className="rounded-xl border border-(--ui-stroke-quaternary) bg-(--ui-bg-quaternary) p-3">
-                      <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Transcript</p>
-                      <p className="whitespace-pre-wrap text-xs leading-relaxed text-foreground">{transcript}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Button
-                          disabled={savedNote[file.path]}
-                          onClick={() => void saveTranscriptNote(file)}
-                          size="sm"
-                          variant="secondary"
-                        >
-                          {savedNote[file.path] ? 'Saved to Library ✓' : 'Save as note'}
-                        </Button>
-                        <Button onClick={() => draftFlashcards(file)} size="sm" variant="secondary">
-                          Draft flashcards
-                        </Button>
-                        {(corrections[file.path] ?? 0) > 0 && (
-                          <span className="text-[10px] text-muted-foreground">
-                            {corrections[file.path]} pharm term{corrections[file.path] === 1 ? '' : 's'} auto-corrected
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-7">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">Nothing captured</p>
-            <p className="mt-1 text-xs text-muted-foreground">Recordings save to Documents / Nemesis Recordings as ordinary audio files.</p>
-          </div>
-        )}
-        {playing && <audio autoPlay className="mt-3 w-full" controls src={playing.src} />}
+        <RecordingArchive reloadToken={recordingsVersion} />
         <div className="flex items-center gap-1.5 pt-4 text-[0.6875rem] text-muted-foreground">
           <IconLock size={11} />
           <span>Local by design ·</span>

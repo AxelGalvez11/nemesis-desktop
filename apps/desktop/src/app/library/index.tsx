@@ -1,7 +1,7 @@
 // Library — the notes vault page. A folder tree (left) over recursive Obsidian-compatible
 // Markdown, a prose-styled CodeMirror editor (middle, de-code-ified via .nemesis-prose-editor
-// CSS), and a Links/Backlinks rail. Non-markdown files (PDF/images inline; slides/docs open
-// externally) preview in place. Autosaves 800ms after typing.
+// CSS), and a collapsible Outline/Links rail (right). Non-markdown files (PDF/images inline;
+// slides/docs open externally) preview in place. Autosaves 800ms after typing.
 import {
   IconChevronRight,
   IconFilePlus,
@@ -24,12 +24,12 @@ import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
-import { NoteEditor } from './note-editor'
+import { NoteEditor, type NoteEditorHandle } from './note-editor'
+import { NoteRail } from './note-rail'
 import { PdfViewer } from './pdf-viewer'
 import {
   buildIndex,
   createFolder,
-  extractWikilinks,
   loadVaultContents,
   saveNote,
   SEED_NOTES,
@@ -113,6 +113,7 @@ export function LibraryView() {
   const [saving, setSaving] = useState(false)
   const [searchParams] = useSearchParams()
   const saveTimer = useRef<null | ReturnType<typeof setTimeout>>(null)
+  const noteEditorRef = useRef<NoteEditorHandle>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -235,6 +236,12 @@ export function LibraryView() {
     }, 800)
   }, [])
 
+  // Outline tab entries drive the editor imperatively — scrolling to a line isn't
+  // something the editor's props model expresses, so this goes through its ref handle.
+  const handleSelectHeading = useCallback((line: number) => {
+    noteEditorRef.current?.scrollToLine(line)
+  }, [])
+
   const targetFolder =
     selection?.kind === 'note' ? selection.note.folder : selection?.kind === 'file' ? selection.file.folder : ''
 
@@ -302,13 +309,6 @@ export function LibraryView() {
     return <EmptyState className="h-full" description="Opening your vault…" title="Library" />
   }
 
-  const outgoing = activeNote && index ? (index.links.get(activeNote.title) ?? []) : []
-  const incoming = activeNote && index ? (index.backlinks.get(activeNote.title) ?? []) : []
-  const unresolved = activeNote
-    ? extractWikilinks(activeNote.content).filter(
-        target => !contents.notes.some(note => note.title.toLowerCase() === target.toLowerCase())
-      )
-    : []
   const noteCount = contents.notes.length
   const fileCount = contents.files.length
 
@@ -451,6 +451,7 @@ export function LibraryView() {
                 key={selection.note.path}
                 onChange={value => scheduleSave(selection.note, value)}
                 onOpenWikilink={target => void openWikilink(target)}
+                ref={noteEditorRef}
               />
             </div>
           </>
@@ -461,43 +462,15 @@ export function LibraryView() {
         )}
       </main>
 
-      {/* Links rail (notes only) */}
-      {activeNote && (
-        <aside className="hidden w-64 shrink-0 flex-col gap-3 overflow-y-auto border-l border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-3 pb-4 pt-4 lg:flex">
-          <LinkGroup
-            emptyLabel="Write [[Note title]] to connect ideas."
-            onOpen={title => {
-              const note = contents.notes.find(n => n.title === title)
-              if (note) openSelection({ kind: 'note', note })
-            }}
-            title="Links"
-            titles={outgoing}
-          />
-          <LinkGroup
-            emptyLabel="Nothing links here yet."
-            onOpen={title => {
-              const note = contents.notes.find(n => n.title === title)
-              if (note) openSelection({ kind: 'note', note })
-            }}
-            title="Backlinks"
-            titles={incoming}
-          />
-          {unresolved.length > 0 && (
-            <div className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">Unresolved</h3>
-                <span className="text-[0.65rem] tabular-nums text-(--ui-text-quaternary)">{unresolved.length}</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {unresolved.map(target => (
-                  <span className="rounded-full border border-dashed border-(--ui-stroke-secondary) px-2.5 py-1 text-[0.6875rem] text-muted-foreground" key={target}>
-                    {target}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </aside>
+      {/* Outline/Links rail (notes only) */}
+      {activeNote && index && (
+        <NoteRail
+          activeNote={activeNote}
+          index={index}
+          notes={contents.notes}
+          onOpenNote={note => openSelection({ kind: 'note', note })}
+          onSelectHeading={handleSelectHeading}
+        />
       )}
     </div>
   )
@@ -667,48 +640,6 @@ function FilePreview({ file }: { file: VaultFile }) {
           />
         )}
       </div>
-    </div>
-  )
-}
-
-function LinkGroup({
-  emptyLabel,
-  onOpen,
-  title,
-  titles
-}: {
-  emptyLabel: string
-  onOpen: (title: string) => void
-  title: string
-  titles: string[]
-}) {
-  return (
-    <div className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{title}</h3>
-        <span className="rounded-full bg-(--ui-bg-quaternary) px-1.5 py-0.5 text-[0.625rem] font-medium tabular-nums text-(--ui-text-tertiary)">
-          {titles.length}
-        </span>
-      </div>
-      {titles.length ? (
-        <div className="flex flex-wrap gap-1.5">
-          {titles.map(target => (
-            <button
-              className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2.5 py-1 text-[0.6875rem] text-(--ui-text-secondary) transition-[transform,color,border-color,background-color] duration-200 ease-out hover:border-(--theme-primary)/40 hover:bg-(--ui-bg-primary) hover:text-foreground active:scale-[0.98]"
-              key={target}
-              onClick={() => onOpen(target)}
-              type="button"
-            >
-              {target}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-lg border border-dashed border-(--ui-stroke-tertiary) px-3 py-3">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">None yet</p>
-          <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">{emptyLabel}</p>
-        </div>
-      )}
     </div>
   )
 }

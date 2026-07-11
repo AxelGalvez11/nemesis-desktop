@@ -66,6 +66,7 @@ import { installEmbedReferer } from './embed-referer'
 import { readDirForIpc } from './fs-read-dir'
 import { probeGatewayWebSocket } from './gateway-ws-probe'
 import { registerSchoolBrowserIpc } from './school-browser'
+import { installSchoolView, registerSchoolViewIpc } from './school-view'
 import { scanGitRepos } from './git-repo-scan'
 import {
   fileDiffVsHead,
@@ -6549,6 +6550,22 @@ function wireCommonWindowHandlers(win) {
     event.preventDefault()
     openExternalUrl(url)
   })
+  // Backstop for navigations will-navigate can't intercept (notably CDP
+  // Page.navigate — the app window is a debuggable target when the native
+  // school browser opens the remote-debugging port). If the shell ever lands
+  // on a foreign URL, walk history back to the app instead of stranding a
+  // blank window.
+  win.webContents.on('did-navigate', (_event, url) => {
+    if ((DEV_SERVER && url.startsWith(DEV_SERVER)) || (!DEV_SERVER && url.startsWith('file:'))) {
+      return
+    }
+
+    const nav = win.webContents.navigationHistory
+
+    if (nav.canGoBack()) {
+      nav.goBack()
+    }
+  })
 }
 
 // Secondary "session windows" — one extra OS window per chat so a user can
@@ -6859,6 +6876,10 @@ function createWindow() {
   mainWindow.on('closed', () => closePetOverlay())
 
   wireCommonWindowHandlers(mainWindow)
+
+  // Native school browser tabs ride the main window's content view (no-op in
+  // mirror mode) — see school-view.ts.
+  installSchoolView(mainWindow)
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     rememberLog(`[renderer] render-process-gone reason=${details?.reason} exitCode=${details?.exitCode}`)
@@ -7899,6 +7920,9 @@ ipcMain.handle('hermes:fs:readDir', async (_event, dirPath) => readDirForIpc(dir
 
 // App-managed agent browser (school-portal mirror) — see school-browser.ts.
 registerSchoolBrowserIpc()
+
+// Native school browser (WebContentsView tabs) — see school-view.ts.
+registerSchoolViewIpc()
 
 ipcMain.handle('hermes:fs:gitRoot', async (_event, startPath) => gitRootForIpc(startPath))
 

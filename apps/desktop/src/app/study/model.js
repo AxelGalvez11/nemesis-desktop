@@ -5,7 +5,7 @@
 // v1 persistence is a small localStorage JSON blob (same pattern as store/onboarding);
 // the upgrade path is backend/vault storage once Nemesis accounts land.
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
-// Bumped to v2 for the grouped-decks + heatmap seed. Pre-release, so discarding the old
+// Bumped to v2 for grouped decks + review activity. Pre-release, so discarding the old
 // demo blob is fine; once real student data exists this needs a migration, not a bump.
 const STORAGE_KEY = 'nemesis.study.v2';
 const QUEUE_LIMIT = 200;
@@ -37,20 +37,38 @@ function isDue(stored, now) {
     }
     return new Date(stored.due).getTime() <= now.getTime();
 }
+function normalizeSections(sections, decks) {
+    const names = [];
+    const seen = new Set();
+    for (const raw of [...(sections ?? []), ...decks.map(deck => deck.course ?? '')]) {
+        const name = raw.trim();
+        const key = name.toLocaleLowerCase();
+        if (name && key !== 'other' && !seen.has(key)) {
+            names.push(name);
+            seen.add(key);
+        }
+    }
+    return names;
+}
 export function loadState() {
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
         if (raw) {
             const parsed = JSON.parse(raw);
             if (parsed && parsed.version === 1 && Array.isArray(parsed.decks)) {
-                return parsed;
+                return {
+                    ...parsed,
+                    reviews: (parsed.reviews ?? []).filter(review => !review.cardId.startsWith('seed#')),
+                    sections: normalizeSections(parsed.sections, parsed.decks)
+                };
             }
         }
     }
     catch {
         // corrupted blob → fall through to a fresh seeded state
     }
-    return { version: 1, decks: seedDecks(), schedule: {}, reviews: seedReviews() };
+    const decks = seedDecks();
+    return { version: 1, decks, sections: normalizeSections([], decks), schedule: {}, reviews: [] };
 }
 export function saveState(state) {
     try {
@@ -143,6 +161,22 @@ export function deleteDeck(state, deckId) {
     }
     return { ...state, decks: state.decks.filter(candidate => candidate.id !== deckId), schedule };
 }
+export function addSection(state, name) {
+    const section = name.trim();
+    if (!section ||
+        section.toLocaleLowerCase() === 'other' ||
+        state.sections.some(existing => existing.toLocaleLowerCase() === section.toLocaleLowerCase())) {
+        return state;
+    }
+    return { ...state, sections: [...state.sections, section] };
+}
+export function assignDeckSection(state, deckId, section) {
+    const course = section.trim() || undefined;
+    return {
+        ...state,
+        decks: state.decks.map(deck => (deck.id === deckId ? { ...deck, course } : deck))
+    };
+}
 export function studyMotivation(state, todayIso, windowDays = 90) {
     const DAY = 86_400_000;
     const days = new Set(state.reviews.map(review => review.at.slice(0, 10)));
@@ -201,8 +235,18 @@ export function gradeCard(state, cardId, rating, now) {
 /** Group decks by course (the "folder"). Ungrouped decks fall under "Other". Pure. */
 export function groupDecks(state, now) {
     const byCourse = new Map();
+    const canonicalNames = new Map();
+    for (const section of state.sections) {
+        const name = section.trim();
+        if (name) {
+            byCourse.set(name, []);
+            canonicalNames.set(name.toLocaleLowerCase(), name);
+        }
+    }
     for (const deck of state.decks) {
-        const key = deck.course?.trim() || 'Other';
+        const course = deck.course?.trim();
+        const normalized = course?.toLocaleLowerCase();
+        const key = !course || normalized === 'other' ? 'Other' : (canonicalNames.get(course.toLocaleLowerCase()) ?? course);
         const list = byCourse.get(key) ?? [];
         list.push(deck);
         byCourse.set(key, list);
@@ -220,7 +264,7 @@ export function groupDecks(state, now) {
 }
 /** GitHub-style contribution grid: review counts per day for the last `weeks` weeks,
  *  laid out oldest→newest, each column a Sun-anchored week. Pure. */
-export function reviewHeatmap(state, todayIso, weeks = 18) {
+export function reviewHeatmap(state, todayIso, weeks = 53) {
     const perDay = new Map();
     for (const review of state.reviews) {
         const day = review.at.slice(0, 10); // UTC calendar day from the ISO timestamp
@@ -310,28 +354,4 @@ function seedDecks() {
         ]
     };
     return [cardio, antimicrobials];
-}
-/** Demo review history so the activity heatmap isn't blank on first open — a realistic
- *  (deterministic) scatter over the last ~12 weeks. These are demo entries tied to no real
- *  card; the student's real reviews append here as they study, and the grid always counts
- *  the true contents of `reviews`. Clearing/rebuilding decks does not remove them until the
- *  student studies for real. */
-function seedReviews() {
-    const out = [];
-    const today = new Date();
-    for (let daysAgo = 84; daysAgo >= 1; daysAgo--) {
-        const date = new Date(today);
-        date.setDate(today.getDate() - daysAgo);
-        const weekend = date.getDay() === 0 || date.getDay() === 6;
-        // Deterministic pseudo-organic intensity (no RNG): weekdays busier, some rest days.
-        const wobble = ((daysAgo * 2654435761) % 97) / 97;
-        const base = weekend ? 4 : 13;
-        const count = Math.max(0, Math.round(base * wobble * 1.7) - (wobble < 0.22 ? base : 0));
-        for (let i = 0; i < count; i++) {
-            const at = new Date(date);
-            at.setHours(9 + (i % 12), (i * 7) % 60, 0, 0);
-            out.push({ at: at.toISOString(), cardId: `seed#${daysAgo}#${i}`, rating: wobble > 0.6 ? 'good' : 'hard' });
-        }
-    }
-    return out;
 }

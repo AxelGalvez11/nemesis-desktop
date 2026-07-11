@@ -40,7 +40,7 @@ import {
 } from '@/store/preview'
 import { $dirtyPreviewUrls } from '@/store/preview-edit'
 
-import { BrowserMirror } from './browser-mirror'
+import { SchoolBrowserPanel } from './native-browser-panel'
 import { PreviewPane } from './preview-pane'
 
 // Synthetic targets for the non-PreviewPane tabs (browser mirror + pinned
@@ -280,7 +280,7 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
             <SourcesTab />
           </div>
         ) : activeSegmentId === RIGHT_RAIL_BROWSER_TAB_ID ? (
-          <BrowserMirror />
+          <SchoolBrowserPanel />
         ) : activePreviewTarget ? (
           <PreviewPane
             embedded
@@ -463,7 +463,7 @@ function DefaultChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
             <SourcesTab />
           </div>
         ) : activeTab.id === RIGHT_RAIL_BROWSER_TAB_ID ? (
-          <BrowserMirror />
+          <SchoolBrowserPanel />
         ) : (
           <PreviewPane
             embedded

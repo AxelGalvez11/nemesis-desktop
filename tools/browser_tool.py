@@ -1359,6 +1359,124 @@ def _plan_origin_tab(
     return "new", _label_for_origin(origin)
 
 
+# Sentinel stored in _origin_tabs when the CDP host cannot create labeled tabs
+# (Electron's remote debugging rejects Target.createTarget — the native school
+# browser in the desktop app). Tabs for these origins are created app-side via
+# window.open() and re-found by origin match instead of by label.
+_NATIVE_TAB_SENTINEL = "@native"
+
+
+def _is_appshell_url(url: str) -> bool:
+    """True for targets that are the hosting app's own UI, never a web page.
+
+    The Electron desktop app exposes its shell window as a debuggable target
+    alongside the school tabs; acting on it (navigate/click/eval side effects)
+    would corrupt the running app, so every native-mode helper filters it out.
+    """
+    return (url or "").startswith(("file://", "devtools://", "chrome://"))
+
+
+def _native_tab_list(session_key: str) -> List[Dict[str, Any]]:
+    """Return [{active, index, url}] from ``agent-browser tab`` — [] on any failure."""
+    try:
+        result = _run_browser_command(session_key, "tab", [], timeout=15)
+    except Exception:
+        return []
+    if not result.get("success"):
+        return []
+    data = result.get("data")
+    raw_tabs = data.get("tabs") if isinstance(data, dict) else None
+    tabs: List[Dict[str, Any]] = []
+    if isinstance(raw_tabs, list):
+        for entry in raw_tabs:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                index = int(entry.get("index"))
+            except (TypeError, ValueError):
+                continue
+            tabs.append(
+                {
+                    "active": bool(entry.get("active")),
+                    "index": index,
+                    "url": str(entry.get("url") or ""),
+                }
+            )
+    return tabs
+
+
+def _native_select_tab(session_key: str, index: int) -> bool:
+    """Switch the daemon's active tab by index. Best-effort."""
+    try:
+        result = _run_browser_command(session_key, "tab", [str(index)], timeout=15)
+    except Exception:
+        return False
+    return bool(result.get("success"))
+
+
+def _native_fallback_new_tab(session_key: str) -> bool:
+    """Create + select a fresh tab on a CDP host without Target.createTarget.
+
+    Mechanism: evaluate ``window.open('about:blank')`` in an existing school
+    tab — the desktop app's window-open handler (school-view.ts) turns that
+    into a first-class native tab, which then appears as a new CDP target.
+    Steps: steer the active tab off the app shell if needed (eval must run in
+    a school tab so the app's handler owns it), snapshot the tab list, open,
+    poll for the new entry, switch to it. Returns True only when the new tab
+    is created AND selected; the caller's subsequent ``open <url>`` lands on it.
+    """
+    before = _native_tab_list(session_key)
+    if not before:
+        return False
+
+    active = next((t for t in before if t["active"]), None)
+    if active is None or _is_appshell_url(active["url"]):
+        host = next((t for t in before if not _is_appshell_url(t["url"])), None)
+        if host is None:
+            logger.debug(
+                "_native_fallback_new_tab: no non-appshell tab to host window.open for session=%s",
+                session_key,
+            )
+            return False
+        if not _native_select_tab(session_key, host["index"]):
+            return False
+
+    try:
+        _run_browser_command(session_key, "eval", ["window.open('about:blank')"], timeout=15)
+    except Exception as exc:
+        logger.debug("_native_fallback_new_tab: eval window.open raised for session=%s: %s", session_key, exc)
+        return False
+
+    deadline = time.time() + 4.0
+    while time.time() < deadline:
+        after = _native_tab_list(session_key)
+        if len(after) > len(before):
+            newest = max(after, key=lambda t: t["index"])
+            return _native_select_tab(session_key, newest["index"])
+        time.sleep(0.2)
+
+    logger.debug("_native_fallback_new_tab: no new target appeared for session=%s", session_key)
+    return False
+
+
+def _native_switch_to_origin(session_key: str, origin: str) -> None:
+    """Activate the tab whose URL matches ``origin`` (native-mode sessions).
+
+    Native tabs carry no agent-browser label, so the origin→tab association
+    is re-derived from the live tab list on every switch. If the tab has been
+    closed since (min-one-tab invariant app-side means the list is never
+    empty), fall back to creating a fresh one so the caller's navigation still
+    gets a dedicated tab rather than clobbering an unrelated origin's.
+    """
+    for tab in _native_tab_list(session_key):
+        if _is_appshell_url(tab["url"]):
+            continue
+        if _origin_for_tab_routing(tab["url"]) == origin:
+            _native_select_tab(session_key, tab["index"])
+            return
+    _native_fallback_new_tab(session_key)
+
+
 def _ensure_origin_tab(session_key: str, url: str) -> None:
     """Best-effort: route ``url``'s navigation to a tab dedicated to its origin.
 
@@ -1402,23 +1520,39 @@ def _ensure_origin_tab(session_key: str, url: str) -> None:
 
     action, label = _plan_origin_tab(origin, known)
 
+    # Native-mode origins (Electron CDP host) have no agent-browser label —
+    # re-find their tab by origin match instead of a label switch.
+    if action == "switch" and label == _NATIVE_TAB_SENTINEL:
+        _native_switch_to_origin(session_key, origin)
+        return
+
     if action == "new":
+        create_ok = False
         try:
             create_result = _run_browser_command(
                 session_key, "tab", ["new", "--label", label], timeout=15
             )
+            create_ok = bool(create_result.get("success"))
+            if not create_ok:
+                logger.debug(
+                    "_ensure_origin_tab: 'tab new' failed for session=%s origin=%s: %s",
+                    session_key, origin, create_result.get("error"),
+                )
         except Exception as exc:
             logger.debug(
                 "_ensure_origin_tab: 'tab new' raised for session=%s origin=%s: %s",
                 session_key, origin, exc,
             )
-            return
 
-        if not create_result.get("success"):
-            logger.debug(
-                "_ensure_origin_tab: 'tab new' failed for session=%s origin=%s: %s",
-                session_key, origin, create_result.get("error"),
-            )
+        if not create_ok:
+            # Target.createTarget is unsupported on this CDP host (Electron's
+            # native school browser) — create the tab app-side via
+            # window.open() instead. On success the new tab is already
+            # selected; record the sentinel so later navigations to this
+            # origin re-find it by URL match.
+            if _native_fallback_new_tab(session_key):
+                with _cleanup_lock:
+                    _origin_tabs.setdefault(session_key, {})[origin] = _NATIVE_TAB_SENTINEL
             return
 
         # Record the mapping now that the tab is known to exist, independent

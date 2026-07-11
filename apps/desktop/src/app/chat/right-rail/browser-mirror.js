@@ -42,8 +42,10 @@ export function BrowserMirror() {
     const [urlDraft, setUrlDraft] = useState(null);
     const imgRef = useRef(null);
     const overlayRef = useRef(null);
+    const surfaceRef = useRef(null);
     // Page CSS size of the last frame — the input coordinate space.
     const frameSizeRef = useRef({ height: 0, width: 0 });
+    const lastViewportRef = useRef({ height: 0, width: 0 });
     const activeIdRef = useRef('');
     activeIdRef.current = activeId;
     const exec = useCallback((payload) => {
@@ -51,6 +53,34 @@ export function BrowserMirror() {
             ?.exec(payload)
             .catch(() => undefined);
     }, []);
+    // Match the PAGE's viewport to the mirror surface so sites lay out at the
+    // panel's exact shape and frames fill it edge-to-edge (no letterboxing).
+    // `force` re-sends even when the panel size hasn't changed — needed after a
+    // navigation, which drops the per-page metrics override in some SPAs.
+    const syncViewport = useCallback((force = false) => {
+        const box = surfaceRef.current?.getBoundingClientRect();
+        if (!box || box.width < 80 || box.height < 80) {
+            return;
+        }
+        // Headless Page.startScreencast captures at the CSS viewport WIDTH and
+        // ignores deviceScaleFactor, so a 1x viewport upscales blurrily on a retina
+        // panel. Supersample instead: emulate the page at panel-size × pixel-density,
+        // then object-contain the larger frame down into the panel → the frame lands
+        // 1:1 on the physical retina pixels, sharp. (lastViewportRef holds the
+        // EMULATED size so the onFrame self-heal compares against it correctly.)
+        const ss = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        const width = Math.round(box.width * ss);
+        const height = Math.round(box.height * ss);
+        const last = lastViewportRef.current;
+        if (!force && Math.abs(width - last.width) < 4 && Math.abs(height - last.height) < 4) {
+            return;
+        }
+        lastViewportRef.current = { height, width };
+        exec({
+            method: 'Emulation.setDeviceMetricsOverride',
+            params: { deviceScaleFactor: 1, height, mobile: false, width }
+        });
+    }, [exec]);
     const attach = useCallback(async (targetId) => {
         setActiveId(targetId);
         if (imgRef.current) {
@@ -58,7 +88,13 @@ export function BrowserMirror() {
         }
         const ok = await api()?.attach(targetId);
         setStatus(ok ? 'live' : 'offline');
-    }, []);
+        if (ok) {
+            // Fresh session on a (possibly) new target — re-assert the panel-shaped
+            // viewport before the first frames arrive.
+            lastViewportRef.current = { height: 0, width: 0 };
+            syncViewport();
+        }
+    }, [syncViewport]);
     const refreshTabs = useCallback(async () => {
         const result = await api()?.list();
         if (!result?.running) {
@@ -105,8 +141,15 @@ export function BrowserMirror() {
                 return;
             }
             frameSizeRef.current = { height: frame.metadata.deviceHeight, width: frame.metadata.deviceWidth };
-            imgRef.current.src = `data:image/jpeg;base64,${frame.data}`;
+            imgRef.current.src = `data:image/png;base64,${frame.data}`;
             setStatus('live');
+            // Self-heal: if a frame arrives at a size far from the panel's viewport
+            // (a navigation dropped the override, or the browser fell back to its
+            // window size), re-assert the panel-shaped viewport once.
+            const want = lastViewportRef.current;
+            if (want.width && Math.abs(frame.metadata.deviceWidth - want.width) > 24) {
+                syncViewport(true);
+            }
         });
         const offEvent = api()?.onEvent(event => {
             if (event.targetId !== activeIdRef.current) {
@@ -114,17 +157,36 @@ export function BrowserMirror() {
             }
             if (event.type === 'url-changed' && event.url) {
                 setUrl(event.url);
+                // A top-frame navigation can drop the metrics override — re-assert the
+                // panel-shaped viewport so the new page fills the mirror too.
+                syncViewport(true);
             }
             if (event.type === 'detached') {
                 setStatus('offline');
             }
         });
+        // Keep the page viewport glued to the panel shape while the user resizes.
+        let resizeTimer = 0;
+        const observer = new ResizeObserver(() => {
+            window.clearTimeout(resizeTimer);
+            resizeTimer = window.setTimeout(syncViewport, 250);
+        });
+        if (surfaceRef.current) {
+            observer.observe(surfaceRef.current);
+        }
         return () => {
             stopped = true;
             window.clearInterval(timer);
+            window.clearTimeout(resizeTimer);
+            observer.disconnect();
             offFrame?.();
             offEvent?.();
-            void api()?.detach();
+            // Leave the real window usable: drop the panel-shaped viewport before
+            // letting go of the CDP session.
+            void api()
+                ?.exec({ method: 'Emulation.clearDeviceMetricsOverride', params: {} })
+                .catch(() => undefined)
+                .finally(() => void api()?.detach());
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -239,7 +301,7 @@ export function BrowserMirror() {
                                 navigate(event.currentTarget.value);
                                 event.currentTarget.blur();
                             }
-                        }, placeholder: "Type a URL and press Enter", spellCheck: false, value: urlDraft ?? url })] }), _jsx("div", { className: "relative min-h-0 flex-1 bg-black/90", children: status === 'offline' ? (_jsxs("div", { className: "flex h-full flex-col items-center justify-center gap-3 px-6 text-center", children: [_jsx(Codicon, { className: "text-(--ui-text-quaternary)", name: "globe", size: "1.6rem" }), _jsx("div", { className: "text-[0.75rem] text-(--ui-text-tertiary)", children: "The agent\u2019s browser isn\u2019t running." }), _jsx("button", { className: "rounded-md bg-(--ui-bg-secondary) px-3 py-1.5 text-[0.72rem] font-medium text-foreground transition-colors hover:bg-(--chrome-action-hover)", onClick: () => void startBrowser(), type: "button", children: "Start browser" })] })) : (_jsxs(_Fragment, { children: [_jsx("img", { alt: "", className: "h-full w-full select-none object-contain", draggable: false, ref: imgRef }), _jsx("div", { className: "absolute inset-0 cursor-default outline-none", onKeyDown: onKeyDown, onMouseDown: event => {
+                        }, placeholder: "Type a URL and press Enter", spellCheck: false, value: urlDraft ?? url })] }), _jsx("div", { className: "relative min-h-0 flex-1 bg-black/90", ref: surfaceRef, children: status === 'offline' ? (_jsxs("div", { className: "flex h-full flex-col items-center justify-center gap-3 px-6 text-center", children: [_jsx(Codicon, { className: "text-(--ui-text-quaternary)", name: "globe", size: "1.6rem" }), _jsx("div", { className: "text-[0.75rem] text-(--ui-text-tertiary)", children: "The agent\u2019s browser isn\u2019t running." }), _jsx("button", { className: "rounded-md bg-(--ui-bg-secondary) px-3 py-1.5 text-[0.72rem] font-medium text-foreground transition-colors hover:bg-(--chrome-action-hover)", onClick: () => void startBrowser(), type: "button", children: "Start browser" })] })) : (_jsxs(_Fragment, { children: [_jsx("img", { alt: "", className: "h-full w-full select-none object-contain", draggable: false, ref: imgRef }), _jsx("div", { className: "absolute inset-0 cursor-default outline-none", onKeyDown: onKeyDown, onMouseDown: event => {
                                 event.preventDefault();
                                 event.currentTarget.focus();
                                 sendMouse('mousePressed', event, { buttons: 1 });

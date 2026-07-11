@@ -1,6 +1,7 @@
 import { atom, computed } from 'nanostores';
 import { Codecs, persistentAtom } from '@/lib/persisted';
 import { arraysEqual, insertUniqueId } from '@/lib/storage';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $paneStates, ensurePaneRegistered, setPaneOpen, setPaneWidthOverride, togglePane } from './panes';
 export const SIDEBAR_DEFAULT_WIDTH = 237;
 export const SIDEBAR_MAX_WIDTH = 360;
@@ -40,7 +41,7 @@ export const $sidebarOpen = computed($paneStates, states => states[CHAT_SIDEBAR_
 export const $fileBrowserOpen = computed($paneStates, states => states[FILE_BROWSER_PANE_ID]?.open ?? false);
 // Persisted so a relaunch reopens the same rail tab. A restored file-tab id with
 // no matching tab is reconciled back to the preview tab in the preview store.
-export const $rightRailActiveTabId = persistentAtom(RIGHT_RAIL_ACTIVE_TAB_STORAGE_KEY, RIGHT_RAIL_PREVIEW_TAB_ID, { decode: raw => raw, encode: tabId => tabId });
+export const $rightRailActiveTabId = persistentAtom(RIGHT_RAIL_ACTIVE_TAB_STORAGE_KEY, NEMESIS_STUDENT_BUILD ? RIGHT_RAIL_SOURCES_TAB_ID : RIGHT_RAIL_PREVIEW_TAB_ID, { decode: raw => raw, encode: tabId => tabId });
 export const $sidebarWidth = computed($paneStates, states => {
     const override = states[CHAT_SIDEBAR_PANE_ID]?.widthOverride;
     return typeof override === 'number' ? override : SIDEBAR_DEFAULT_WIDTH;

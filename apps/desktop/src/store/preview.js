@@ -21,14 +21,16 @@ export const $filePreviewTabs = persistentAtom(TABS_STORAGE_KEY, [], {
     },
     encode: tabs => JSON.stringify(tabs, (key, value) => (key === 'dataUrl' ? undefined : value))
 });
-// Drop a restored active file-tab that didn't survive validation so the rail
-// never points at a tab that isn't there. Same for a restored 'browser' id —
-// the mirror tab always starts closed — and a restored 'sources' id outside
-// the student build (where that tab doesn't exist).
-if (($rightRailActiveTabId.get().startsWith('file:') &&
-    !$filePreviewTabs.get().some(tab => tab.id === $rightRailActiveTabId.get())) ||
-    $rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID ||
-    (!NEMESIS_STUDENT_BUILD && $rightRailActiveTabId.get() === RIGHT_RAIL_SOURCES_TAB_ID)) {
+// Students always enter through Sources; live browser/preview events can then
+// focus their own view. Outside the student build, retain the persisted-tab
+// validation used by the legacy rail.
+const restoredRightRailTabId = $rightRailActiveTabId.get();
+const invalidDefaultRailTab = (restoredRightRailTabId.startsWith('file:') &&
+    !$filePreviewTabs.get().some(tab => tab.id === restoredRightRailTabId)) ||
+    restoredRightRailTabId === RIGHT_RAIL_BROWSER_TAB_ID ||
+    restoredRightRailTabId === RIGHT_RAIL_SOURCES_TAB_ID;
+if ((NEMESIS_STUDENT_BUILD && restoredRightRailTabId !== RIGHT_RAIL_SOURCES_TAB_ID) ||
+    (!NEMESIS_STUDENT_BUILD && invalidDefaultRailTab)) {
     selectRightRailTab(NEMESIS_STUDENT_BUILD ? RIGHT_RAIL_SOURCES_TAB_ID : RIGHT_RAIL_PREVIEW_TAB_ID);
 }
 export const $filePreviewTarget = computed([$filePreviewTabs, $rightRailActiveTabId], (tabs, activeTabId) => {
@@ -268,9 +270,14 @@ export function dismissPreviewTarget() {
     }
     $previewTarget.set(null);
     if ($rightRailActiveTabId.get() === RIGHT_RAIL_PREVIEW_TAB_ID) {
-        selectRightRailTab($filePreviewTabs.get()[0]?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID);
+        selectRightRailTab($filePreviewTabs.get()[0]?.id ??
+            (NEMESIS_STUDENT_BUILD
+                ? $browserRailOpen.get()
+                    ? RIGHT_RAIL_BROWSER_TAB_ID
+                    : RIGHT_RAIL_SOURCES_TAB_ID
+                : RIGHT_RAIL_PREVIEW_TAB_ID));
     }
-    setPaneOpen(PREVIEW_PANE_ID, $filePreviewTabs.get().length > 0);
+    setPaneOpen(PREVIEW_PANE_ID, NEMESIS_STUDENT_BUILD || $filePreviewTabs.get().length > 0);
 }
 function closeFilePreviewTab(tabId) {
     if (!tabId.startsWith('file:')) {
@@ -284,9 +291,16 @@ function closeFilePreviewTab(tabId) {
     const next = current.filter(tab => tab.id !== tabId);
     $filePreviewTabs.set(next);
     if ($rightRailActiveTabId.get() === tabId) {
-        selectRightRailTab(next[Math.min(index, next.length - 1)]?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID);
+        selectRightRailTab(next[Math.min(index, next.length - 1)]?.id ??
+            (NEMESIS_STUDENT_BUILD
+                ? $previewTarget.get()
+                    ? RIGHT_RAIL_PREVIEW_TAB_ID
+                    : $browserRailOpen.get()
+                        ? RIGHT_RAIL_BROWSER_TAB_ID
+                        : RIGHT_RAIL_SOURCES_TAB_ID
+                : RIGHT_RAIL_PREVIEW_TAB_ID));
     }
-    if (next.length === 0 && !$previewTarget.get()) {
+    if (next.length === 0 && !$previewTarget.get() && !NEMESIS_STUDENT_BUILD) {
         setPaneOpen(PREVIEW_PANE_ID, false);
     }
 }
@@ -297,15 +311,18 @@ function closeBrowserRailTab() {
     }
     $browserRailOpen.set(false);
     if ($rightRailActiveTabId.get() === RIGHT_RAIL_BROWSER_TAB_ID) {
-        selectRightRailTab($previewTarget.get() ? RIGHT_RAIL_PREVIEW_TAB_ID : ($filePreviewTabs.get()[0]?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID));
+        selectRightRailTab($previewTarget.get()
+            ? RIGHT_RAIL_PREVIEW_TAB_ID
+            : ($filePreviewTabs.get()[0]?.id ??
+                (NEMESIS_STUDENT_BUILD ? RIGHT_RAIL_SOURCES_TAB_ID : RIGHT_RAIL_PREVIEW_TAB_ID)));
     }
-    if (!$previewTarget.get() && $filePreviewTabs.get().length === 0) {
+    if (!$previewTarget.get() && $filePreviewTabs.get().length === 0 && !NEMESIS_STUDENT_BUILD) {
         setPaneOpen(PREVIEW_PANE_ID, false);
     }
 }
 export function closeRightRailTab(tabId) {
-    // The Sources tab is pinned (student build) — the whole-rail close is the
-    // only way it leaves the strip.
+    // Sources is the pinned student-build home view. It can only leave when the
+    // whole rail is dismissed.
     if (tabId === RIGHT_RAIL_SOURCES_TAB_ID) {
         return;
     }

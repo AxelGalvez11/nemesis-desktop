@@ -9,7 +9,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, keymap, placeholder, ViewPlugin, WidgetType } from '@codemirror/view';
-import { useEffect, useRef } from 'react';
+import { useEffect, useImperativeHandle, useRef } from 'react';
 const WIKILINK_RE = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g;
 class BulletWidget extends WidgetType {
     eq() {
@@ -246,12 +246,28 @@ const noteTheme = EditorView.theme({
         width: '100%'
     }
 });
-export function NoteEditor({ initialValue, onChange, onOpenWikilink }) {
+export function NoteEditor({ initialValue, onChange, onOpenWikilink, ref }) {
     const hostRef = useRef(null);
+    const viewRef = useRef(null);
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
     const onOpenRef = useRef(onOpenWikilink);
     onOpenRef.current = onOpenWikilink;
+    useImperativeHandle(ref, () => ({
+        scrollToLine(line) {
+            const view = viewRef.current;
+            if (!view) {
+                return;
+            }
+            const clamped = Math.min(Math.max(line, 1), view.state.doc.lines);
+            const pos = view.state.doc.line(clamped).from;
+            view.dispatch({
+                effects: EditorView.scrollIntoView(pos, { y: 'start', yMargin: 48 }),
+                selection: { anchor: pos }
+            });
+            view.focus();
+        }
+    }), []);
     useEffect(() => {
         const host = hostRef.current;
         if (!host) {
@@ -275,7 +291,11 @@ export function NoteEditor({ initialValue, onChange, onOpenWikilink }) {
             ],
             parent: host
         });
-        return () => view.destroy();
+        viewRef.current = view;
+        return () => {
+            viewRef.current = null;
+            view.destroy();
+        };
         // The parent remounts this component per note (key={path}); initialValue is
         // intentionally captured once per mount.
         // eslint-disable-next-line react-hooks/exhaustive-deps

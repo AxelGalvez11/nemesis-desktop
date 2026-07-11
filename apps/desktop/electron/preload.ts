@@ -116,6 +116,30 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
       return () => ipcRenderer.removeListener('hermes:schoolBrowser:event', listener)
     }
   },
+  // Native school browser (WebContentsView tabs over the chat right rail).
+  schoolView: {
+    getState: () => ipcRenderer.invoke('hermes:schoolView:getState'),
+    newTab: url => ipcRenderer.invoke('hermes:schoolView:newTab', url),
+    closeTab: id => ipcRenderer.invoke('hermes:schoolView:closeTab', id),
+    activate: id => ipcRenderer.invoke('hermes:schoolView:activate', id),
+    navigate: url => ipcRenderer.invoke('hermes:schoolView:navigate', url),
+    history: direction => ipcRenderer.invoke('hermes:schoolView:history', direction),
+    reload: () => ipcRenderer.invoke('hermes:schoolView:reload'),
+    setBounds: rect => ipcRenderer.invoke('hermes:schoolView:setBounds', rect),
+    setVisible: visible => ipcRenderer.invoke('hermes:schoolView:setVisible', visible),
+    onState: callback => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on('hermes:schoolView:state', listener)
+
+      return () => ipcRenderer.removeListener('hermes:schoolView:state', listener)
+    },
+    onDownload: callback => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on('hermes:schoolView:download', listener)
+
+      return () => ipcRenderer.removeListener('hermes:schoolView:download', listener)
+    }
+  },
   gitRoot: startPath => ipcRenderer.invoke('hermes:fs:gitRoot', startPath),
   revealPath: targetPath => ipcRenderer.invoke('hermes:fs:reveal', targetPath),
   renamePath: (targetPath, newName) => ipcRenderer.invoke('hermes:fs:rename', targetPath, newName),

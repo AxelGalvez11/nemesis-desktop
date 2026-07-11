@@ -114,6 +114,23 @@ declare global {
         ) => () => void
         onEvent: (callback: (event: { targetId: string; type: string; url?: string }) => void) => () => void
       }
+      // Native school browser: real WebContentsView tabs the main process
+      // composites over the chat right rail. The renderer draws only the tab
+      // strip + URL bar (native-browser-panel.tsx) and reports the placeholder
+      // rect in CSS px — the main process scales by the live zoomFactor.
+      schoolView?: {
+        getState: () => Promise<HermesSchoolViewState>
+        newTab: (url?: string) => Promise<HermesSchoolViewState>
+        closeTab: (id: number) => Promise<HermesSchoolViewState>
+        activate: (id: number) => Promise<HermesSchoolViewState>
+        navigate: (url: string) => Promise<HermesSchoolViewState>
+        history: (direction: 'back' | 'forward') => Promise<HermesSchoolViewState>
+        reload: () => Promise<HermesSchoolViewState>
+        setBounds: (rect: { height: number; width: number; x: number; y: number }) => Promise<boolean>
+        setVisible: (visible: boolean) => Promise<boolean>
+        onState: (callback: (state: HermesSchoolViewState) => void) => () => void
+        onDownload: (callback: (payload: HermesSchoolViewDownload) => void) => () => void
+      }
       gitRoot?: (path: string) => Promise<string | null>
       // Reveal a path in the OS file manager (Finder / Explorer).
       revealPath?: (path: string) => Promise<boolean>
@@ -707,4 +724,26 @@ export interface HermesSelectPathsOptions {
 export interface BackendExit {
   code: number | null
   signal: string | null
+}
+
+export interface HermesSchoolViewTab {
+  /** webContents id of the tab's WebContentsView. */
+  id: number
+  title: string
+  url: string
+}
+
+export interface HermesSchoolViewState {
+  activeId: null | number
+  mode: 'mirror' | 'native'
+  tabs: HermesSchoolViewTab[]
+  visible: boolean
+}
+
+/** A finished download in the school session (`state` is Electron's
+ *  DownloadItem done state, relayed as-is). */
+export interface HermesSchoolViewDownload {
+  filename: string
+  path: string
+  state: 'cancelled' | 'completed' | 'interrupted'
 }

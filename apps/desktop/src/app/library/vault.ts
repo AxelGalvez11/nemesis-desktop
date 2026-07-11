@@ -70,16 +70,106 @@ export function extractWikilinks(markdown: string): string[] {
   return targets
 }
 
-/** Build the link/backlink index. Pure. */
+const MD_LINK = /\[[^\]]*\]\(([^)]+)\)/g
+
+/** Extract relative ".md" link targets ("[label](Note.md)" / "[label](folder/Note.md)")
+ *  from markdown, as bare titles (matches VaultNote.title — the same key wikilinks
+ *  resolve by). Absolute URLs, mailto/tel links, and protocol-relative links are skipped;
+ *  only vault-relative markdown links count as a note-to-note connection. */
+export function extractRelativeMdLinks(markdown: string): string[] {
+  const seen = new Set<string>()
+  const targets: string[] = []
+
+  for (const match of markdown.matchAll(MD_LINK)) {
+    const raw = match[1].trim().split('#')[0]
+
+    if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) {
+      continue // absolute URL / mailto: / protocol-relative — not a vault note
+    }
+
+    if (!raw.toLowerCase().endsWith('.md')) {
+      continue
+    }
+
+    const fileName = raw.split('/').pop() ?? ''
+    let target = fileName.replace(/\.md$/i, '')
+
+    try {
+      target = decodeURIComponent(target)
+    } catch {
+      // Malformed percent-escape — fall back to the raw text.
+    }
+
+    if (target && !seen.has(target.toLowerCase())) {
+      seen.add(target.toLowerCase())
+      targets.push(target)
+    }
+  }
+
+  return targets
+}
+
+export interface NoteHeading {
+  /** ATX heading level — the Outline tab is a table of contents for h1–h3 only. */
+  level: 1 | 2 | 3
+  text: string
+  /** 1-based line number in the note's content, so the editor can scroll there. */
+  line: number
+}
+
+const ATX_HEADING = /^(#{1,3})\s+(.+?)\s*#*\s*$/
+const FENCE = /^(`{3,}|~{3,})/
+
+/** Table of contents: h1–h3 ATX headings ("# ", "## ", "### ") in document order.
+ *  Headings inside fenced code blocks don't count (a Python "# comment" isn't a section). */
+export function extractHeadings(markdown: string): NoteHeading[] {
+  const headings: NoteHeading[] = []
+  let fenceChar: null | string = null
+
+  markdown.split('\n').forEach((raw, index) => {
+    const fence = FENCE.exec(raw.trim())
+
+    if (fence) {
+      fenceChar = fenceChar === fence[1][0] ? null : (fenceChar ?? fence[1][0])
+
+      return
+    }
+
+    if (fenceChar) {
+      return
+    }
+
+    const match = ATX_HEADING.exec(raw)
+
+    if (match) {
+      headings.push({ level: match[1].length as 1 | 2 | 3, line: index + 1, text: match[2].trim() })
+    }
+  })
+
+  return headings
+}
+
+/** Build the link/backlink index. Pure. Links come from both [[wikilinks]] and
+ *  relative ".md" markdown links; backlinks are simply the reverse of that graph. */
 export function buildIndex(notes: VaultNote[]): VaultIndex {
   const byLower = new Map(notes.map(note => [note.title.toLowerCase(), note.title]))
   const links = new Map<string, string[]>()
   const backlinks = new Map<string, string[]>(notes.map(note => [note.title, []]))
 
   for (const note of notes) {
-    const resolved = extractWikilinks(note.content)
-      .map(target => byLower.get(target.toLowerCase()))
-      .filter((title): title is string => Boolean(title) && title !== note.title)
+    const rawTargets = [...extractWikilinks(note.content), ...extractRelativeMdLinks(note.content)]
+    const seen = new Set<string>()
+    const resolved: string[] = []
+
+    for (const raw of rawTargets) {
+      const title = byLower.get(raw.toLowerCase())
+
+      if (title && title !== note.title && !seen.has(title)) {
+        seen.add(title)
+        resolved.push(title)
+      }
+    }
+
     links.set(note.title, resolved)
 
     for (const target of resolved) {
@@ -154,6 +244,29 @@ export async function loadVaultContents(): Promise<VaultContents> {
 /** Notes-only (recursive) — the Graph page and backlink index consume this. */
 export async function loadVault(): Promise<VaultNote[]> {
   return (await loadVaultContents()).notes
+}
+
+/** Notes directly inside one vault folder (non-recursive, no PDF/image scan) — cheaper
+ *  than loadVaultContents() when a caller only needs one folder, e.g. the Recorder
+ *  matching saved recordings back to their auto-saved Lectures notes. */
+export async function loadFolderNotes(folder: string): Promise<VaultNote[]> {
+  const api = bridge()
+  const dirPath = folder ? `${VAULT_DIR}/${folder}` : VAULT_DIR
+  const dir = await api.readDir(dirPath)
+
+  if (dir.error) {
+    return []
+  }
+
+  const reads = dir.entries
+    .filter(entry => !entry.isDirectory && entry.name.toLowerCase().endsWith('.md'))
+    .map(async entry => {
+      const read = await api.readFileText(entry.path)
+
+      return { content: read.text ?? '', folder, path: entry.path, title: entry.name.replace(/\.md$/i, '') }
+    })
+
+  return Promise.all(reads)
 }
 
 export async function saveNote(title: string, content: string, folder = ''): Promise<string> {

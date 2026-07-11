@@ -18,7 +18,7 @@ import {
   type ViewUpdate,
   WidgetType
 } from '@codemirror/view'
-import { useEffect, useRef } from 'react'
+import { type Ref, useEffect, useImperativeHandle, useRef } from 'react'
 
 const WIKILINK_RE = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g
 
@@ -311,18 +311,49 @@ const noteTheme = EditorView.theme({
   }
 })
 
+export interface NoteEditorHandle {
+  /** Scroll the editor to a 1-based line number and place the cursor there
+   *  (the Outline tab in the right rail drives this). */
+  scrollToLine: (line: number) => void
+}
+
 export interface NoteEditorProps {
   initialValue: string
   onChange: (value: string) => void
   onOpenWikilink: (target: string) => void
+  ref?: Ref<NoteEditorHandle>
 }
 
-export function NoteEditor({ initialValue, onChange, onOpenWikilink }: NoteEditorProps) {
+export function NoteEditor({ initialValue, onChange, onOpenWikilink, ref }: NoteEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
+  const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   const onOpenRef = useRef(onOpenWikilink)
   onOpenRef.current = onOpenWikilink
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToLine(line) {
+        const view = viewRef.current
+
+        if (!view) {
+          return
+        }
+
+        const clamped = Math.min(Math.max(line, 1), view.state.doc.lines)
+        const pos = view.state.doc.line(clamped).from
+
+        view.dispatch({
+          effects: EditorView.scrollIntoView(pos, { y: 'start', yMargin: 48 }),
+          selection: { anchor: pos }
+        })
+        view.focus()
+      }
+    }),
+    []
+  )
 
   useEffect(() => {
     const host = hostRef.current
@@ -350,7 +381,12 @@ export function NoteEditor({ initialValue, onChange, onOpenWikilink }: NoteEdito
       parent: host
     })
 
-    return () => view.destroy()
+    viewRef.current = view
+
+    return () => {
+      viewRef.current = null
+      view.destroy()
+    }
     // The parent remounts this component per note (key={path}); initialValue is
     // intentionally captured once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
