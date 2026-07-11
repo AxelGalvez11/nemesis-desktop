@@ -280,7 +280,9 @@ function MindmapCanvas({ file }: { file: MindmapFile }) {
         editable: true,
         el: host,
         keypress: false,
-        overflowHidden: true,
+        // NEVER set overflowHidden: true — mind-elixir treats it as "the host manages
+        // interaction" and skips binding its mouse handlers entirely (no drag/click/pan).
+        mouseSelectionButton: 0,
         theme: MINDMAP_THEME,
         toolBar: false
       })
