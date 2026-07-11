@@ -108,7 +108,7 @@ import { $terminalTakeover } from './right-sidebar/store'
 import { TerminalPaneChrome } from './right-sidebar/terminal/chrome'
 import { PersistentTerminal } from './right-sidebar/terminal/persistent'
 import { closeActiveTerminal } from './right-sidebar/terminal/terminals'
-import { CRON_ROUTE, NEW_CHAT_ROUTE, routeSessionId, sessionRoute, SETTINGS_ROUTE } from './routes'
+import { CRON_ROUTE, NEW_CHAT_ROUTE, routeSessionId, sessionRoute, SETTINGS_ROUTE, TODAY_ROUTE } from './routes'
 import { SessionPickerOverlay } from './session-picker-overlay'
 import { SessionSwitcher } from './session-switcher'
 import { useContextSuggestions } from './session/hooks/use-context-suggestions'
@@ -146,6 +146,7 @@ const LibraryView = lazy(async () => ({ default: (await import('./library')).Lib
 const GraphView = lazy(async () => ({ default: (await import('./graph')).GraphView }))
 const RecorderView = lazy(async () => ({ default: (await import('./recorder')).RecorderView }))
 const CalendarView = lazy(async () => ({ default: (await import('./calendar')).CalendarView }))
+const TodayView = lazy(async () => ({ default: (await import('./today')).TodayView }))
 
 // Latest cron-job sessions surfaced in the collapsed "Cron jobs" section. The
 // Cron sessions are written by a background scheduler tick (the desktop
@@ -224,6 +225,14 @@ export function DesktopController() {
   const narrowViewport = useMediaQuery(SIDEBAR_COLLAPSE_MEDIA_QUERY)
 
   const routedSessionId = routeSessionId(location.pathname)
+
+  // React Router gives the initial history entry the stable `default` key. Use
+  // that to distinguish a cold boot at `/` from an intentional later trip to
+  // NEW_CHAT_ROUTE (Today "Start", New session, etc.), which must still open
+  // the composer in the student build.
+  const studentColdStart =
+    NEMESIS_STUDENT_BUILD && location.pathname === NEW_CHAT_ROUTE && location.key === 'default'
+
   const routeToken = `${location.pathname}:${location.search}:${location.hash}`
   const routeTokenRef = useRef(routeToken)
   routeTokenRef.current = routeToken
@@ -300,7 +309,7 @@ export function DesktopController() {
   // below, so we never boot-loop into an error screen.
   const restoredLastSessionRef = useRef(false)
   useEffect(() => {
-    if (restoredLastSessionRef.current) {
+    if (NEMESIS_STUDENT_BUILD || restoredLastSessionRef.current) {
       return
     }
 
@@ -1338,8 +1347,16 @@ export function DesktopController() {
       )}
       <PaneMain>
         <Routes>
-          <Route element={chatView} index />
+          <Route element={studentColdStart ? <Navigate replace to={TODAY_ROUTE} /> : chatView} index />
           <Route element={chatView} path=":sessionId" />
+          <Route
+            element={
+              <Suspense fallback={null}>
+                <TodayView />
+              </Suspense>
+            }
+            path="today"
+          />
           <Route
             element={
               <Suspense fallback={null}>
@@ -1409,9 +1426,9 @@ export function DesktopController() {
           <Route element={null} path="settings" />
           <Route element={null} path="command-center" />
           <Route element={null} path="agents" />
-          <Route element={<Navigate replace to={NEW_CHAT_ROUTE} />} path="new" />
+          <Route element={<Navigate replace to={NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE} />} path="new" />
           <Route element={<LegacySessionRedirect />} path="sessions/:sessionId" />
-          <Route element={<Navigate replace to={NEW_CHAT_ROUTE} />} path="*" />
+          <Route element={<Navigate replace to={NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE} />} path="*" />
         </Routes>
       </PaneMain>
       {/*

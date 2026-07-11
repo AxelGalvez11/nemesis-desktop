@@ -134,6 +134,7 @@ export type SidebarNavId =
   | 'settings'
   | 'skills'
   | 'study'
+  | 'today'
 
 export interface SidebarNavItem {
   id: SidebarNavId

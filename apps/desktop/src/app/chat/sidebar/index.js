@@ -24,7 +24,7 @@ import { $newChatProfile, $profiles, $profileScope, ALL_PROFILES, normalizeProfi
 import { $activeProjectId, $projects, $projectScope, $projectTree, $projectTreeLoading, $removedSessionIds, $reposScanning, ALL_PROJECTS, enterProject, exitProjectScope, fetchProjectSessions, openProjectCreate, refreshProjects, refreshProjectTree, refreshWorktrees, scanAndRecordRepos } from '@/store/projects';
 import { $cronSessions, $currentCwd, $gatewayState, $messagingPlatformTotals, $messagingSessions, $messagingTruncated, $selectedStoredSessionId, $sessionProfileTotals, $sessions, $sessionsLoading, $sessionsTotal, $workingSessionIds, sessionPinId, setCurrentCwd } from '@/store/session';
 import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis';
-import { ARTIFACTS_ROUTE, CALENDAR_ROUTE, GRAPH_ROUTE, LIBRARY_ROUTE, MESSAGING_ROUTE, RECORDER_ROUTE, SETTINGS_ROUTE, SKILLS_ROUTE, STUDY_ROUTE } from '../../routes';
+import { ARTIFACTS_ROUTE, CALENDAR_ROUTE, GRAPH_ROUTE, LIBRARY_ROUTE, MESSAGING_ROUTE, RECORDER_ROUTE, SETTINGS_ROUTE, SKILLS_ROUTE, STUDY_ROUTE, TODAY_ROUTE } from '../../routes';
 import { countLabel } from './chrome';
 import { SidebarCronJobsSection } from './cron-jobs-section';
 import { SidebarLoadMoreRow } from './load-more-row';
@@ -41,6 +41,7 @@ const NON_SESSION_INITIAL_ROWS = 3;
 const NON_SESSION_LOAD_STEP = 10;
 const NEW_SESSION_KBD = comboTokens('mod+n');
 const SIDEBAR_NAV_ALL = [
+    { id: 'today', label: 'Today', icon: props => _jsx(Codicon, { name: "dashboard", ...props }), route: TODAY_ROUTE },
     {
         id: 'new-session',
         label: '',
@@ -700,7 +701,8 @@ export function ChatSidebar({ currentView, onNavigate, onLoadMoreSessions, onLoa
         // — on hover (group-hover/reveal) or when keyboard-pinned (data-forced).
         'in-data-[pane-hover-reveal=open]:pointer-events-auto in-data-[pane-hover-reveal=open]:border-(--sidebar-edge-border) in-data-[pane-hover-reveal=open]:bg-(--ui-sidebar-surface-background) in-data-[pane-hover-reveal=open]:opacity-100', 'group-hover/reveal:pointer-events-auto group-hover/reveal:border-(--sidebar-edge-border) group-hover/reveal:bg-(--ui-sidebar-surface-background) group-hover/reveal:opacity-100'), collapsible: "none", children: [_jsxs(SidebarContent, { className: "gap-0 overflow-hidden bg-transparent px-2.5", children: [_jsx(SidebarGroup, { className: "shrink-0 p-0 pb-2 pt-[calc(var(--titlebar-height)+0.375rem)]", children: _jsx(SidebarGroupContent, { children: _jsx(SidebarMenu, { className: "gap-px", children: SIDEBAR_NAV.map(item => {
                                     const isInteractive = Boolean(item.action) || Boolean(item.route);
-                                    const active = (item.id === 'skills' && currentView === 'skills') ||
+                                    const active = (item.id === 'today' && currentView === 'today') ||
+                                        (item.id === 'skills' && currentView === 'skills') ||
                                         (item.id === 'messaging' && currentView === 'messaging') ||
                                         (item.id === 'artifacts' && currentView === 'artifacts');
                                     const isNewSession = item.id === 'new-session';

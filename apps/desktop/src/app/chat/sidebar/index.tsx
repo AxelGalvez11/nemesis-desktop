@@ -110,7 +110,8 @@ import {
   RECORDER_ROUTE,
   SETTINGS_ROUTE,
   SKILLS_ROUTE,
-  STUDY_ROUTE
+  STUDY_ROUTE,
+  TODAY_ROUTE
 } from '../../routes'
 import type { SidebarNavItem } from '../../types'
 
@@ -147,6 +148,7 @@ const NON_SESSION_LOAD_STEP = 10
 const NEW_SESSION_KBD = comboTokens('mod+n')
 
 const SIDEBAR_NAV_ALL: SidebarNavItem[] = [
+  { id: 'today', label: 'Today', icon: props => <Codicon name="dashboard" {...props} />, route: TODAY_ROUTE },
   {
     id: 'new-session',
     label: '',
@@ -1081,6 +1083,7 @@ export function ChatSidebar({
                 const isInteractive = Boolean(item.action) || Boolean(item.route)
 
                 const active =
+                  (item.id === 'today' && currentView === 'today') ||
                   (item.id === 'skills' && currentView === 'skills') ||
                   (item.id === 'messaging' && currentView === 'messaging') ||
                   (item.id === 'artifacts' && currentView === 'artifacts')

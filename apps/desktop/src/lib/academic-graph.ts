@@ -108,11 +108,11 @@ export async function loadAcademicGraph(): Promise<AcademicGraph> {
   try {
     const result = await api.readFileText(ACADEMIC_GRAPH_PATH)
 
-    if (result.error || !result.content) {
+    if (!result.text) {
       return emptyGraph()
     }
 
-    const parsed = JSON.parse(result.content) as Partial<AcademicGraph>
+    const parsed = JSON.parse(result.text) as Partial<AcademicGraph>
 
     return {
       changes: Array.isArray(parsed.changes) ? parsed.changes : [],

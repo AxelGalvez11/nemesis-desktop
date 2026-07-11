@@ -1487,7 +1487,8 @@ export const en: Translations = {
       library: 'Library',
       graph: 'Graph',
       recorder: 'Recorder',
-      calendar: 'Calendar'
+      calendar: 'Calendar',
+      today: 'Today'
     },
     searchAria: 'Search sessions',
     searchPlaceholder: 'Search sessions…',
