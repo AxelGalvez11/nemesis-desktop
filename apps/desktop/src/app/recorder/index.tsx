@@ -327,27 +327,31 @@ export function RecorderView() {
 
   return (
     <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background)">
-      <header className="px-4 pb-2 pt-5 sm:px-6 sm:pt-6">
+      {/* Short-viewport compaction (high zoom shrinks the effective window):
+          the record button must sit in the FIRST screenful at every zoom step,
+          so header + hero tighten below ~720px effective height instead of
+          pushing the primary control under the fold. */}
+      <header className="px-4 pb-2 pt-5 sm:px-6 sm:pt-6 [@media(max-height:720px)]:pb-1 [@media(max-height:720px)]:pt-3">
         <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">Capture desk</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em]">Recorder</h1>
-        <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+        <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] [@media(max-height:720px)]:text-xl">Recorder</h1>
+        <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground [@media(max-height:720px)]:hidden">
           Capture your microphone{withSystemAudio ? ' and this computer’s audio' : ''} locally. Keep a live notepad,
           review on-device transcription, and collect the pharmacology terms that matter.
         </p>
       </header>
 
-      <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)] sm:mx-6">
+      <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)] sm:mx-6 [@media(max-height:720px)]:mt-2">
         <div className="grid items-stretch lg:grid-cols-[minmax(0,0.9fr)_minmax(20rem,1.1fr)]">
-          <div className="flex min-w-0 flex-col items-start gap-5 border-b border-(--ui-stroke-tertiary) p-5 sm:flex-row sm:items-center sm:p-6 lg:border-b-0 lg:border-r">
-            <div className="grid size-24 shrink-0 place-items-center rounded-full border border-(--theme-primary)/25 bg-(--ui-bg-primary) shadow-[inset_0_0_0_7px_var(--ui-bg-elevated)]">
+          <div className="flex min-w-0 flex-col items-start gap-5 border-b border-(--ui-stroke-tertiary) p-5 sm:flex-row sm:items-center sm:p-6 lg:border-b-0 lg:border-r [@media(max-height:720px)]:gap-3 [@media(max-height:720px)]:p-3">
+            <div className="grid size-24 shrink-0 place-items-center rounded-full border border-(--theme-primary)/25 bg-(--ui-bg-primary) shadow-[inset_0_0_0_7px_var(--ui-bg-elevated)] [@media(max-height:720px)]:size-16 [@media(max-height:720px)]:shadow-[inset_0_0_0_4px_var(--ui-bg-elevated)]">
               <Button
                 aria-label="Start recording"
-                className="size-20 rounded-full shadow-lg transition-[transform,opacity] active:scale-[0.96]"
+                className="size-20 rounded-full shadow-lg transition-[transform,opacity] active:scale-[0.96] [@media(max-height:720px)]:size-12"
                 disabled={stopping || starting}
                 onClick={() => void startRecording()}
                 size="icon-lg"
               >
-                <IconMicrophone className="size-7" />
+                <IconMicrophone className="size-7 [@media(max-height:720px)]:size-5" />
               </Button>
             </div>
             <div className="min-w-0">

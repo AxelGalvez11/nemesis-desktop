@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { SetTitlebarToolGroup } from '@/app/shell/titlebar-controls'
 import { Button } from '@/components/ui/button'
@@ -186,14 +186,37 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
   }
 
   const activeSegmentLabel = segments.find(segment => segment.id === activeSegmentId)?.label ?? 'Sources'
+  // Fullscreen: the rail lifts out of its column and covers the whole window
+  // (owner ask — reading a paper or steering the browser in a narrow strip is
+  // cramped). Plain fixed positioning; the native browser view follows
+  // automatically because its bounds track the placeholder's live rect.
+  const [fullscreen, setFullscreen] = useState(false)
+
+  useEffect(() => {
+    if (!fullscreen) {
+      return
+    }
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setFullscreen(false)
+      }
+    }
+
+    window.addEventListener('keydown', onKey)
+
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fullscreen])
 
   return (
     <aside
       className={cn(
-        'relative flex h-full w-full min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)',
-        panesFlipped ? 'border-r' : 'border-l'
+        'flex min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)',
+        fullscreen
+          ? 'fixed inset-0 z-40 border-none'
+          : cn('relative h-full w-full', panesFlipped ? 'border-r' : 'border-l')
       )}
-      style={{ paddingTop: 'var(--right-rail-top-inset, 0px)' }}
+      style={fullscreen ? undefined : { paddingTop: 'var(--right-rail-top-inset, 0px)' }}
     >
       <div className="flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2 [-webkit-app-region:no-drag]">
         <SegmentedControl
@@ -202,6 +225,18 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
           options={segments}
           value={activeSegmentId}
         />
+        <Tip label={fullscreen ? 'Exit full screen' : 'Full screen'}>
+          <Button
+            aria-label={fullscreen ? 'Exit full screen' : 'Full screen'}
+            className="ml-auto shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100"
+            onClick={() => setFullscreen(current => !current)}
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+          >
+            <Codicon name={fullscreen ? 'screen-normal' : 'screen-full'} size="0.75rem" />
+          </Button>
+        </Tip>
         <Tip
           label={
             activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
@@ -215,8 +250,11 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
                 ? t.preview.closePane
                 : t.preview.closeTab(activeSegmentLabel)
             }
-            className="ml-auto shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100"
-            onClick={closeActiveView}
+            className="shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100"
+            onClick={() => {
+              setFullscreen(false)
+              closeActiveView()
+            }}
             size="icon-xs"
             type="button"
             variant="ghost"

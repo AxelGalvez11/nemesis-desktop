@@ -7,7 +7,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { type ChatMessage, chatMessageText } from '@/lib/chat-messages'
+import { useLinkTitle } from '@/lib/external-link'
 import { cn } from '@/lib/utils'
+import { openBrowserRail } from '@/store/browser-rail'
 import { $messages } from '@/store/session'
 import { $focusedSourceUrl } from '@/store/source-focus'
 
@@ -245,10 +247,74 @@ export function SourceFavicon({ domain }: { domain: string }) {
   )
 }
 
+/** One reading-list row, ChatGPT-anatomy: publisher line (favicon + badge),
+ *  the real article title (fetched lazily, 2-line clamp) as the prominent
+ *  element, then the dim domain. Click reads it in the rail's own Browser
+ *  tab; the hover ↗ is the external escape hatch. */
+function SourceRow({
+  focused,
+  refCb,
+  source
+}: {
+  focused: boolean
+  refCb: (el: HTMLButtonElement | null) => void
+  source: SourceRef
+}) {
+  const fetchedTitle = useLinkTitle(source.url)
+  const title = fetchedTitle || source.title
+
+  return (
+    <div className="group/source relative">
+      <button
+        className={cn(
+          'flex w-full flex-col items-start gap-0.5 rounded-lg px-2 py-2 pr-7 text-left transition-colors hover:bg-(--chrome-action-hover)',
+          focused && 'bg-card ring-2 ring-(--theme-primary)/70 ring-offset-1 ring-offset-background'
+        )}
+        onClick={() => {
+          void window.hermesDesktop?.schoolView?.newTab?.(source.url)
+          openBrowserRail()
+        }}
+        ref={refCb}
+        title={`${title}\n${source.url}\nClick: read here · ↗: open in your browser`}
+        type="button"
+      >
+        <span className="flex min-w-0 max-w-full items-center gap-1.5 text-[0.65rem] text-muted-foreground">
+          <SourceFavicon domain={source.domain} />
+          <span className="truncate">{source.badge}</span>
+        </span>
+        <span className="line-clamp-2 text-xs font-medium leading-snug text-foreground/90">{title}</span>
+        <span className="max-w-full truncate text-[0.65rem] text-muted-foreground/60">{source.domain}</span>
+      </button>
+      <button
+        aria-label="Open in your browser"
+        className="absolute right-1.5 top-2 grid place-items-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-focus-within/source:opacity-70 group-hover/source:opacity-70"
+        onClick={() => void window.hermesDesktop?.openExternal?.(source.url)}
+        title="Open in your browser"
+        type="button"
+      >
+        <Codicon name="link-external" size="0.625rem" />
+      </button>
+    </div>
+  )
+}
+
 export function SourcesTab() {
   const messages = useStore($messages)
   const focusedSourceUrl = useStore($focusedSourceUrl)
   const sources = useMemo(() => extractSources(messages), [messages])
+  // ChatGPT splits its drawer into cited-in-the-answer vs everything else the
+  // run touched. Cited = named in an ASSISTANT message's text; the rest came
+  // from tool traffic only.
+  const citedUrls = useMemo(() => {
+    const assistantText = messages
+      .filter(message => message.role === 'assistant')
+      .map(message => chatMessageText(message))
+      .join('\n')
+
+    return new Set(sourcesFromText(assistantText).map(source => source.url))
+  }, [messages])
+  const cited = useMemo(() => sources.filter(source => citedUrls.has(source.url)), [citedUrls, sources])
+  const consulted = useMemo(() => sources.filter(source => !citedUrls.has(source.url)), [citedUrls, sources])
   const sourceElements = useRef(new Map<string, HTMLButtonElement>())
 
   useEffect(() => {
@@ -271,10 +337,6 @@ export function SourcesTab() {
     return () => window.clearTimeout(clearFocusTimer)
   }, [focusedSourceUrl, sources])
 
-  const openExternal = (url: string) => {
-    void window.hermesDesktop?.openExternal?.(url)
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-1">
       {/* Rail header. (The Browser opener that used to live here is gone — the
@@ -295,40 +357,53 @@ export function SourcesTab() {
           </div>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
-          <div className="flex flex-wrap gap-1.5">
-            {sources.map(source => (
-              <button
-                className={cn(
-                  SOURCE_CHIP_CLASS_NAME,
-                  focusedSourceUrl === source.url &&
-                    'bg-card text-foreground ring-2 ring-(--theme-primary)/70 ring-offset-1 ring-offset-background'
-                )}
-                key={source.url}
-                onClick={() => openExternal(source.url)}
-                ref={element => {
-                  if (element) {
-                    sourceElements.current.set(source.url, element)
-                  } else {
-                    sourceElements.current.delete(source.url)
-                  }
-                }}
-                title={`${source.title}\n${source.url}`}
-                type="button"
-              >
-                <SourceFavicon domain={source.domain} />
-                <span className="max-w-[8.5rem] truncate text-foreground/80">{source.title}</span>
-                <span className="shrink-0 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/55">
-                  {source.badge}
-                </span>
-                <Codicon
-                  className="ml-0.5 shrink-0 opacity-0 transition-opacity group-hover/source:opacity-60 group-focus-visible/source:opacity-60"
-                  name="link-external"
-                  size="0.625rem"
-                />
-              </button>
-            ))}
-          </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-4">
+          {cited.length > 0 && (
+            <>
+              <div className="px-2 pb-1 pt-1 text-[0.6rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/60">
+                Citations
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {cited.map(source => (
+                  <SourceRow
+                    focused={focusedSourceUrl === source.url}
+                    key={source.url}
+                    refCb={element => {
+                      if (element) {
+                        sourceElements.current.set(source.url, element)
+                      } else {
+                        sourceElements.current.delete(source.url)
+                      }
+                    }}
+                    source={source}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+          {consulted.length > 0 && (
+            <>
+              <div className="px-2 pb-1 pt-3 text-[0.6rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/60">
+                Also consulted
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {consulted.map(source => (
+                  <SourceRow
+                    focused={focusedSourceUrl === source.url}
+                    key={source.url}
+                    refCb={element => {
+                      if (element) {
+                        sourceElements.current.set(source.url, element)
+                      } else {
+                        sourceElements.current.delete(source.url)
+                      }
+                    }}
+                    source={source}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
