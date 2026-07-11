@@ -48,6 +48,41 @@ const PORTALS: Portal[] = [
     name: 'Canvas',
     origin: 'https://canvas.instructure.com',
     url: 'https://canvas.instructure.com/'
+  },
+  {
+    hint: 'Flashcards and study sets',
+    id: 'quizlet',
+    name: 'Quizlet',
+    origin: 'https://quizlet.com',
+    url: 'https://quizlet.com/'
+  },
+  {
+    hint: 'Notes, docs, and course workspaces',
+    id: 'notion',
+    name: 'Notion',
+    origin: 'https://www.notion.so',
+    url: 'https://www.notion.so/'
+  },
+  {
+    hint: 'School files and shared folders',
+    id: 'google-drive',
+    name: 'Google Drive',
+    origin: 'https://drive.google.com',
+    url: 'https://drive.google.com/drive/my-drive'
+  },
+  {
+    hint: 'Class notebooks and course notes',
+    id: 'onenote',
+    name: 'OneNote',
+    origin: 'https://www.onenote.com',
+    url: 'https://www.onenote.com/notebooks'
+  },
+  {
+    hint: 'Classes, meetings, and assignments',
+    id: 'teams',
+    name: 'Microsoft Teams',
+    origin: 'https://teams.microsoft.com',
+    url: 'https://teams.microsoft.com/v2/'
   }
 ]
 

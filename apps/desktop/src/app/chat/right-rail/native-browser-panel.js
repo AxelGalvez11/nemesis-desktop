@@ -18,6 +18,8 @@ import { useStore } from '@nanostores/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Codicon } from '@/components/ui/codicon';
 import { cn } from '@/lib/utils';
+import { $rightRailActiveTabId, PREVIEW_PANE_ID, RIGHT_RAIL_BROWSER_TAB_ID } from '@/store/layout';
+import { $paneOpen } from '@/store/panes';
 import { $zoomPercent } from '@/store/zoom';
 import { BrowserMirror } from './browser-mirror';
 // ResizeObserver only fires on SIZE changes; pure position shifts (another
@@ -75,6 +77,8 @@ function resolveMode() {
  *  otherwise (mirror config fallback, older preload, plain web build). */
 export function SchoolBrowserPanel() {
     const [mode, setMode] = useState(null);
+    const activeTabId = useStore($rightRailActiveTabId);
+    const railOpen = useStore($paneOpen(PREVIEW_PANE_ID));
     useEffect(() => {
         let cancelled = false;
         void resolveMode().then(resolved => {
@@ -90,9 +94,10 @@ export function SchoolBrowserPanel() {
         // One IPC round-trip of blank surface — avoids flashing the wrong chrome.
         return _jsx("div", { className: "h-full w-full bg-(--ui-editor-surface-background)" });
     }
-    return mode === 'native' ? _jsx(NativeBrowserPanel, {}) : _jsx(BrowserMirror, {});
+    return mode === 'native' ? (_jsx(NativeBrowserPanel, { railVisible: railOpen && activeTabId === RIGHT_RAIL_BROWSER_TAB_ID })) : (_jsx(BrowserMirror, {}));
 }
-function NativeBrowserPanel() {
+function NativeBrowserPanel({ railVisible }) {
+    const [boundsReady, setBoundsReady] = useState(false);
     const [state, setState] = useState(null);
     const [urlDraft, setUrlDraft] = useState(null);
     const zoomPercent = useStore($zoomPercent);
@@ -110,6 +115,13 @@ function NativeBrowserPanel() {
     const reportBounds = useCallback((force = false) => {
         const box = placeholderRef.current?.getBoundingClientRect();
         if (!box || box.width < MIN_PANEL_PX || box.height < MIN_PANEL_PX) {
+            // The DOM pane remains mounted while PaneShell collapses it. A native
+            // WebContentsView is composited independently, so zero/near-zero DOM
+            // geometry must actively hide it instead of merely skipping setBounds.
+            void api()
+                ?.setVisible(false)
+                .catch(() => undefined);
+            setBoundsReady(false);
             return false;
         }
         const z = zoomFactorRef.current;
@@ -124,6 +136,7 @@ function NativeBrowserPanel() {
             Math.abs(rect.y - last.y) < 2 &&
             Math.abs(rect.width - last.width) < 2 &&
             Math.abs(rect.height - last.height) < 2;
+        setBoundsReady(true);
         if (!force && unchanged) {
             return true;
         }
@@ -166,9 +179,10 @@ function NativeBrowserPanel() {
     useEffect(() => {
         reportBounds(true);
     }, [reportBounds, zoomPercent]);
-    // Visibility: shown while mounted — EXCEPT while any open DOM dialog
-    // exists, because the native view composites above the entire DOM and would
-    // cover the modal. Watch the body and yield for as long as one is up.
+    // Visibility: shown only while the rail is open on the Browser tab, and
+    // EXCEPT while any open DOM dialog exists. The native view composites above
+    // the entire DOM, so mounted-but-collapsed panes and inactive tabs must hide
+    // it explicitly.
     useEffect(() => {
         let lastApplied = null;
         let raf = 0;
@@ -199,7 +213,7 @@ function NativeBrowserPanel() {
             });
         };
         const sync = () => {
-            const next = !document.querySelector('[role="dialog"][data-state="open"]');
+            const next = boundsReady && railVisible && !document.querySelector('[role="dialog"][data-state="open"]');
             if (next === lastApplied) {
                 return;
             }
@@ -242,7 +256,7 @@ function NativeBrowserPanel() {
                 ?.setVisible(false)
                 .catch(() => undefined);
         };
-    }, [reportBounds]);
+    }, [boundsReady, railVisible, reportBounds]);
     // Tab-op invokes resolve with the fresh snapshot — apply it directly
     // instead of waiting a beat for the broadcast to come back around.
     const apply = useCallback((op) => {

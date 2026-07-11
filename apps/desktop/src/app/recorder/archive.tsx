@@ -12,7 +12,8 @@
 // is hard-capped at 16MB, which a lecture-length recording routinely exceeds. The custom
 // protocol goes through the same path-hardening resolver with no size cap and supports
 // seeking — the same mechanism chat's audio/video attachments already use.
-import { useCallback, useEffect, useState } from 'react'
+import { IconPlayerPause, IconPlayerPlay } from '@tabler/icons-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { NavigateFunction } from 'react-router-dom'
 
@@ -43,6 +44,7 @@ import { transcribeAudio } from './transcribe'
 export { LECTURE_FOLDER, RECORDINGS_DIR } from './service'
 
 const AUDIO_FILE_RE = /\.(webm|m4a|wav)$/i
+const PLAYBACK_RATES = [1, 1.25, 1.5, 2] as const
 
 export interface RecordingFile {
   name: string
@@ -421,6 +423,117 @@ interface RecordingDetailProps {
   transcript: string
 }
 
+function audioTimestamp(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '0:00'
+  }
+
+  const whole = Math.floor(seconds)
+  const minutes = Math.floor(whole / 60)
+
+  return `${minutes}:${String(whole % 60).padStart(2, '0')}`
+}
+
+/** Compact app-styled playback controls for a streamed recording. */
+function RecordingAudioPlayer({ onError, src }: { onError: () => void; src: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [rateIndex, setRateIndex] = useState(0)
+
+  useEffect(() => {
+    setCurrentTime(0)
+    setDuration(0)
+    setPlaying(false)
+    setRateIndex(0)
+  }, [src])
+
+  const togglePlayback = () => {
+    const audio = audioRef.current
+
+    if (!audio) {
+      return
+    }
+
+    if (audio.paused) {
+      void audio.play().catch(() => setPlaying(false))
+    } else {
+      audio.pause()
+    }
+  }
+
+  const cycleRate = () => {
+    const nextIndex = (rateIndex + 1) % PLAYBACK_RATES.length
+    const nextRate = PLAYBACK_RATES[nextIndex]
+    setRateIndex(nextIndex)
+
+    if (audioRef.current) {
+      audioRef.current.playbackRate = nextRate
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-2">
+      <audio
+        onDurationChange={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+        onEnded={() => setPlaying(false)}
+        onError={onError}
+        onLoadedMetadata={event => {
+          setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)
+          event.currentTarget.playbackRate = PLAYBACK_RATES[rateIndex]
+        }}
+        onPause={() => setPlaying(false)}
+        onPlay={() => setPlaying(true)}
+        onTimeUpdate={event => setCurrentTime(event.currentTarget.currentTime)}
+        preload="metadata"
+        ref={audioRef}
+        src={src}
+      />
+      <button
+        aria-label={playing ? 'Pause recording' : 'Play recording'}
+        className="grid size-7 shrink-0 place-items-center rounded-full bg-(--theme-primary) text-primary-foreground transition-transform active:scale-[0.96]"
+        onClick={togglePlayback}
+        type="button"
+      >
+        {playing ? <IconPlayerPause size={13} /> : <IconPlayerPlay className="ml-px" size={13} />}
+      </button>
+      <span className="w-9 shrink-0 text-right font-mono text-[0.65rem] tabular-nums text-muted-foreground">
+        {audioTimestamp(currentTime)}
+      </span>
+      <input
+        aria-label="Recording position"
+        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-(--ui-stroke-primary) accent-(--theme-primary) disabled:cursor-default disabled:opacity-50"
+        disabled={duration <= 0}
+        max={duration || 0}
+        min={0}
+        onChange={event => {
+          const nextTime = Number(event.target.value)
+          setCurrentTime(nextTime)
+
+          if (audioRef.current) {
+            audioRef.current.currentTime = nextTime
+          }
+        }}
+        step={0.1}
+        type="range"
+        value={Math.min(currentTime, duration || 0)}
+      />
+      <span className="w-9 shrink-0 font-mono text-[0.65rem] tabular-nums text-muted-foreground">
+        {audioTimestamp(duration)}
+      </span>
+      <button
+        aria-label={`Playback speed ${PLAYBACK_RATES[rateIndex]}x`}
+        className="min-w-10 shrink-0 rounded-md px-1.5 py-1 font-mono text-[0.65rem] font-semibold text-muted-foreground hover:bg-(--ui-control-hover-background) hover:text-foreground"
+        onClick={cycleRate}
+        type="button"
+      >
+        {PLAYBACK_RATES[rateIndex]}x
+      </button>
+    </div>
+  )
+}
+
 function RecordingDetail({
   corrections,
   file,
@@ -437,6 +550,8 @@ function RecordingDetail({
   const sections = file.note ? parseLectureSections(file.note.content) : null
   const rawTranscript = sections?.transcript || transcript
   const hasNote = Boolean(file.note)
+
+  useEffect(() => setAudioFailed(false), [file.path])
 
   return (
     <PanelDetail>
@@ -462,13 +577,7 @@ function RecordingDetail({
             Couldn&rsquo;t play this recording — the audio file may have been moved or deleted.
           </p>
         ) : (
-          <audio
-            className="w-full"
-            controls
-            onError={() => setAudioFailed(true)}
-            preload="metadata"
-            src={mediaStreamUrl(file.path)}
-          />
+          <RecordingAudioPlayer onError={() => setAudioFailed(true)} src={mediaStreamUrl(file.path)} />
         )}
       </section>
 

@@ -17,14 +17,14 @@ import { profileColor } from '@/lib/profile-color';
 import { sessionMatchesSearch } from '@/lib/session-search';
 import { normalizeSessionSource, sessionSourceLabel } from '@/lib/session-source';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis';
 import { $account, planLabel } from '@/nemesis-account';
 import { $cronJobs } from '@/store/cron';
 import { $dismissedAutoProjectIds, $panesFlipped, $pinnedSessionIds, $sidebarAgentsGrouped, $sidebarCronOpen, $sidebarMessagingOpenIds, $sidebarOpen, $sidebarOverlayMounted, $sidebarPinsOpen, $sidebarProjectOrderIds, $sidebarRecentsOpen, $sidebarSessionOrderIds, $sidebarSessionOrderManual, $sidebarWorkspaceOrderIds, $sidebarWorkspaceParentOrderIds, pinSession, SESSION_SEARCH_FOCUS_EVENT, setPinnedSessionOrder, setSidebarAgentsGrouped, setSidebarCronOpen, setSidebarPinsOpen, setSidebarProjectOrderIds, setSidebarRecentsOpen, setSidebarSessionOrderIds, setSidebarSessionOrderManual, setSidebarWorkspaceOrderIds, setSidebarWorkspaceParentOrderIds, SIDEBAR_SESSIONS_PAGE_SIZE, toggleSidebarMessagingOpen, unpinSession } from '@/store/layout';
 import { $newChatProfile, $profiles, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile';
 import { $activeProjectId, $projects, $projectScope, $projectTree, $projectTreeLoading, $removedSessionIds, $reposScanning, ALL_PROJECTS, enterProject, exitProjectScope, fetchProjectSessions, openProjectCreate, refreshProjects, refreshProjectTree, refreshWorktrees, scanAndRecordRepos } from '@/store/projects';
 import { $cronSessions, $currentCwd, $gatewayState, $messagingPlatformTotals, $messagingSessions, $messagingTruncated, $selectedStoredSessionId, $sessionProfileTotals, $sessions, $sessionsLoading, $sessionsTotal, $workingSessionIds, sessionPinId, setCurrentCwd } from '@/store/session';
-import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis';
-import { ARTIFACTS_ROUTE, CALENDAR_ROUTE, GRAPH_ROUTE, LEDGER_ROUTE, LIBRARY_ROUTE, MESSAGING_ROUTE, RECORDER_ROUTE, SETTINGS_ROUTE, SKILLS_ROUTE, STUDY_ROUTE, TODAY_ROUTE } from '../../routes';
+import { ARTIFACTS_ROUTE, CALENDAR_ROUTE, GRAPH_ROUTE, LIBRARY_ROUTE, MESSAGING_ROUTE, RECORDER_ROUTE, SETTINGS_ROUTE, SKILLS_ROUTE, STUDY_ROUTE, TODAY_ROUTE } from '../../routes';
 import { countLabel } from './chrome';
 import { SidebarCronJobsSection } from './cron-jobs-section';
 import { SidebarLoadMoreRow } from './load-more-row';
@@ -40,12 +40,8 @@ import { SidebarSessionsSection, VIRTUALIZE_THRESHOLD } from './sessions-section
 const NON_SESSION_INITIAL_ROWS = 3;
 const NON_SESSION_LOAD_STEP = 10;
 const NEW_SESSION_KBD = comboTokens('mod+n');
-const STUDENT_LEDGER_NAV = NEMESIS_STUDENT_BUILD
-    ? [{ id: 'ledger', label: 'Ledger', icon: props => _jsx(Codicon, { name: "history", ...props }), route: LEDGER_ROUTE }]
-    : [];
 const SIDEBAR_NAV_ALL = [
     { id: 'today', label: 'Today', icon: props => _jsx(Codicon, { name: "dashboard", ...props }), route: TODAY_ROUTE },
-    ...STUDENT_LEDGER_NAV,
     {
         id: 'new-session',
         label: '',

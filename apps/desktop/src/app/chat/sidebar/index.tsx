@@ -20,7 +20,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem
 } from '@/components/ui/sidebar'
-import { Tip } from '@/components/ui/tooltip'
 import { searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { comboTokens } from '@/lib/keybinds/combo'
@@ -28,6 +27,7 @@ import { profileColor } from '@/lib/profile-color'
 import { sessionMatchesSearch } from '@/lib/session-search'
 import { normalizeSessionSource, sessionSourceLabel } from '@/lib/session-source'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis'
 import { $account, planLabel } from '@/nemesis-account'
 import { $cronJobs } from '@/store/cron'
 import {
@@ -98,14 +98,11 @@ import {
   setCurrentCwd
 } from '@/store/session'
 
-import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_NAV } from '@/nemesis'
-
 import {
   type AppView,
   ARTIFACTS_ROUTE,
   CALENDAR_ROUTE,
   GRAPH_ROUTE,
-  LEDGER_ROUTE,
   LIBRARY_ROUTE,
   MESSAGING_ROUTE,
   RECORDER_ROUTE,
@@ -148,13 +145,8 @@ const NON_SESSION_LOAD_STEP = 10
 
 const NEW_SESSION_KBD = comboTokens('mod+n')
 
-const STUDENT_LEDGER_NAV: SidebarNavItem[] = NEMESIS_STUDENT_BUILD
-  ? [{ id: 'ledger', label: 'Ledger', icon: props => <Codicon name="history" {...props} />, route: LEDGER_ROUTE }]
-  : []
-
 const SIDEBAR_NAV_ALL: SidebarNavItem[] = [
   { id: 'today', label: 'Today', icon: props => <Codicon name="dashboard" {...props} />, route: TODAY_ROUTE },
-  ...STUDENT_LEDGER_NAV,
   {
     id: 'new-session',
     label: '',

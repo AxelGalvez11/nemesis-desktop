@@ -331,13 +331,24 @@ export function RecorderView() {
           the record button must sit in the FIRST screenful at every zoom step,
           so header + hero tighten below ~720px effective height instead of
           pushing the primary control under the fold. */}
-      <header className="px-4 pb-2 pt-5 sm:px-6 sm:pt-6 [@media(max-height:720px)]:pb-1 [@media(max-height:720px)]:pt-3">
-        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">Capture desk</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] [@media(max-height:720px)]:text-xl">Recorder</h1>
-        <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground [@media(max-height:720px)]:hidden">
-          Capture your microphone{withSystemAudio ? ' and this computer’s audio' : ''} locally. Keep a live notepad,
-          review on-device transcription, and collect the pharmacology terms that matter.
-        </p>
+      <header className="sticky top-0 z-20 flex shrink-0 items-start gap-3 border-b border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background)/95 px-4 pb-2 pt-5 backdrop-blur-sm sm:px-6 sm:pt-6 [@media(max-height:720px)]:pb-2 [@media(max-height:720px)]:pt-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">Capture desk</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] [@media(max-height:720px)]:text-xl">Recorder</h1>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground [@media(max-height:720px)]:hidden">
+            Capture your microphone{withSystemAudio ? ' and this computer’s audio' : ''} locally. Keep a live notepad,
+            review on-device transcription, and collect the pharmacology terms that matter.
+          </p>
+        </div>
+        <Button
+          aria-label="Start recording"
+          className="mt-0.5 shrink-0 active:scale-[0.98]"
+          disabled={stopping || starting}
+          onClick={() => void startRecording()}
+          size="sm"
+        >
+          ● Record
+        </Button>
       </header>
 
       <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)] sm:mx-6 [@media(max-height:720px)]:mt-2">

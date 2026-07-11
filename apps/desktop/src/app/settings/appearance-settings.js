@@ -11,6 +11,7 @@ import { Check, Download, Loader2, Palette, Trash2 } from '@/lib/icons';
 import { selectableCardClass } from '@/lib/selectable-card';
 import { normalize } from '@/lib/text';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $embedAllowed, $embedMode, clearEmbedAllowed, setEmbedMode } from '@/store/embed-consent';
 import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/profile';
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view';
@@ -190,5 +191,5 @@ export function AppearanceSettings() {
                                             }, options: embedOptions, value: embedMode }), embedAllowed.length > 0 && (_jsx(Button, { onClick: () => {
                                                 triggerHaptic('selection');
                                                 clearEmbedAllowed();
-                                            }, size: "inline", variant: "text", children: a.embedsReset(embedAllowed.length) }))] }), description: a.embedsDesc, title: a.embedsTitle })] })] }), _jsx("div", { className: "mt-6", children: _jsx(PetSettings, {}) })] }));
+                                            }, size: "inline", variant: "text", children: a.embedsReset(embedAllowed.length) }))] }), description: a.embedsDesc, title: a.embedsTitle })] })] }), !NEMESIS_STUDENT_BUILD && (_jsx("div", { className: "mt-6", children: _jsx(PetSettings, {}) }))] }));
 }

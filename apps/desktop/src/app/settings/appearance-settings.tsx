@@ -12,6 +12,7 @@ import { Check, Download, Loader2, Palette, Trash2 } from '@/lib/icons'
 import { selectableCardClass } from '@/lib/selectable-card'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { $embedAllowed, $embedMode, clearEmbedAllowed, type EmbedMode, setEmbedMode } from '@/store/embed-consent'
 import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/profile'
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view'
@@ -497,9 +498,11 @@ export function AppearanceSettings() {
         </div>
       </div>
 
-      <div className="mt-6">
-        <PetSettings />
-      </div>
+      {!NEMESIS_STUDENT_BUILD && (
+        <div className="mt-6">
+          <PetSettings />
+        </div>
+      )}
     </SettingsContent>
   )
 }

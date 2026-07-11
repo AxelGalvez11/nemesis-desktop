@@ -140,6 +140,30 @@ export function StudyView() {
   const now = useMemo(() => new Date(), [state, reviewing])
   const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now])
   const current: QueueItem | undefined = queue[0]
+
+  const remainingCounts = useMemo(
+    () =>
+      queue.reduce(
+        (counts, item) => {
+          if (item.isNew) {
+            counts.new++
+          } else {
+            const cardState = state.schedule[item.card.id]?.state
+
+            if (cardState === 1 || cardState === 3) {
+              counts.learning++
+            } else {
+              counts.review++
+            }
+          }
+
+          return counts
+        },
+        { learning: 0, new: 0, review: 0 }
+      ),
+    [queue, state.schedule]
+  )
+
   const totals = deckStats(state, null, now)
 
   const sections = useMemo(
@@ -475,13 +499,12 @@ export function StudyView() {
       {reviewing ? (
         current ? (
           <ReviewSurface
-            done={done}
             flip={flip}
             intervals={previewIntervals(state, current.card.id, now)}
             item={current}
             onGrade={grade}
             onReveal={() => setRevealed(true)}
-            remaining={queue.length}
+            remainingCounts={remainingCounts}
             revealed={revealed}
             showIntervalHints={settings.showIntervalHints}
           />
@@ -1630,29 +1653,24 @@ function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => voi
 }
 
 function ReviewSurface({
-  done,
   flip,
   intervals,
   item,
   onGrade,
   onReveal,
-  remaining,
+  remainingCounts,
   revealed,
   showIntervalHints
 }: {
-  done: number
   flip: boolean
   intervals: Record<StudyRating, string>
   item: QueueItem
   onGrade: (rating: StudyRating) => void
   onReveal: () => void
-  remaining: number
+  remainingCounts: { learning: number; new: number; review: number }
   revealed: boolean
   showIntervalHints: boolean
 }) {
-  const total = done + remaining
-  const progress = total > 0 ? Math.round((done / total) * 100) : 0
-
   return (
     <div className="flex flex-1 flex-col items-center px-6 pb-8">
       <div className="flex w-full max-w-2xl flex-1 flex-col">
@@ -1665,14 +1683,17 @@ function ReviewSurface({
               </Badge>
             )}
           </span>
-          <span className="tabular-nums">
-            {done} done · {remaining} left
+          <span aria-label="Cards remaining" className="flex shrink-0 items-center gap-3 font-mono text-[0.6875rem] tabular-nums">
+            <span className="text-(--ui-blue)" title="New cards remaining">
+              {remainingCounts.new} <span className="font-sans text-muted-foreground">New</span>
+            </span>
+            <span className="text-(--ui-red)" title="Learning cards remaining">
+              {remainingCounts.learning} <span className="font-sans text-muted-foreground">Learning</span>
+            </span>
+            <span className="text-(--ui-green)" title="Review cards remaining">
+              {remainingCounts.review} <span className="font-sans text-muted-foreground">Review</span>
+            </span>
           </span>
-        </div>
-
-        {/* Session progress */}
-        <div className="mb-4 h-1 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,theme(colors.muted.DEFAULT))">
-          <div className="h-full bg-(--theme-primary)" style={{ width: `${progress}%` }} />
         </div>
 
         {/* Card. Flip build = a 3D-rotating card with distinct front/back faces; plain

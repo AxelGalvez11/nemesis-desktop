@@ -13,12 +13,16 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Switch } from '@/components/ui/switch';
 import { useTheme } from '@/themes/context';
-import { LIBRARY_ROUTE } from '../routes';
 import { buildIndex, extractWikilinks, loadVault, saveNote } from '../library/vault';
+import { LIBRARY_ROUTE } from '../routes';
 const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1';
+const MIN_NODE_SIZE = 4;
+const MIN_LABEL_SIZE = 4;
+const MAX_LABEL_SIZE = 24;
 const DEFAULT_CONTROLS = {
+    labelSize: 8,
     neighborGlow: true,
-    nodeSize: 4,
+    nodeSize: 7,
     repulsion: 40,
     rotationSpeed: 0,
     showNames: true,
@@ -26,7 +30,6 @@ const DEFAULT_CONTROLS = {
 };
 // Always-visible node label (three-spritetext) tuning.
 const LABEL_MAX_CHARS = 24;
-const LABEL_TEXT_HEIGHT = 3.6;
 // The label's bottom edge sits this much beyond the node sphere's own radius (see
 // sprite.center below) — proportional, not a flat offset, so it still clears big hub
 // spheres instead of looking glued on at high "Node size" settings.
@@ -140,7 +143,17 @@ function loadControls() {
     try {
         const raw = window.localStorage.getItem(GRAPH_SETTINGS_KEY);
         if (raw) {
-            return { ...DEFAULT_CONTROLS, ...JSON.parse(raw) };
+            const stored = JSON.parse(raw);
+            const controls = { ...DEFAULT_CONTROLS, ...stored };
+            return {
+                ...controls,
+                labelSize: typeof controls.labelSize === 'number' && Number.isFinite(controls.labelSize)
+                    ? Math.min(MAX_LABEL_SIZE, Math.max(MIN_LABEL_SIZE, controls.labelSize))
+                    : DEFAULT_CONTROLS.labelSize,
+                nodeSize: typeof controls.nodeSize === 'number' && Number.isFinite(controls.nodeSize)
+                    ? Math.max(MIN_NODE_SIZE, controls.nodeSize)
+                    : DEFAULT_CONTROLS.nodeSize
+            };
         }
     }
     catch {
@@ -175,7 +188,7 @@ export function GraphView() {
     // Last-applied values for the tuning-panel effect below, so toggling "Node names" or
     // dragging a layout slider only pays for a sprite rebuild / simulation reheat when
     // that specific setting actually changed — not on every unrelated control tweak.
-    const prevShowNamesRef = useRef(controls.showNames);
+    const prevLabelSignatureRef = useRef(`${controls.showNames}|${controls.labelSize}|${controls.nodeSize}`);
     const prevLayoutSignatureRef = useRef(`${controls.nodeSize}|${controls.spread}|${controls.repulsion}`);
     controlsRef.current = controls;
     useEffect(() => {
@@ -312,7 +325,7 @@ export function GraphView() {
                     const graphNode = node;
                     const activePalette = paletteRef.current ?? palette;
                     const color = graphNode.ghost ? activePalette.ghost : activePalette.label;
-                    const sprite = new SpriteText(truncateLabel(graphNode.id), LABEL_TEXT_HEIGHT, color);
+                    const sprite = new SpriteText(truncateLabel(graphNode.id), controlsRef.current.labelSize, color);
                     const object3d = sprite;
                     const radius = Math.cbrt(1 + graphNode.degree) * controlsRef.current.nodeSize;
                     // Anchor the sprite's bottom edge (not its center) at the offset point, so the
@@ -423,13 +436,14 @@ export function GraphView() {
         const orbit = graph.controls();
         orbit.autoRotate = controls.rotationSpeed > 0;
         orbit.autoRotateSpeed = controls.rotationSpeed;
-        if (prevShowNamesRef.current !== controls.showNames) {
-            prevShowNamesRef.current = controls.showNames;
+        const labelSignature = `${controls.showNames}|${controls.labelSize}|${controls.nodeSize}`;
+        if (prevLabelSignatureRef.current !== labelSignature) {
+            prevLabelSignatureRef.current = labelSignature;
             graph.refresh?.();
         }
         refreshHighlight();
     }, [controls, status]);
     return (_jsxs("div", { className: "relative flex h-full min-h-0 flex-col", children: [_jsxs("header", { className: "pointer-events-none absolute left-6 top-5 z-10", children: [_jsx("h1", { className: "text-lg font-semibold", children: "Graph" }), _jsx("p", { className: "text-xs text-muted-foreground", children: status === 'ready'
                             ? `${noteCount} notes${ghostCount > 0 ? ` · ${ghostCount} to create` : ''} — click any node`
-                            : '' }), status === 'ready' && ghostCount > 0 && (_jsx("p", { className: "text-[11px] text-muted-foreground/70", children: "Dim nodes are [[links]] with no note yet \u2014 click one to create it." }))] }), status === 'ready' && (_jsxs("div", { className: "absolute right-6 top-5 z-10 flex flex-col items-end gap-2", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { "aria-label": "Graph settings", className: "active:scale-[0.97] motion-reduce:transition-none", onClick: () => setPanelOpen(value => !value), size: "sm", variant: panelOpen ? 'secondary' : 'outline', children: _jsx(IconAdjustmentsHorizontal, { size: 14 }) }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?create=note`), size: "sm", variant: "outline", children: "+ New note" })] }), panelOpen && (_jsxs("div", { className: "w-64 rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated) p-4 text-(--ui-text-primary) shadow-lg", children: [_jsxs("div", { className: "mb-4", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Graph controls" }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: "Tune the map without changing your notes." })] }), _jsxs("div", { className: "space-y-4", children: [_jsx(ControlSlider, { label: "Node size", max: 10, min: 1, onChange: nodeSize => setControls(current => ({ ...current, nodeSize })), step: 0.5, value: controls.nodeSize }), _jsx(ControlSlider, { label: "Spread", max: 120, min: 10, onChange: spread => setControls(current => ({ ...current, spread })), step: 2, value: controls.spread }), _jsx(ControlSlider, { label: "Repulsion", max: 140, min: 0, onChange: repulsion => setControls(current => ({ ...current, repulsion })), step: 5, value: controls.repulsion }), _jsx(ControlSlider, { label: "Rotation speed", max: 3, min: 0, onChange: rotationSpeed => setControls(current => ({ ...current, rotationSpeed })), step: 0.1, value: controls.rotationSpeed })] }), _jsxs("label", { className: "mt-4 flex cursor-pointer items-center justify-between border-t border-(--ui-stroke-tertiary) pt-3 text-xs font-medium text-(--ui-text-primary)", children: ["Node names", _jsx(Switch, { checked: controls.showNames, onCheckedChange: showNames => setControls(current => ({ ...current, showNames })), size: "xs" })] }), _jsxs("label", { className: "mt-3 flex cursor-pointer items-center justify-between text-xs font-medium text-(--ui-text-primary)", children: ["Neighbor glow", _jsx(Switch, { checked: controls.neighborGlow, onCheckedChange: neighborGlow => setControls(current => ({ ...current, neighborGlow })), size: "xs" })] }), _jsx(Button, { className: "mt-3", onClick: () => setControls(DEFAULT_CONTROLS), size: "inline", variant: "text", children: "Reset to defaults" })] }))] })), status === 'error' && (_jsx(EmptyState, { className: "flex-1", description: "Could not read the Library vault.", title: "Graph unavailable" })), status === 'empty' && (_jsx(EmptyState, { className: "flex-1", description: "Write linked notes in the Library first.", title: "Nothing to map yet" })), _jsx("div", { className: status === 'ready' || status === 'loading' ? 'min-h-0 flex-1' : 'hidden', ref: hostRef })] }));
+                            : '' }), status === 'ready' && ghostCount > 0 && (_jsx("p", { className: "text-[11px] text-muted-foreground/70", children: "Dim nodes are [[links]] with no note yet \u2014 click one to create it." }))] }), status === 'ready' && (_jsxs("div", { className: "absolute right-6 top-5 z-10 flex flex-col items-end gap-2", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { "aria-label": "Graph settings", className: "active:scale-[0.97] motion-reduce:transition-none", onClick: () => setPanelOpen(value => !value), size: "sm", variant: panelOpen ? 'secondary' : 'outline', children: _jsx(IconAdjustmentsHorizontal, { size: 14 }) }), _jsx(Button, { onClick: () => navigate(`${LIBRARY_ROUTE}?create=note`), size: "sm", variant: "outline", children: "+ New note" })] }), panelOpen && (_jsxs("div", { className: "w-64 rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated) p-4 text-(--ui-text-primary) shadow-lg", children: [_jsxs("div", { className: "mb-4", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Graph controls" }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: "Tune the map without changing your notes." })] }), _jsxs("div", { className: "space-y-4", children: [_jsx(ControlSlider, { label: "Node size", max: 10, min: MIN_NODE_SIZE, onChange: nodeSize => setControls(current => ({ ...current, nodeSize })), step: 0.5, value: controls.nodeSize }), _jsx(ControlSlider, { label: "Label size", max: MAX_LABEL_SIZE, min: MIN_LABEL_SIZE, onChange: labelSize => setControls(current => ({ ...current, labelSize })), step: 1, value: controls.labelSize }), _jsx(ControlSlider, { label: "Spread", max: 120, min: 10, onChange: spread => setControls(current => ({ ...current, spread })), step: 2, value: controls.spread }), _jsx(ControlSlider, { label: "Repulsion", max: 140, min: 0, onChange: repulsion => setControls(current => ({ ...current, repulsion })), step: 5, value: controls.repulsion }), _jsx(ControlSlider, { label: "Rotation speed", max: 3, min: 0, onChange: rotationSpeed => setControls(current => ({ ...current, rotationSpeed })), step: 0.1, value: controls.rotationSpeed })] }), _jsxs("label", { className: "mt-4 flex cursor-pointer items-center justify-between border-t border-(--ui-stroke-tertiary) pt-3 text-xs font-medium text-(--ui-text-primary)", children: ["Node names", _jsx(Switch, { checked: controls.showNames, onCheckedChange: showNames => setControls(current => ({ ...current, showNames })), size: "xs" })] }), _jsxs("label", { className: "mt-3 flex cursor-pointer items-center justify-between text-xs font-medium text-(--ui-text-primary)", children: ["Neighbor glow", _jsx(Switch, { checked: controls.neighborGlow, onCheckedChange: neighborGlow => setControls(current => ({ ...current, neighborGlow })), size: "xs" })] }), _jsx(Button, { className: "mt-3", onClick: () => setControls(DEFAULT_CONTROLS), size: "inline", variant: "text", children: "Reset to defaults" })] }))] })), status === 'error' && (_jsx(EmptyState, { className: "flex-1", description: "Could not read the Library vault.", title: "Graph unavailable" })), status === 'empty' && (_jsx(EmptyState, { className: "flex-1", description: "Write linked notes in the Library first.", title: "Nothing to map yet" })), _jsx("div", { className: status === 'ready' || status === 'loading' ? 'min-h-0 flex-1' : 'hidden', ref: hostRef })] }));
 }

@@ -14,8 +14,8 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Switch } from '@/components/ui/switch'
 import { useTheme } from '@/themes/context'
 
-import { LIBRARY_ROUTE } from '../routes'
 import { buildIndex, extractWikilinks, loadVault, saveNote } from '../library/vault'
+import { LIBRARY_ROUTE } from '../routes'
 
 interface GraphNode {
   id: string
@@ -77,6 +77,7 @@ interface GraphPalette {
 }
 
 interface GraphControlsState {
+  labelSize: number
   nodeSize: number
   spread: number
   repulsion: number
@@ -86,10 +87,14 @@ interface GraphControlsState {
 }
 
 const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1'
+const MIN_NODE_SIZE = 4
+const MIN_LABEL_SIZE = 4
+const MAX_LABEL_SIZE = 24
 
 const DEFAULT_CONTROLS: GraphControlsState = {
+  labelSize: 8,
   neighborGlow: true,
-  nodeSize: 4,
+  nodeSize: 7,
   repulsion: 40,
   rotationSpeed: 0,
   showNames: true,
@@ -98,7 +103,6 @@ const DEFAULT_CONTROLS: GraphControlsState = {
 
 // Always-visible node label (three-spritetext) tuning.
 const LABEL_MAX_CHARS = 24
-const LABEL_TEXT_HEIGHT = 3.6
 // The label's bottom edge sits this much beyond the node sphere's own radius (see
 // sprite.center below) — proportional, not a flat offset, so it still clears big hub
 // spheres instead of looking glued on at high "Node size" settings.
@@ -253,7 +257,20 @@ function loadControls(): GraphControlsState {
     const raw = window.localStorage.getItem(GRAPH_SETTINGS_KEY)
 
     if (raw) {
-      return { ...DEFAULT_CONTROLS, ...(JSON.parse(raw) as Partial<GraphControlsState>) }
+      const stored = JSON.parse(raw) as Partial<GraphControlsState>
+      const controls = { ...DEFAULT_CONTROLS, ...stored }
+
+      return {
+        ...controls,
+        labelSize:
+          typeof controls.labelSize === 'number' && Number.isFinite(controls.labelSize)
+            ? Math.min(MAX_LABEL_SIZE, Math.max(MIN_LABEL_SIZE, controls.labelSize))
+            : DEFAULT_CONTROLS.labelSize,
+        nodeSize:
+          typeof controls.nodeSize === 'number' && Number.isFinite(controls.nodeSize)
+            ? Math.max(MIN_NODE_SIZE, controls.nodeSize)
+            : DEFAULT_CONTROLS.nodeSize
+      }
     }
   } catch {
     // fall through to defaults
@@ -322,7 +339,7 @@ export function GraphView() {
   // Last-applied values for the tuning-panel effect below, so toggling "Node names" or
   // dragging a layout slider only pays for a sprite rebuild / simulation reheat when
   // that specific setting actually changed — not on every unrelated control tweak.
-  const prevShowNamesRef = useRef(controls.showNames)
+  const prevLabelSignatureRef = useRef(`${controls.showNames}|${controls.labelSize}|${controls.nodeSize}`)
   const prevLayoutSignatureRef = useRef(`${controls.nodeSize}|${controls.spread}|${controls.repulsion}`)
   controlsRef.current = controls
 
@@ -499,7 +516,7 @@ export function GraphView() {
             const graphNode = node as GraphNode
             const activePalette = paletteRef.current ?? palette
             const color = graphNode.ghost ? activePalette.ghost : activePalette.label
-            const sprite = new SpriteText(truncateLabel(graphNode.id), LABEL_TEXT_HEIGHT, color)
+            const sprite = new SpriteText(truncateLabel(graphNode.id), controlsRef.current.labelSize, color)
             const object3d = sprite as unknown as Object3DLike
             const radius = Math.cbrt(1 + graphNode.degree) * controlsRef.current.nodeSize
 
@@ -636,8 +653,10 @@ export function GraphView() {
     orbit.autoRotate = controls.rotationSpeed > 0
     orbit.autoRotateSpeed = controls.rotationSpeed
 
-    if (prevShowNamesRef.current !== controls.showNames) {
-      prevShowNamesRef.current = controls.showNames
+    const labelSignature = `${controls.showNames}|${controls.labelSize}|${controls.nodeSize}`
+
+    if (prevLabelSignatureRef.current !== labelSignature) {
+      prevLabelSignatureRef.current = labelSignature
       graph.refresh?.()
     }
 
@@ -683,10 +702,18 @@ export function GraphView() {
                 <ControlSlider
                   label="Node size"
                   max={10}
-                  min={1}
+                  min={MIN_NODE_SIZE}
                   onChange={nodeSize => setControls(current => ({ ...current, nodeSize }))}
                   step={0.5}
                   value={controls.nodeSize}
+                />
+                <ControlSlider
+                  label="Label size"
+                  max={MAX_LABEL_SIZE}
+                  min={MIN_LABEL_SIZE}
+                  onChange={labelSize => setControls(current => ({ ...current, labelSize }))}
+                  step={1}
+                  value={controls.labelSize}
                 />
                 <ControlSlider
                   label="Spread"
