@@ -22,11 +22,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
-import { markDeckFileImported, scanDeckFiles } from './deck-files'
+import { importedDeckFileNames, scanAllDeckFiles } from './deck-files'
 import { parseCardPaste } from './import-cards'
 import {
   addCard,
   addSection,
+  adoptLegacyDeckFiles,
   assignDeckSection,
   buildQueue,
   deckStats,
@@ -39,6 +40,7 @@ import {
   loadState,
   previewIntervals,
   type QueueItem,
+  reconcileDeckFiles,
   reviewHeatmap,
   saveState,
   type StudyCard,
@@ -112,57 +114,68 @@ export function StudyView() {
     saveState(next)
   }, [])
 
-  // Agent-created decks: import any new deck files Nemesis wrote into the vault's
-  // Flashcards folder (see deck-files.ts). Runs once per page visit.
+  // Agent-managed decks: the vault's Flashcards folder is the source of truth, so
+  // reconcile against it on mount and whenever the window regains focus — the agent
+  // may have renamed, edited, or deleted deck files while you were away. Debounced so
+  // an incidental refocus doesn't hammer the disk. Review schedules survive because
+  // reconcile keeps card ids for unchanged card text (see model.ts).
   useEffect(() => {
     let cancelled = false
+    let lastRun = 0
 
-    void (async () => {
-      const candidates = await scanDeckFiles()
+    const reconcile = async () => {
+      lastRun = Date.now()
+      const candidates = await scanAllDeckFiles()
 
-      if (cancelled || !candidates.length) {
+      if (cancelled || !candidates) {
         return
       }
 
-      const importedNames: string[] = []
+      const addedNames: string[] = []
 
       setState(current => {
-        let next = current
+        const adopted = adoptLegacyDeckFiles(current, importedDeckFileNames())
+        const next = reconcileDeckFiles(adopted, candidates)
 
-        for (const candidate of candidates) {
-          markDeckFileImported(candidate.fileName)
-
-          if (!candidate.cards.length) {
-            continue
-          }
-
-          const deck: StudyDeck = {
-            id: freshId('deck'),
-            name: candidate.name,
-            course: candidate.course,
-            createdAt: new Date().toISOString(),
-            cards: candidate.cards.map(card => ({ back: card.back, front: card.front, id: freshId('card'), tags: [] }))
-          }
-          next = addSection({ ...next, decks: [...next.decks, deck] }, candidate.course ?? '')
-          importedNames.push(candidate.name)
+        if (next === current) {
+          return current
         }
 
-        if (next !== current) {
-          saveState(next)
+        const knownIds = new Set(current.decks.map(deck => deck.id))
+
+        for (const deck of next.decks) {
+          // Genuinely new decks only — renamed/relinked decks keep their id.
+          if (deck.sourceFile && !knownIds.has(deck.id)) {
+            addedNames.push(deck.name)
+          }
         }
+
+        saveState(next)
 
         return next
       })
 
-      if (importedNames.length) {
-        setAutoImported(importedNames)
+      if (addedNames.length) {
+        setAutoImported([...new Set(addedNames)])
       }
-    })()
+    }
+
+    void reconcile()
+
+    const onFocus = () => {
+      if (Date.now() - lastRun < 1500) {
+        return
+      }
+
+      void reconcile()
+    }
+
+    window.addEventListener('focus', onFocus)
 
     return () => {
       cancelled = true
+      window.removeEventListener('focus', onFocus)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const startReview = useCallback((deckId: null | string) => {
@@ -429,8 +442,8 @@ export function StudyView() {
           <ReviewSurface
             done={done}
             flip={flip}
-            item={current}
             intervals={previewIntervals(state, current.card.id, now)}
+            item={current}
             onGrade={grade}
             onReveal={() => setRevealed(true)}
             remaining={queue.length}

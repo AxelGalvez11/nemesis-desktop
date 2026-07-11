@@ -177,6 +177,191 @@ export function assignDeckSection(state, deckId, section) {
         decks: state.decks.map(deck => (deck.id === deckId ? { ...deck, course } : deck))
     };
 }
+// --- Deck-file reconcile (agent-managed decks) --------------------------------
+// The vault's Flashcards folder is the source of truth for agent-written decks:
+// the agent renames, edits, and deletes deck files while organizing, and Study
+// mirrors that here — without losing FSRS review progress, because cards keep
+// their ids (the schedule key) whenever their text survives the file edit.
+/** Keep in sync with the deck-file extension filter in deck-files.ts. */
+const DECK_FILE_EXTENSION = /\.(tsv|txt|md)$/i;
+/** A vanished file and a new file that share at least half their cards are the
+ *  same deck, renamed — relink it instead of wiping its review history. */
+const RENAME_OVERLAP_MIN = 0.5;
+/** Cards match across file edits by text, not id (case-insensitive, trimmed). */
+function cardKey(front, back) {
+    return `${front.trim().toLocaleLowerCase()}\u0000${back.trim().toLocaleLowerCase()}`;
+}
+/** Shared-card fraction (0..1) between a deck and a candidate, multiset-aware. */
+function renameScore(deck, candidate) {
+    if (!deck.cards.length || !candidate.cards.length) {
+        return 0;
+    }
+    const counts = new Map();
+    for (const card of deck.cards) {
+        const key = cardKey(card.front, card.back);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    let shared = 0;
+    for (const card of candidate.cards) {
+        const key = cardKey(card.front, card.back);
+        const left = counts.get(key) ?? 0;
+        if (left > 0) {
+            counts.set(key, left - 1);
+            shared++;
+        }
+    }
+    return shared / Math.max(deck.cards.length, candidate.cards.length);
+}
+/** File cards → deck cards. Text-matched cards keep their StudyCard (id, tags,
+ *  suspended — and therefore their schedule entry); file text wins on case or
+ *  whitespace drift; new cards get fresh ids; dropped cards are reported so the
+ *  caller can prune their schedules. Returns the same array when nothing changed. */
+function reconcileCards(existing, parsed) {
+    const pool = new Map();
+    for (const card of existing) {
+        const key = cardKey(card.front, card.back);
+        const queue = pool.get(key);
+        if (queue) {
+            queue.push(card);
+        }
+        else {
+            pool.set(key, [card]);
+        }
+    }
+    const cards = parsed.map((entry) => {
+        const match = pool.get(cardKey(entry.front, entry.back))?.shift();
+        if (!match) {
+            return { back: entry.back, front: entry.front, id: freshId('card'), tags: [] };
+        }
+        return match.front === entry.front && match.back === entry.back
+            ? match
+            : { ...match, back: entry.back, front: entry.front };
+    });
+    const removedIds = [...pool.values()].flat().map(card => card.id);
+    const unchanged = removedIds.length === 0 && cards.length === existing.length && cards.every((card, index) => card === existing[index]);
+    return { cards: unchanged ? existing : cards, removedIds };
+}
+/** Reconcile agent-managed decks against the vault's deck files. Pure.
+ *  - candidate with a linked deck (`sourceFile`) → update name/course/cards in place
+ *  - candidate with no linked deck → relink a renamed deck when the cards overlap,
+ *    else import it fresh (skipping files with no parseable cards, like the old import)
+ *  - linked deck whose file is gone → remove it and prune its cards' schedules
+ *  - decks without `sourceFile` (made in-app) are never touched
+ *  Returns the same state reference when the files already match, so callers can
+ *  skip persistence. */
+export function reconcileDeckFiles(state, candidates) {
+    const byFile = new Map(candidates.map(candidate => [candidate.fileName, candidate]));
+    const linkedFiles = new Set();
+    for (const deck of state.decks) {
+        if (deck.sourceFile) {
+            linkedFiles.add(deck.sourceFile);
+        }
+    }
+    const decks = [];
+    const orphans = [];
+    const prunedIds = [];
+    let changed = false;
+    for (const deck of state.decks) {
+        if (!deck.sourceFile) {
+            decks.push(deck);
+            continue;
+        }
+        const candidate = byFile.get(deck.sourceFile);
+        if (!candidate) {
+            // File gone — deleted, unless a new file below claims it as a rename.
+            orphans.push(deck);
+            continue;
+        }
+        const { cards, removedIds } = reconcileCards(deck.cards, candidate.cards);
+        const course = candidate.course?.trim() || undefined;
+        if (cards === deck.cards && deck.name === candidate.name && deck.course === course) {
+            decks.push(deck);
+            continue;
+        }
+        decks.push({ ...deck, cards, course, name: candidate.name });
+        prunedIds.push(...removedIds);
+        changed = true;
+    }
+    for (const candidate of candidates) {
+        if (linkedFiles.has(candidate.fileName)) {
+            continue;
+        }
+        let renamedAt = -1;
+        let bestScore = 0;
+        for (let index = 0; index < orphans.length; index++) {
+            const score = renameScore(orphans[index], candidate);
+            if (score > bestScore) {
+                bestScore = score;
+                renamedAt = index;
+            }
+        }
+        if (renamedAt >= 0 && bestScore >= RENAME_OVERLAP_MIN) {
+            const [renamed] = orphans.splice(renamedAt, 1);
+            const { cards, removedIds } = reconcileCards(renamed.cards, candidate.cards);
+            decks.push({
+                ...renamed,
+                cards,
+                course: candidate.course?.trim() || undefined,
+                name: candidate.name,
+                sourceFile: candidate.fileName
+            });
+            prunedIds.push(...removedIds);
+            changed = true;
+            continue;
+        }
+        if (!candidate.cards.length) {
+            continue;
+        }
+        decks.push({
+            cards: candidate.cards.map(card => ({ back: card.back, front: card.front, id: freshId('card'), tags: [] })),
+            course: candidate.course?.trim() || undefined,
+            createdAt: new Date().toISOString(),
+            id: freshId('deck'),
+            name: candidate.name,
+            sourceFile: candidate.fileName
+        });
+        changed = true;
+    }
+    for (const deck of orphans) {
+        prunedIds.push(...deck.cards.map(card => card.id));
+        changed = true;
+    }
+    if (!changed) {
+        return state;
+    }
+    let schedule = state.schedule;
+    if (prunedIds.length) {
+        schedule = { ...schedule };
+        for (const id of prunedIds) {
+            delete schedule[id];
+        }
+    }
+    // Same section rules as everywhere else: new courses appear, manually-added
+    // (now empty) sections stay. The review log keeps its history — see deleteDeck.
+    return { ...state, decks, schedule, sections: normalizeSections(state.sections, decks) };
+}
+/** One-time bridge for decks imported before `sourceFile` existed: the legacy
+ *  import-once registry knows which file names were auto-imported, so relink each
+ *  to the (still unlinked) deck carrying that import's default name. Without this,
+ *  the first reconcile would see every already-imported file as brand new and
+ *  duplicate the deck. Pure; returns the same reference when nothing to adopt. */
+export function adoptLegacyDeckFiles(state, importedFileNames) {
+    let decks = state.decks;
+    let changed = false;
+    for (const fileName of importedFileNames) {
+        if (decks.some(deck => deck.sourceFile === fileName)) {
+            continue;
+        }
+        const name = fileName.replace(DECK_FILE_EXTENSION, '');
+        const at = decks.findIndex(deck => !deck.sourceFile && deck.name === name);
+        if (at < 0) {
+            continue;
+        }
+        decks = decks.map((deck, index) => (index === at ? { ...deck, sourceFile: fileName } : deck));
+        changed = true;
+    }
+    return changed ? { ...state, decks } : state;
+}
 export function studyMotivation(state, todayIso, windowDays = 90) {
     const DAY = 86_400_000;
     const days = new Set(state.reviews.map(review => review.at.slice(0, 10)));

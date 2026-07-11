@@ -14,9 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { markDeckFileImported, scanDeckFiles } from './deck-files';
+import { importedDeckFileNames, scanAllDeckFiles } from './deck-files';
 import { parseCardPaste } from './import-cards';
-import { addCard, addSection, assignDeckSection, buildQueue, deckStats, deleteCard, deleteDeck, freshId, gradeCard, groupDecks, loadState, previewIntervals, reviewHeatmap, saveState, studyMotivation, toggleSuspendCard, updateCard } from './model';
+import { addCard, addSection, adoptLegacyDeckFiles, assignDeckSection, buildQueue, deckStats, deleteCard, deleteDeck, freshId, gradeCard, groupDecks, loadState, previewIntervals, reconcileDeckFiles, reviewHeatmap, saveState, studyMotivation, toggleSuspendCard, updateCard } from './model';
 const GRADES = [
     { key: '1', label: 'Again', rating: 'again' },
     { key: '2', label: 'Hard', rating: 'hard' },
@@ -68,46 +68,53 @@ export function StudyView() {
         setState(next);
         saveState(next);
     }, []);
-    // Agent-created decks: import any new deck files Nemesis wrote into the vault's
-    // Flashcards folder (see deck-files.ts). Runs once per page visit.
+    // Agent-managed decks: the vault's Flashcards folder is the source of truth, so
+    // reconcile against it on mount and whenever the window regains focus — the agent
+    // may have renamed, edited, or deleted deck files while you were away. Debounced so
+    // an incidental refocus doesn't hammer the disk. Review schedules survive because
+    // reconcile keeps card ids for unchanged card text (see model.ts).
     useEffect(() => {
         let cancelled = false;
-        void (async () => {
-            const candidates = await scanDeckFiles();
-            if (cancelled || !candidates.length) {
+        let lastRun = 0;
+        const reconcile = async () => {
+            lastRun = Date.now();
+            const candidates = await scanAllDeckFiles();
+            if (cancelled || !candidates) {
                 return;
             }
-            const importedNames = [];
+            const addedNames = [];
             setState(current => {
-                let next = current;
-                for (const candidate of candidates) {
-                    markDeckFileImported(candidate.fileName);
-                    if (!candidate.cards.length) {
-                        continue;
+                const adopted = adoptLegacyDeckFiles(current, importedDeckFileNames());
+                const next = reconcileDeckFiles(adopted, candidates);
+                if (next === current) {
+                    return current;
+                }
+                const knownIds = new Set(current.decks.map(deck => deck.id));
+                for (const deck of next.decks) {
+                    // Genuinely new decks only — renamed/relinked decks keep their id.
+                    if (deck.sourceFile && !knownIds.has(deck.id)) {
+                        addedNames.push(deck.name);
                     }
-                    const deck = {
-                        id: freshId('deck'),
-                        name: candidate.name,
-                        course: candidate.course,
-                        createdAt: new Date().toISOString(),
-                        cards: candidate.cards.map(card => ({ back: card.back, front: card.front, id: freshId('card'), tags: [] }))
-                    };
-                    next = addSection({ ...next, decks: [...next.decks, deck] }, candidate.course ?? '');
-                    importedNames.push(candidate.name);
                 }
-                if (next !== current) {
-                    saveState(next);
-                }
+                saveState(next);
                 return next;
             });
-            if (importedNames.length) {
-                setAutoImported(importedNames);
+            if (addedNames.length) {
+                setAutoImported([...new Set(addedNames)]);
             }
-        })();
+        };
+        void reconcile();
+        const onFocus = () => {
+            if (Date.now() - lastRun < 1500) {
+                return;
+            }
+            void reconcile();
+        };
+        window.addEventListener('focus', onFocus);
         return () => {
             cancelled = true;
+            window.removeEventListener('focus', onFocus);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     const startReview = useCallback((deckId) => {
         setReviewDeckId(deckId);
@@ -228,7 +235,7 @@ export function StudyView() {
                                 exitReview();
                                 setBrowseDeckId(null);
                                 setMatchDeckId(null);
-                            }, size: "sm", variant: "outline", children: "Back to decks" })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mr-1 flex items-center overflow-hidden rounded-md border border-border", children: [_jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'cards' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('cards'), title: "Card view", type: "button", children: _jsx(IconLayoutGrid, { size: 14 }) }), _jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'list' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('list'), title: "List view", type: "button", children: _jsx(IconList, { size: 14 }) })] }), _jsx("button", { className: cn('rounded-md border border-border px-2 py-1.5 transition-colors', flip ? 'text-(--theme-primary)' : 'text-muted-foreground hover:text-foreground'), onClick: toggleFlip, title: flip ? 'Flip animation on' : 'Flip animation off', type: "button", children: _jsx(IconCards, { size: 14 }) }), _jsxs(Button, { onClick: () => setNewSectionOpen(true), size: "sm", variant: "outline", children: [_jsx(IconFolderPlus, { size: 14 }), "New section"] }), _jsx(Button, { onClick: () => setNewDeckSection(''), size: "sm", variant: "outline", children: "New deck" }), _jsx(Button, { onClick: () => setImportOpen(true), size: "sm", variant: "outline", children: "Import cards" }), _jsx(Button, { disabled: totals.due === 0, onClick: () => startReview(null), size: "sm", children: "Study all" })] })) })] }), autoImported.length > 0 && !reviewing && !browseDeckId && (_jsxs("div", { className: "mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs", children: [_jsxs("span", { children: ["Nemesis added ", autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`, ":", ' ', autoImported.join(', ')] }), _jsx("button", { className: "text-muted-foreground hover:text-foreground", onClick: () => setAutoImported([]), type: "button", children: "Dismiss" })] })), reviewing ? (current ? (_jsx(ReviewSurface, { done: done, flip: flip, item: current, intervals: previewIntervals(state, current.card.id, now), onGrade: grade, onReveal: () => setRevealed(true), remaining: queue.length, revealed: revealed })) : (_jsx(EmptyState, { className: "flex-1", description: done > 0 ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.` : 'Nothing is due right now.', title: "All caught up" }))) : matchDeckId ? (_jsx(MatchGame, { deck: state.decks.find(deck => deck.id === matchDeckId) ?? null, onExit: () => setMatchDeckId(null) })) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), onMatch: () => startMatch(browseDeckId), onMoveDeck: section => moveDeck(browseDeckId, section), sections: sections, state: state })) : (_jsx(DeckBrowser, { onBrowse: setBrowseDeckId, onCreateDeck: setNewDeckSection, onMatch: startMatch, onStudy: startReview, state: state, view: view })), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen, sections: sections }), newDeckSection !== null && (_jsx(NewDeckDialog, { initialSection: newDeckSection, onClose: () => setNewDeckSection(null), onCreate: createDeck, sections: sections })), newSectionOpen && (_jsx(NewSectionDialog, { onClose: () => setNewSectionOpen(false), onCreate: createSection, sections: sections }))] }));
+                            }, size: "sm", variant: "outline", children: "Back to decks" })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mr-1 flex items-center overflow-hidden rounded-md border border-border", children: [_jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'cards' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('cards'), title: "Card view", type: "button", children: _jsx(IconLayoutGrid, { size: 14 }) }), _jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'list' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('list'), title: "List view", type: "button", children: _jsx(IconList, { size: 14 }) })] }), _jsx("button", { className: cn('rounded-md border border-border px-2 py-1.5 transition-colors', flip ? 'text-(--theme-primary)' : 'text-muted-foreground hover:text-foreground'), onClick: toggleFlip, title: flip ? 'Flip animation on' : 'Flip animation off', type: "button", children: _jsx(IconCards, { size: 14 }) }), _jsxs(Button, { onClick: () => setNewSectionOpen(true), size: "sm", variant: "outline", children: [_jsx(IconFolderPlus, { size: 14 }), "New section"] }), _jsx(Button, { onClick: () => setNewDeckSection(''), size: "sm", variant: "outline", children: "New deck" }), _jsx(Button, { onClick: () => setImportOpen(true), size: "sm", variant: "outline", children: "Import cards" }), _jsx(Button, { disabled: totals.due === 0, onClick: () => startReview(null), size: "sm", children: "Study all" })] })) })] }), autoImported.length > 0 && !reviewing && !browseDeckId && (_jsxs("div", { className: "mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs", children: [_jsxs("span", { children: ["Nemesis added ", autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`, ":", ' ', autoImported.join(', ')] }), _jsx("button", { className: "text-muted-foreground hover:text-foreground", onClick: () => setAutoImported([]), type: "button", children: "Dismiss" })] })), reviewing ? (current ? (_jsx(ReviewSurface, { done: done, flip: flip, intervals: previewIntervals(state, current.card.id, now), item: current, onGrade: grade, onReveal: () => setRevealed(true), remaining: queue.length, revealed: revealed })) : (_jsx(EmptyState, { className: "flex-1", description: done > 0 ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.` : 'Nothing is due right now.', title: "All caught up" }))) : matchDeckId ? (_jsx(MatchGame, { deck: state.decks.find(deck => deck.id === matchDeckId) ?? null, onExit: () => setMatchDeckId(null) })) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), onMatch: () => startMatch(browseDeckId), onMoveDeck: section => moveDeck(browseDeckId, section), sections: sections, state: state })) : (_jsx(DeckBrowser, { onBrowse: setBrowseDeckId, onCreateDeck: setNewDeckSection, onMatch: startMatch, onStudy: startReview, state: state, view: view })), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen, sections: sections }), newDeckSection !== null && (_jsx(NewDeckDialog, { initialSection: newDeckSection, onClose: () => setNewDeckSection(null), onCreate: createDeck, sections: sections })), newSectionOpen && (_jsx(NewSectionDialog, { onClose: () => setNewSectionOpen(false), onCreate: createSection, sections: sections }))] }));
 }
 const OTHER_SECTION_VALUE = '__other__';
 function SectionSelect({ label, onChange, sections, value }) {

@@ -116,6 +116,22 @@ export function LibraryView() {
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [refresh]);
+    // Re-read the vault when the window regains focus so files the agent moved,
+    // renamed, or created while you were away show up without a manual reload.
+    // Debounced so an incidental refocus doesn't hammer the disk.
+    useEffect(() => {
+        let last = 0;
+        const onFocus = () => {
+            const now = Date.now();
+            if (now - last < 1500) {
+                return;
+            }
+            last = now;
+            void refresh();
+        };
+        window.addEventListener('focus', onFocus);
+        return () => window.removeEventListener('focus', onFocus);
+    }, [refresh]);
     const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents]);
     const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents]);
     // Deep links from the Graph page: /library?note=Title opens a note,

@@ -9,6 +9,7 @@ export const STUDY_ROUTE = '/study';
 export const LIBRARY_ROUTE = '/library';
 export const GRAPH_ROUTE = '/graph';
 export const RECORDER_ROUTE = '/recorder';
+export const CALENDAR_ROUTE = '/calendar';
 export const CRON_ROUTE = '/cron';
 export const PROFILES_ROUTE = '/profiles';
 export const AGENTS_ROUTE = '/agents';
@@ -24,6 +25,7 @@ export const APP_ROUTES = [
     { id: 'library', path: LIBRARY_ROUTE, view: 'library' },
     { id: 'graph', path: GRAPH_ROUTE, view: 'graph' },
     { id: 'recorder', path: RECORDER_ROUTE, view: 'recorder' },
+    { id: 'calendar', path: CALENDAR_ROUTE, view: 'calendar' },
     { id: 'cron', path: CRON_ROUTE, view: 'cron' },
     { id: 'profiles', path: PROFILES_ROUTE, view: 'profiles' },
     { id: 'agents', path: AGENTS_ROUTE, view: 'agents' },
