@@ -7,6 +7,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { type Translations, useI18n } from '@/i18n'
 import { CheckCircle2, ExternalLink, Loader2, RefreshCw } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import {
   $desktopVersion,
   $updateApply,
@@ -108,6 +109,24 @@ export function AboutSettings() {
       <div className="mx-auto mt-4 w-full max-w-2xl">
         <SectionHeading icon={RefreshCw} title={a.updates} />
 
+        {/* Student build: the source self-updater is DISABLED. It tracks the
+            upstream Hermes main branch — running it swaps the Nemesis build
+            (UI reskin, school browser, study pipeline, agent patches) for
+            stock Hermes and discards local work. Nemesis updates ship as new
+            app versions instead. */}
+        {NEMESIS_STUDENT_BUILD ? (
+          <div className="rounded-xl border border-border/70 bg-muted/20 px-4 py-3 text-sm">
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <div className="min-w-0">
+                <p className="font-medium">You&apos;re running Nemesis {version?.appVersion || ''}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Updates are delivered with new Nemesis releases — nothing to do here.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div
           className={cn(
             'rounded-xl border px-4 py-3 text-sm',
@@ -169,12 +188,15 @@ export function AboutSettings() {
             </Button>
           </div>
         </div>
+        )}
 
-        <ListRow
-          description={a.automaticUpdatesDesc}
-          hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
-          title={a.automaticUpdates}
-        />
+        {!NEMESIS_STUDENT_BUILD && (
+          <ListRow
+            description={a.automaticUpdatesDesc}
+            hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
+            title={a.automaticUpdates}
+          />
+        )}
 
         <UninstallSection />
       </div>

@@ -1864,6 +1864,18 @@ text-* variant utilities. */ .btn-arc {
   display: none;
 }
 
+/* Nemesis student build: live activity phrase in the ActivityStrip. The phrase
+   wrapper remounts whenever the text changes (React key), so this enter fade
+   plays between phrases — a subtle CSS-only cross-fade, no motion library. It
+   lives on a wrapper AROUND the shimmer span because both effects use the
+   `animation` shorthand and would clobber each other on one element. */
+@keyframes nemesis-phrase-in {
+  from { opacity: 0; }
+}
+.nemesis-activity-phrase {
+  animation: nemesis-phrase-in 260ms ease-out;
+}
+
 /* Study flashcard flip (nemesis.study.flip). The inner wrapper rotates 180° on
    reveal; the two faces are back-face-hidden so only one shows at a time.
    400ms with a STRONG ease-in-out: a card flip is on-screen movement (natural
@@ -1889,4 +1901,5 @@ text-* variant utilities. */ .btn-arc {
 @media (prefers-reduced-motion: reduce) {
   .nemesis-flip-inner { transition: none; }
   .nemesis-shake { animation: none; }
+  .nemesis-activity-phrase { animation: none; }
 }

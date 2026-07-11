@@ -34,7 +34,7 @@ interface GraphLink {
 // `.prop(.prop())` idiom — see refreshHighlight() below.
 interface TunableGraph {
   backgroundColor: (color: string) => unknown
-  controls: () => { autoRotate?: boolean }
+  controls: () => { autoRotate?: boolean; autoRotateSpeed?: number }
   d3Force: (name: string) => undefined | { distance?: (n: number) => unknown; strength?: (n: number) => unknown }
   d3ReheatSimulation: () => unknown
   linkColor: {
@@ -80,11 +80,21 @@ interface GraphControlsState {
   nodeSize: number
   spread: number
   repulsion: number
-  rotate: boolean
+  rotationSpeed: number
+  showNames: boolean
+  neighborGlow: boolean
 }
 
 const GRAPH_SETTINGS_KEY = 'nemesis.graph.settings.v1'
-const DEFAULT_CONTROLS: GraphControlsState = { nodeSize: 4, repulsion: 40, rotate: true, spread: 34 }
+
+const DEFAULT_CONTROLS: GraphControlsState = {
+  neighborGlow: true,
+  nodeSize: 4,
+  repulsion: 40,
+  rotationSpeed: 0,
+  showNames: true,
+  spread: 34
+}
 
 // Always-visible node label (three-spritetext) tuning.
 const LABEL_MAX_CHARS = 24
@@ -309,6 +319,11 @@ export function GraphView() {
   // Direct-neighbor adjacency, rebuilt once per graph load (see the main effect below).
   const neighborsByNodeRef = useRef<Map<GraphNode, GraphNode[]>>(new Map())
   const linksByNodeRef = useRef<Map<GraphNode, GraphLink[]>>(new Map())
+  // Last-applied values for the tuning-panel effect below, so toggling "Node names" or
+  // dragging a layout slider only pays for a sprite rebuild / simulation reheat when
+  // that specific setting actually changed — not on every unrelated control tweak.
+  const prevShowNamesRef = useRef(controls.showNames)
+  const prevLayoutSignatureRef = useRef(`${controls.nodeSize}|${controls.spread}|${controls.repulsion}`)
   controlsRef.current = controls
 
   useEffect(() => {
@@ -336,8 +351,14 @@ export function GraphView() {
   // then re-trigger the (already-installed, ref-reading) color/width/particle accessors
   // via the library's own `.prop(.prop())` idiom for a cheap redigest — NOT refresh(),
   // which would tear down and rebuild every node's label sprite on every mouse move.
+  //
+  // "Neighbor glow" off short-circuits `active` to null — same as nothing being hovered
+  // or selected — so resolveNodeColor/resolveLinkColor fall through to their plain,
+  // un-dimmed color for every node/link. Written as a direct ref read (not a helper
+  // function call) everywhere it's needed below, so react-hooks/exhaustive-deps can see
+  // it only touches refs and doesn't ask for it to be listed as an effect dependency.
   function refreshHighlight() {
-    const active = hoverNodeRef.current ?? selectedNodeRef.current
+    const active = controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null
     const highlightNodes = highlightNodesRef.current
     const highlightLinks = highlightLinksRef.current
 
@@ -465,12 +486,16 @@ export function GraphView() {
               node as GraphNode,
               paletteRef.current ?? palette,
               highlightNodesRef.current,
-              hoverNodeRef.current ?? selectedNodeRef.current
+              controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null
             )
           )
           .nodeVal((node: object) => 1 + (node as GraphNode).degree)
           .nodeOpacity(0.9)
           .nodeThreeObject((node: object) => {
+            if (!controlsRef.current.showNames) {
+              return undefined
+            }
+
             const graphNode = node as GraphNode
             const activePalette = paletteRef.current ?? palette
             const color = graphNode.ghost ? activePalette.ghost : activePalette.label
@@ -491,7 +516,7 @@ export function GraphView() {
               link as GraphLink,
               paletteRef.current ?? palette,
               highlightLinksRef.current,
-              hoverNodeRef.current ?? selectedNodeRef.current
+              controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null
             )
           )
           .linkWidth((link: object) => (highlightLinksRef.current.has(link as GraphLink) ? HIGHLIGHT_LINK_WIDTH : DEFAULT_LINK_WIDTH))
@@ -542,8 +567,8 @@ export function GraphView() {
         window.setTimeout(() => instance.zoomToFit(700, 110), 1500)
 
         const orbit = instance.controls() as { autoRotate?: boolean; autoRotateSpeed?: number }
-        orbit.autoRotate = controlsRef.current.rotate
-        orbit.autoRotateSpeed = 0.5
+        orbit.autoRotate = controlsRef.current.rotationSpeed > 0
+        orbit.autoRotateSpeed = controlsRef.current.rotationSpeed
 
         observer = new ResizeObserver(() => {
           instance.width(host.clientWidth || 800)
@@ -577,8 +602,12 @@ export function GraphView() {
     }
   }, [navigate])
 
-  // Live-apply the tuning panel: size, spread (link distance), repulsion (charge),
-  // rotation — then reheat so the layout actually re-settles.
+  // Live-apply the tuning panel: size, spread (link distance) and repulsion (charge) are
+  // cheap prop setters we can always re-send, but the simulation is only reheated when
+  // one of those three layout values actually changed — not on every render of this
+  // effect — so the "Rotation speed" / "Node names" / "Neighbor glow" controls below
+  // (none of which affect layout) don't jiggle the graph or yank the camera through the
+  // onEngineStop -> zoomToFit callback above.
   useEffect(() => {
     try {
       window.localStorage.setItem(GRAPH_SETTINGS_KEY, JSON.stringify(controls))
@@ -595,8 +624,24 @@ export function GraphView() {
     graph.nodeRelSize(controls.nodeSize)
     graph.d3Force('link')?.distance?.(controls.spread)
     graph.d3Force('charge')?.strength?.(-controls.repulsion)
-    graph.d3ReheatSimulation()
-    graph.controls().autoRotate = controls.rotate
+
+    const layoutSignature = `${controls.nodeSize}|${controls.spread}|${controls.repulsion}`
+
+    if (prevLayoutSignatureRef.current !== layoutSignature) {
+      prevLayoutSignatureRef.current = layoutSignature
+      graph.d3ReheatSimulation()
+    }
+
+    const orbit = graph.controls()
+    orbit.autoRotate = controls.rotationSpeed > 0
+    orbit.autoRotateSpeed = controls.rotationSpeed
+
+    if (prevShowNamesRef.current !== controls.showNames) {
+      prevShowNamesRef.current = controls.showNames
+      graph.refresh?.()
+    }
+
+    refreshHighlight()
   }, [controls, status])
 
   return (
@@ -659,12 +704,28 @@ export function GraphView() {
                   step={5}
                   value={controls.repulsion}
                 />
+                <ControlSlider
+                  label="Rotation speed"
+                  max={3}
+                  min={0}
+                  onChange={rotationSpeed => setControls(current => ({ ...current, rotationSpeed }))}
+                  step={0.1}
+                  value={controls.rotationSpeed}
+                />
               </div>
               <label className="mt-4 flex cursor-pointer items-center justify-between border-t border-(--ui-stroke-tertiary) pt-3 text-xs font-medium text-(--ui-text-primary)">
-                Slow auto-rotate
+                Node names
                 <Switch
-                  checked={controls.rotate}
-                  onCheckedChange={rotate => setControls(current => ({ ...current, rotate }))}
+                  checked={controls.showNames}
+                  onCheckedChange={showNames => setControls(current => ({ ...current, showNames }))}
+                  size="xs"
+                />
+              </label>
+              <label className="mt-3 flex cursor-pointer items-center justify-between text-xs font-medium text-(--ui-text-primary)">
+                Neighbor glow
+                <Switch
+                  checked={controls.neighborGlow}
+                  onCheckedChange={neighborGlow => setControls(current => ({ ...current, neighborGlow }))}
                   size="xs"
                 />
               </label>
