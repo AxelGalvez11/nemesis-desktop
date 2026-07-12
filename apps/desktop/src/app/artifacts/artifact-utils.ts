@@ -32,7 +32,11 @@ const MARKDOWN_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g
 const URL_RE = /https?:\/\/[^\s<>"')]+/g
 const PATH_RE = /(^|[\s("'`])((?:\/|~\/|\.\.?\/)[^\s"'`<>]+(?:\.[a-z0-9]{1,8})?)/gi
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp)(?:\?.*)?$/i
-const FILE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|pdf|txt|json|md|csv|zip|tar|gz|mp3|wav|mp4|mov)(?:\?.*)?$/i
+// Real deliverable file types the agent MAKES — reports/handouts (html/pdf/docx),
+// slide decks (html/pptx), notes/data (md/csv/txt), media, and images. Code and build
+// artifacts (.js/.ts/.map/.css/.json/…) are deliberately NOT here: they are the app's
+// own machinery, never something a student "made", so they must not surface in Library.
+const FILE_EXT_RE = /\.(?:png|jpe?g|gif|webp|svg|bmp|pdf|html?|docx|pptx|txt|md|csv|mp3|wav|mp4|mov)(?:\?.*)?$/i
 const KEY_HINT_RE = /(path|file|url|image|artifact|output|download|result|target)/i
 
 function artifactSessionTitle(session: SessionInfo): string {
@@ -68,7 +72,7 @@ function looksLikePathOrUrl(value: string): boolean {
   )
 }
 
-function looksLikeArtifact(value: string): boolean {
+export function looksLikeArtifact(value: string): boolean {
   // A single artifact is one path or URL. Multi-line strings are tool OUTPUT
   // (e.g. a `find` listing of the whole vault) — treating one as an artifact
   // gave it the label of its last line and let an Exports/ line anywhere in
@@ -81,11 +85,12 @@ function looksLikeArtifact(value: string): boolean {
     return true
   }
 
-  if (looksLikePathOrUrl(value) && (IMAGE_EXT_RE.test(value) || FILE_EXT_RE.test(value))) {
-    return true
-  }
-
-  return value.startsWith('/') && value.includes('.')
+  // A real artifact is a path/URL that ends in a KNOWN deliverable extension. The
+  // old fallback (`startsWith('/') && includes('.')`) accepted ANY absolute path with
+  // a dot, which is how build files (main.chunk.js), malformed values (":"), and other
+  // machinery leaked into "Made by Nemesis". An unrecognized extension is not a
+  // deliverable — drop it.
+  return looksLikePathOrUrl(value) && (IMAGE_EXT_RE.test(value) || FILE_EXT_RE.test(value))
 }
 
 function artifactKind(value: string): ArtifactKind {
@@ -375,7 +380,28 @@ export async function loadRecentArtifacts(sessionLimit = 30): Promise<ArtifactRe
     }
   })
 
-  return artifacts.sort((left, right) => right.timestamp - left.timestamp)
+  const ordered = artifacts.sort((left, right) => right.timestamp - left.timestamp)
+
+  // Student build: one row per deliverable FILE. The same report referenced across
+  // several chats collected once per session (the id keys on session.id), so a single
+  // "ACE inhibitor cough.html" showed up three times. Collapse by filename, keeping the
+  // newest (the list is already sorted newest-first).
+  if (!NEMESIS_STUDENT_BUILD) {
+    return ordered
+  }
+
+  const seen = new Set<string>()
+
+  return ordered.filter(artifact => {
+    const key = artifactLabel(artifact.value).toLowerCase()
+    if (seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+
+    return true
+  })
 }
 
 /** Open a collected deliverable through the same local/remote path used by
