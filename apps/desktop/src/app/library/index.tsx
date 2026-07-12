@@ -27,9 +27,6 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { notifyError } from '@/store/notifications'
-
-import { type ArtifactRecord, loadRecentArtifacts, openArtifactHref } from '../artifacts/artifact-utils'
 
 import { NoteEditor, type NoteEditorHandle } from './note-editor'
 import { NoteRail } from './note-rail'
@@ -137,7 +134,6 @@ function buildTree(contents: VaultContents): TreeNode {
 
 export function LibraryView() {
   const [contents, setContents] = useState<VaultContents | null>(null)
-  const [deliverables, setDeliverables] = useState<ArtifactRecord[] | null>(null)
   const [error, setError] = useState<null | string>(null)
   // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
   const [tabs, setTabs] = useState<TabItem[]>([])
@@ -160,6 +156,10 @@ export function LibraryView() {
   const [nav, setNavState] = useState<NavHistory>({ pos: -1, stack: [] })
   const navRef = useRef(nav)
   navRef.current = nav
+  // Latest active-tab index, read inside setTabs updaters where the closed-over
+  // `activeTab` would be stale (openInPlace needs to know which tab to swap).
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
   // Set while a back/forward jump re-opens an entry, so the jump itself
   // doesn't get recorded as a fresh visit.
   const navigatingRef = useRef(false)
@@ -214,30 +214,6 @@ export function LibraryView() {
     }
   }, [])
 
-  const refreshDeliverables = useCallback(async () => {
-    try {
-      setDeliverables(await loadRecentArtifacts())
-    } catch (err) {
-      setDeliverables([])
-      notifyError(err, 'Could not load files made by Nemesis.')
-    }
-  }, [])
-
-  const openDeliverable = useCallback(async (artifact: ArtifactRecord) => {
-    try {
-      // A vault file deliverable is often recorded as a vault-RELATIVE path
-      // ("Exports/report.html"); resolve it against the vault root so it opens in
-      // the preview pane rather than falling through to an unresolvable href.
-      const isSchemeOrAbsolute = /^(?:[a-z]+:|\/|~)/i.test(artifact.value)
-      const target =
-        artifact.kind === 'file' && !isSchemeOrAbsolute ? `${VAULT_DIR}/${artifact.value}` : artifact.href
-
-      await openArtifactHref(target)
-    } catch (err) {
-      notifyError(err, 'Could not open this deliverable.')
-    }
-  }, [])
-
   const openSelection = useCallback(
     (next: TabItem) => {
       const key = tabKey(next)
@@ -259,8 +235,40 @@ export function LibraryView() {
     [recordVisit]
   )
 
-  // Back/forward over the visit history — re-opens the entry (restoring its
-  // tab if it was closed) without recording the jump as a new visit.
+  // Follow a link (a [[wikilink]] in a note, a rail backlink, or back/forward) WITHOUT
+  // spawning a new tab: swap the ACTIVE tab's content in place — the browser/Obsidian
+  // model the owner asked for. Only the sidebar tree opens fresh tabs (openSelection).
+  // If the target is already open in another tab, focus that instead of duplicating.
+  const openInPlace = useCallback(
+    (next: TabItem) => {
+      const key = tabKey(next)
+      setTabs(current => {
+        const existing = current.findIndex(tab => tabKey(tab) === key)
+
+        if (existing >= 0) {
+          setActiveTab(existing)
+
+          return current
+        }
+
+        const idx = activeTabRef.current
+
+        if (idx < 0 || idx >= current.length) {
+          setActiveTab(current.length)
+
+          return [...current, next]
+        }
+
+        // Keep the same tab index; replace only its content.
+        return current.map((tab, i) => (i === idx ? next : tab))
+      })
+      recordVisit(next)
+    },
+    [recordVisit]
+  )
+
+  // Back/forward over the visit history — navigates IN PLACE (same tab) so it stays
+  // consistent with link-following, without recording the jump as a new visit.
   const goHistory = useCallback(
     (delta: -1 | 1) => {
       const { pos, stack } = navRef.current
@@ -271,11 +279,11 @@ export function LibraryView() {
       }
 
       navigatingRef.current = true
-      openSelection(target)
+      openInPlace(target)
       navigatingRef.current = false
       setNavState({ pos: pos + delta, stack })
     },
-    [openSelection]
+    [openInPlace]
   )
 
   // Cmd+N = new note, Cmd+[ / Cmd+] = back / forward (skipped while typing in
@@ -321,7 +329,6 @@ export function LibraryView() {
         openSelection({ kind: 'note', note: loaded.notes[0] })
       }
     })()
-    void refreshDeliverables()
 
     return () => {
       if (saveTimer.current) {
@@ -329,7 +336,7 @@ export function LibraryView() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh, refreshDeliverables])
+  }, [refresh])
 
   // Re-read the vault when the window regains focus so files the agent moved,
   // renamed, or created while you were away show up without a manual reload.
@@ -346,13 +353,12 @@ export function LibraryView() {
 
       last = now
       void refresh()
-      void refreshDeliverables()
     }
 
     window.addEventListener('focus', onFocus)
 
     return () => window.removeEventListener('focus', onFocus)
-  }, [refresh, refreshDeliverables])
+  }, [refresh])
 
   const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents])
   const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents])
@@ -439,7 +445,7 @@ export function LibraryView() {
       )
 
       if (existing) {
-        openSelection({ kind: 'note', note: existing })
+        openInPlace({ kind: 'note', note: existing })
 
         return
       }
@@ -459,10 +465,10 @@ export function LibraryView() {
       )
 
       if (created) {
-        openSelection({ kind: 'note', note: created })
+        openInPlace({ kind: 'note', note: created })
       }
     },
-    [contents, openSelection, refresh]
+    [contents, openInPlace, refresh]
   )
 
   const submitCreate = useCallback(async () => {
@@ -572,45 +578,6 @@ export function LibraryView() {
           </div>
         )}
         <nav className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
-          <section className="mb-3 border-b border-(--ui-stroke-quaternary) pb-3">
-            <div className="mb-1.5 flex items-center justify-between gap-2 px-2">
-              <h2 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
-                Made by Nemesis
-              </h2>
-              {deliverables && deliverables.length > 0 && (
-                <span className="text-[0.625rem] tabular-nums text-(--ui-text-quaternary)">{deliverables.length}</span>
-              )}
-            </div>
-            {!deliverables ? (
-              <p className="px-2 py-1 text-xs text-(--ui-text-tertiary)">Finding deliverables…</p>
-            ) : deliverables.length === 0 ? (
-              <p className="px-2 py-1 text-xs text-(--ui-text-tertiary)">Chat-made files will appear here.</p>
-            ) : (
-              <div className="space-y-0.5">
-                {deliverables.map(artifact => (
-                  <button
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-colors hover:bg-(--ui-row-hover-background) hover:text-foreground"
-                    key={artifact.id}
-                    onClick={() => void openDeliverable(artifact)}
-                    title={`${artifact.label} · ${artifact.sessionTitle}`}
-                    type="button"
-                  >
-                    {artifact.kind === 'image' ? (
-                      <IconPhoto className="shrink-0 text-(--theme-primary)" size={14} />
-                    ) : (
-                      <IconFileText className="shrink-0 text-(--theme-primary)" size={14} />
-                    )}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{artifact.label}</span>
-                      <span className="block truncate text-[0.625rem] text-(--ui-text-tertiary)">
-                        {artifact.sessionTitle}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
           <TreeLevel
             collapsed={collapsed}
             depth={0}
@@ -633,7 +600,7 @@ export function LibraryView() {
       {/* Editor / preview */}
       <main className="flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)">
         {(tabs.length > 0 || !sidebarOpen) && (
-          <div className="flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)">
+          <div className="relative z-10 flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-webkit-app-region:no-drag]">
             {/* Navigation cluster: sidebar re-open + browser-style back/forward */}
             <div className="flex shrink-0 items-center gap-0.5 border-r border-(--ui-stroke-quaternary) px-1.5">
               {!sidebarOpen && (
@@ -731,9 +698,7 @@ export function LibraryView() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)">
                   <span className="tabular-nums">{countWords(selection.note.content)} words</span>
-                  <span className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 font-medium">
-                    {saving ? 'Saving…' : 'Saved to disk'}
-                  </span>
+                  {saving && <span className="text-(--ui-text-quaternary)">Saving…</span>}
                 </div>
               </div>
             </div>
@@ -771,7 +736,7 @@ export function LibraryView() {
           activeNote={activeNote}
           index={index}
           notes={contents.notes}
-          onOpenNote={note => openSelection({ kind: 'note', note })}
+          onOpenNote={note => openInPlace({ kind: 'note', note })}
           onSelectHeading={handleSelectHeading}
         />
       )}
@@ -903,6 +868,10 @@ function FilePreview({ file }: { file: VaultFile }) {
   const url = fileUrl(file.path)
   const openExternal = () => void window.hermesDesktop?.openExternal?.(url)
   const reveal = () => void window.hermesDesktop?.revealPath?.(file.path)
+  // PDFs, HTML deliverables, and images render inside Nemesis (below), so we don't
+  // offer to bounce them out to a browser/other app — everything stays in the app.
+  // Only formats we can't render in-app (PowerPoint/Word) keep the external option.
+  const canPreviewInApp = file.kind === 'pdf' || file.kind === 'html' || file.kind === 'image'
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-(--ui-bg-editor)">
@@ -914,9 +883,11 @@ function FilePreview({ file }: { file: VaultFile }) {
           <h2 className="truncate text-xl font-semibold tracking-tight">{file.name}</h2>
         </div>
         <div className="flex gap-2">
-          <Button onClick={openExternal} size="sm" variant="outline">
-            Open in default app
-          </Button>
+          {!canPreviewInApp && (
+            <Button onClick={openExternal} size="sm" variant="outline">
+              Open in default app
+            </Button>
+          )}
           <Button onClick={reveal} size="sm" variant="outline">
             Reveal
           </Button>

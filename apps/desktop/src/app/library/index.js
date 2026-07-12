@@ -11,8 +11,6 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { notifyError } from '@/store/notifications';
-import { loadRecentArtifacts, openArtifactHref } from '../artifacts/artifact-utils';
 import { NoteEditor } from './note-editor';
 import { NoteRail } from './note-rail';
 import { PdfViewer } from './pdf-viewer';
@@ -74,7 +72,6 @@ function buildTree(contents) {
 }
 export function LibraryView() {
     const [contents, setContents] = useState(null);
-    const [deliverables, setDeliverables] = useState(null);
     const [error, setError] = useState(null);
     // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
     const [tabs, setTabs] = useState([]);
@@ -98,6 +95,10 @@ export function LibraryView() {
     const [nav, setNavState] = useState({ pos: -1, stack: [] });
     const navRef = useRef(nav);
     navRef.current = nav;
+    // Latest active-tab index, read inside setTabs updaters where the closed-over
+    // `activeTab` would be stale (openInPlace needs to know which tab to swap).
+    const activeTabRef = useRef(activeTab);
+    activeTabRef.current = activeTab;
     // Set while a back/forward jump re-opens an entry, so the jump itself
     // doesn't get recorded as a fresh visit.
     const navigatingRef = useRef(false);
@@ -139,28 +140,6 @@ export function LibraryView() {
             return null;
         }
     }, []);
-    const refreshDeliverables = useCallback(async () => {
-        try {
-            setDeliverables(await loadRecentArtifacts());
-        }
-        catch (err) {
-            setDeliverables([]);
-            notifyError(err, 'Could not load files made by Nemesis.');
-        }
-    }, []);
-    const openDeliverable = useCallback(async (artifact) => {
-        try {
-            // A vault file deliverable is often recorded as a vault-RELATIVE path
-            // ("Exports/report.html"); resolve it against the vault root so it opens in
-            // the preview pane rather than falling through to an unresolvable href.
-            const isSchemeOrAbsolute = /^(?:[a-z]+:|\/|~)/i.test(artifact.value);
-            const target = artifact.kind === 'file' && !isSchemeOrAbsolute ? `${VAULT_DIR}/${artifact.value}` : artifact.href;
-            await openArtifactHref(target);
-        }
-        catch (err) {
-            notifyError(err, 'Could not open this deliverable.');
-        }
-    }, []);
     const openSelection = useCallback((next) => {
         const key = tabKey(next);
         setTabs(current => {
@@ -174,8 +153,30 @@ export function LibraryView() {
         });
         recordVisit(next);
     }, [recordVisit]);
-    // Back/forward over the visit history — re-opens the entry (restoring its
-    // tab if it was closed) without recording the jump as a new visit.
+    // Follow a link (a [[wikilink]] in a note, a rail backlink, or back/forward) WITHOUT
+    // spawning a new tab: swap the ACTIVE tab's content in place — the browser/Obsidian
+    // model the owner asked for. Only the sidebar tree opens fresh tabs (openSelection).
+    // If the target is already open in another tab, focus that instead of duplicating.
+    const openInPlace = useCallback((next) => {
+        const key = tabKey(next);
+        setTabs(current => {
+            const existing = current.findIndex(tab => tabKey(tab) === key);
+            if (existing >= 0) {
+                setActiveTab(existing);
+                return current;
+            }
+            const idx = activeTabRef.current;
+            if (idx < 0 || idx >= current.length) {
+                setActiveTab(current.length);
+                return [...current, next];
+            }
+            // Keep the same tab index; replace only its content.
+            return current.map((tab, i) => (i === idx ? next : tab));
+        });
+        recordVisit(next);
+    }, [recordVisit]);
+    // Back/forward over the visit history — navigates IN PLACE (same tab) so it stays
+    // consistent with link-following, without recording the jump as a new visit.
     const goHistory = useCallback((delta) => {
         const { pos, stack } = navRef.current;
         const target = stack[pos + delta];
@@ -183,10 +184,10 @@ export function LibraryView() {
             return;
         }
         navigatingRef.current = true;
-        openSelection(target);
+        openInPlace(target);
         navigatingRef.current = false;
         setNavState({ pos: pos + delta, stack });
-    }, [openSelection]);
+    }, [openInPlace]);
     // Cmd+N = new note, Cmd+[ / Cmd+] = back / forward (skipped while typing in
     // the editor, where CodeMirror owns bracket shortcuts for indentation).
     useEffect(() => {
@@ -222,14 +223,13 @@ export function LibraryView() {
                 openSelection({ kind: 'note', note: loaded.notes[0] });
             }
         })();
-        void refreshDeliverables();
         return () => {
             if (saveTimer.current) {
                 clearTimeout(saveTimer.current);
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [refresh, refreshDeliverables]);
+    }, [refresh]);
     // Re-read the vault when the window regains focus so files the agent moved,
     // renamed, or created while you were away show up without a manual reload.
     // Debounced so an incidental refocus doesn't hammer the disk.
@@ -242,11 +242,10 @@ export function LibraryView() {
             }
             last = now;
             void refresh();
-            void refreshDeliverables();
         };
         window.addEventListener('focus', onFocus);
         return () => window.removeEventListener('focus', onFocus);
-    }, [refresh, refreshDeliverables]);
+    }, [refresh]);
     const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents]);
     const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents]);
     // Deep links from the Graph page: /library?note=Title opens a note,
@@ -307,7 +306,7 @@ export function LibraryView() {
         const wanted = target.toLowerCase();
         const existing = loaded.notes.find(n => n.title.toLowerCase() === wanted || `${n.folder}/${n.title}`.toLowerCase() === wanted);
         if (existing) {
-            openSelection({ kind: 'note', note: existing });
+            openInPlace({ kind: 'note', note: existing });
             return;
         }
         const slash = target.lastIndexOf('/');
@@ -320,9 +319,9 @@ export function LibraryView() {
         const after = await refresh();
         const created = after?.notes.find(n => n.title.toLowerCase() === title.toLowerCase() && (!folder || n.folder.toLowerCase() === folder.toLowerCase()));
         if (created) {
-            openSelection({ kind: 'note', note: created });
+            openInPlace({ kind: 'note', note: created });
         }
-    }, [contents, openSelection, refresh]);
+    }, [contents, openInPlace, refresh]);
     const submitCreate = useCallback(async () => {
         const name = draft.trim();
         if (!name) {
@@ -360,11 +359,11 @@ export function LibraryView() {
                                     if (event.key === 'Escape') {
                                         setCreating(null);
                                     }
-                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsxs("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: [_jsxs("section", { className: "mb-3 border-b border-(--ui-stroke-quaternary) pb-3", children: [_jsxs("div", { className: "mb-1.5 flex items-center justify-between gap-2 px-2", children: [_jsx("h2", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: "Made by Nemesis" }), deliverables && deliverables.length > 0 && (_jsx("span", { className: "text-[0.625rem] tabular-nums text-(--ui-text-quaternary)", children: deliverables.length }))] }), !deliverables ? (_jsx("p", { className: "px-2 py-1 text-xs text-(--ui-text-tertiary)", children: "Finding deliverables\u2026" })) : deliverables.length === 0 ? (_jsx("p", { className: "px-2 py-1 text-xs text-(--ui-text-tertiary)", children: "Chat-made files will appear here." })) : (_jsx("div", { className: "space-y-0.5", children: deliverables.map(artifact => (_jsxs("button", { className: "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-colors hover:bg-(--ui-row-hover-background) hover:text-foreground", onClick: () => void openDeliverable(artifact), title: `${artifact.label} · ${artifact.sessionTitle}`, type: "button", children: [artifact.kind === 'image' ? (_jsx(IconPhoto, { className: "shrink-0 text-(--theme-primary)", size: 14 })) : (_jsx(IconFileText, { className: "shrink-0 text-(--theme-primary)", size: 14 })), _jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate", children: artifact.label }), _jsx("span", { className: "block truncate text-[0.625rem] text-(--ui-text-tertiary)", children: artifact.sessionTitle })] })] }, artifact.id))) }))] }), _jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
-                                    const next = new Set(current);
-                                    next.has(path) ? next.delete(path) : next.add(path);
-                                    return next;
-                                }), selection: selection })] })] })), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [(tabs.length > 0 || !sidebarOpen) && (_jsxs("div", { className: "flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)", children: [_jsxs("div", { className: "flex shrink-0 items-center gap-0.5 border-r border-(--ui-stroke-quaternary) px-1.5", children: [!sidebarOpen && (_jsx(Tip, { label: "Show file list", children: _jsx(Button, { "aria-label": "Show file list", onClick: () => setSidebar(true), size: "icon-xs", variant: "ghost", children: _jsx(IconLayoutSidebarLeftExpand, {}) }) })), _jsx(Tip, { label: "Back (\u2318[)", children: _jsx(Button, { "aria-label": "Back", disabled: nav.pos <= 0, onClick: () => goHistory(-1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowLeft, {}) }) }), _jsx(Tip, { label: "Forward (\u2318])", children: _jsx(Button, { "aria-label": "Forward", disabled: nav.pos >= nav.stack.length - 1, onClick: () => goHistory(1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowRight, {}) }) })] }), _jsx("div", { className: "flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out', i === activeTab
+                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: _jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
+                                const next = new Set(current);
+                                next.has(path) ? next.delete(path) : next.add(path);
+                                return next;
+                            }), selection: selection }) })] })), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [(tabs.length > 0 || !sidebarOpen) && (_jsxs("div", { className: "relative z-10 flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-webkit-app-region:no-drag]", children: [_jsxs("div", { className: "flex shrink-0 items-center gap-0.5 border-r border-(--ui-stroke-quaternary) px-1.5", children: [!sidebarOpen && (_jsx(Tip, { label: "Show file list", children: _jsx(Button, { "aria-label": "Show file list", onClick: () => setSidebar(true), size: "icon-xs", variant: "ghost", children: _jsx(IconLayoutSidebarLeftExpand, {}) }) })), _jsx(Tip, { label: "Back (\u2318[)", children: _jsx(Button, { "aria-label": "Back", disabled: nav.pos <= 0, onClick: () => goHistory(-1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowLeft, {}) }) }), _jsx(Tip, { label: "Forward (\u2318])", children: _jsx(Button, { "aria-label": "Forward", disabled: nav.pos >= nav.stack.length - 1, onClick: () => goHistory(1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowRight, {}) }) })] }), _jsx("div", { className: "flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out', i === activeTab
                                         ? 'bg-(--ui-bg-editor) text-foreground'
                                         : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'), onClick: () => {
                                         setActiveTab(i);
@@ -375,7 +374,7 @@ export function LibraryView() {
                                             }, type: "button", children: _jsx(IconX, { size: 11 }) })] }, tabKey(tab)))) })] })), selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "shrink-0 border-b border-(--ui-stroke-quaternary) px-7 pb-4 pt-6", children: _jsxs("div", { className: "flex items-end justify-between gap-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [_jsx("span", { children: "Library" }), selection.note.folder
                                                             .split('/')
                                                             .filter(Boolean)
-                                                            .map((part, index) => (_jsxs("span", { className: "contents", children: [_jsx(IconChevronRight, { className: "shrink-0 opacity-50", size: 11 }), _jsx("span", { className: "truncate", children: part })] }, `${part}-${index}`)))] }), _jsx("h2", { className: "truncate text-2xl font-semibold tracking-[-0.025em]", children: selection.note.title })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)", children: [_jsxs("span", { className: "tabular-nums", children: [countWords(selection.note.content), " words"] }), _jsx("span", { className: "rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 font-medium", children: saving ? 'Saving…' : 'Saved to disk' })] })] }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-7 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target), ref: noteEditorRef }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx("div", { className: "grid flex-1 place-items-center text-center", children: _jsxs("div", { className: "flex flex-col items-center gap-3", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: "No note open" }), _jsx("div", { className: "mt-1 text-xs text-muted-foreground", children: "Pick a note on the left, or start a fresh one." })] }), _jsxs(Button, { onClick: () => startCreating('note'), size: "sm", variant: "secondary", children: [_jsx(IconFilePlus, { size: 15 }), "New note"] })] }) }))] }), activeNote && index && (_jsx(NoteRail, { activeNote: activeNote, index: index, notes: contents.notes, onOpenNote: note => openSelection({ kind: 'note', note }), onSelectHeading: handleSelectHeading }))] }));
+                                                            .map((part, index) => (_jsxs("span", { className: "contents", children: [_jsx(IconChevronRight, { className: "shrink-0 opacity-50", size: 11 }), _jsx("span", { className: "truncate", children: part })] }, `${part}-${index}`)))] }), _jsx("h2", { className: "truncate text-2xl font-semibold tracking-[-0.025em]", children: selection.note.title })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)", children: [_jsxs("span", { className: "tabular-nums", children: [countWords(selection.note.content), " words"] }), saving && _jsx("span", { className: "text-(--ui-text-quaternary)", children: "Saving\u2026" })] })] }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-7 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target), ref: noteEditorRef }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx("div", { className: "grid flex-1 place-items-center text-center", children: _jsxs("div", { className: "flex flex-col items-center gap-3", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: "No note open" }), _jsx("div", { className: "mt-1 text-xs text-muted-foreground", children: "Pick a note on the left, or start a fresh one." })] }), _jsxs(Button, { onClick: () => startCreating('note'), size: "sm", variant: "secondary", children: [_jsx(IconFilePlus, { size: 15 }), "New note"] })] }) }))] }), activeNote && index && (_jsx(NoteRail, { activeNote: activeNote, index: index, notes: contents.notes, onOpenNote: note => openInPlace({ kind: 'note', note }), onSelectHeading: handleSelectHeading }))] }));
 }
 function FileGlyph({ kind }) {
     const Icon = kind === 'pdf'
@@ -417,7 +416,11 @@ function FilePreview({ file }) {
     const url = fileUrl(file.path);
     const openExternal = () => void window.hermesDesktop?.openExternal?.(url);
     const reveal = () => void window.hermesDesktop?.revealPath?.(file.path);
-    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [_jsxs("div", { className: "flex items-end justify-between gap-4 border-b border-(--ui-stroke-quaternary) px-6 pb-4 pt-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("p", { className: "mb-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [file.folder || 'Library', " \u00B7 ", file.kind] }), _jsx("h2", { className: "truncate text-xl font-semibold tracking-tight", children: file.name })] }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: openExternal, size: "sm", variant: "outline", children: "Open in default app" }), _jsx(Button, { onClick: reveal, size: "sm", variant: "outline", children: "Reveal" })] })] }), _jsx("div", { className: "min-h-0 flex-1 px-5 pb-5", children: file.kind === 'pdf' ? (_jsx(PdfViewer, { path: file.path })) : file.kind === 'html' ? (_jsx("iframe", { className: "h-full w-full rounded-lg border border-border bg-white", sandbox: "", src: url, title: file.name })) : file.kind === 'image' ? (_jsx("div", { className: "grid h-full place-items-center rounded-lg border border-border bg-card p-4", children: _jsx("img", { alt: file.name, className: "max-h-full max-w-full object-contain", src: url }) })) : (_jsx(EmptyState, { className: "h-full", description: file.kind === 'slides'
+    // PDFs, HTML deliverables, and images render inside Nemesis (below), so we don't
+    // offer to bounce them out to a browser/other app — everything stays in the app.
+    // Only formats we can't render in-app (PowerPoint/Word) keep the external option.
+    const canPreviewInApp = file.kind === 'pdf' || file.kind === 'html' || file.kind === 'image';
+    return (_jsxs("div", { className: "flex min-h-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [_jsxs("div", { className: "flex items-end justify-between gap-4 border-b border-(--ui-stroke-quaternary) px-6 pb-4 pt-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("p", { className: "mb-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [file.folder || 'Library', " \u00B7 ", file.kind] }), _jsx("h2", { className: "truncate text-xl font-semibold tracking-tight", children: file.name })] }), _jsxs("div", { className: "flex gap-2", children: [!canPreviewInApp && (_jsx(Button, { onClick: openExternal, size: "sm", variant: "outline", children: "Open in default app" })), _jsx(Button, { onClick: reveal, size: "sm", variant: "outline", children: "Reveal" })] })] }), _jsx("div", { className: "min-h-0 flex-1 px-5 pb-5", children: file.kind === 'pdf' ? (_jsx(PdfViewer, { path: file.path })) : file.kind === 'html' ? (_jsx("iframe", { className: "h-full w-full rounded-lg border border-border bg-white", sandbox: "", src: url, title: file.name })) : file.kind === 'image' ? (_jsx("div", { className: "grid h-full place-items-center rounded-lg border border-border bg-card p-4", children: _jsx("img", { alt: file.name, className: "max-h-full max-w-full object-contain", src: url }) })) : (_jsx(EmptyState, { className: "h-full", description: file.kind === 'slides'
                         ? 'PowerPoint/Keynote files open in their own app — click “Open in default app”.'
                         : 'This file type opens in its own app — click “Open in default app”.', title: file.name })) })] }));
 }
