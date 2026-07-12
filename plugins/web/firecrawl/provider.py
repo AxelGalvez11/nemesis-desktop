@@ -209,6 +209,41 @@ def _raise_web_backend_configuration_error() -> None:
     raise ValueError(message)
 
 
+def _fix_path_prefixed_api_url(client: Any) -> Any:
+    """Make path-prefixed api_url values work (Nemesis metering proxy).
+
+    firecrawl-py's HttpClient joins endpoints with ``urljoin``, and every SDK
+    endpoint starts with "/" — so urljoin DROPS any path on api_url
+    (urljoin("https://h/functions/v1/nemesis-search/", "/v2/search") →
+    "https://h/v2/search", a platform 404). Nemesis points api_url at a
+    path-prefixed Supabase function, so rewrite the joiner on the constructed
+    client's http clients to plain concatenation. Bare-origin api_urls (real
+    Firecrawl, Nous gateway) are left on stock behavior.
+    """
+    from urllib.parse import urlparse
+
+    for version_attr in ("_v2_client", "_v1_client"):
+        inner = getattr(client, version_attr, None)
+
+        for http_attr in ("http_client", "_http_client", "async_http_client"):
+            http_client = getattr(inner, http_attr, None) if inner is not None else None
+
+            if http_client is None or not hasattr(http_client, "_build_url"):
+                continue
+
+            base = (getattr(http_client, "api_url", "") or "").rstrip("/")
+
+            if not base or urlparse(base).path in ("", "/"):
+                continue
+
+            def _build_url(endpoint: str, _base: str = base) -> str:
+                return f"{_base}/{endpoint.lstrip('/')}"
+
+            http_client._build_url = _build_url
+
+    return client
+
+
 def _get_firecrawl_client() -> Any:
     """Get or create the cached Firecrawl client.
 
@@ -260,7 +295,7 @@ def _get_firecrawl_client() -> Any:
 
     # Construct via the re-exported Firecrawl proxy on tools.web_tools so
     # unit tests patching ``tools.web_tools.Firecrawl`` see their mock.
-    _wt._firecrawl_client = _wt.Firecrawl(**kwargs)
+    _wt._firecrawl_client = _fix_path_prefixed_api_url(_wt.Firecrawl(**kwargs))
     _wt._firecrawl_client_config = client_config
     return _wt._firecrawl_client
 
