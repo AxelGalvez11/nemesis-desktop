@@ -270,6 +270,10 @@ export function GraphView() {
         let disposed = false;
         let graph = null;
         let observer = null;
+        // Nodes, links, and labels start invisible and ramp in together (~1.6s ease-out) when the
+        // graph first builds, so it materializes gently instead of snapping on. Cancelled on unmount.
+        let revealRaf = 0;
+        const revealSprites = [];
         void (async () => {
             try {
                 const [{ default: ForceGraph3D }, { default: SpriteText }, notes] = await Promise.all([
@@ -356,6 +360,11 @@ export function GraphView() {
                     // label grows upward from just outside the sphere instead of straddling it.
                     object3d.center.set(0.5, 0);
                     object3d.position.set(0, radius * LABEL_OFFSET_SCALE, 0);
+                    // Start the label transparent so it fades in with its node during the reveal.
+                    const withMaterial = sprite;
+                    withMaterial.material.transparent = true;
+                    withMaterial.material.opacity = 0;
+                    revealSprites.push(withMaterial);
                     return sprite;
                 })
                     .nodeThreeObjectExtend(true)
@@ -401,6 +410,28 @@ export function GraphView() {
                 // padding keeps the nodes comfortably inside the viewport rather than filling it.
                 instance.onEngineStop(() => instance.zoomToFit(500, 110));
                 window.setTimeout(() => instance.zoomToFit(700, 110), 1500);
+                // Reveal: ramp node spheres, links, and label sprites from invisible to their
+                // resting opacity over ~1.6s (ease-out cubic) so the graph materializes gently.
+                const REVEAL_MS = 1600;
+                const NODE_TARGET = 0.9;
+                const LINK_TARGET = 0.55;
+                const revealStart = performance.now();
+                instance.nodeOpacity(0).linkOpacity(0);
+                const stepReveal = (now) => {
+                    if (disposed) {
+                        return;
+                    }
+                    const p = Math.min(1, (now - revealStart) / REVEAL_MS);
+                    const eased = 1 - (1 - p) ** 3;
+                    instance.nodeOpacity(NODE_TARGET * eased).linkOpacity(LINK_TARGET * eased);
+                    for (const sprite of revealSprites) {
+                        sprite.material.opacity = eased;
+                    }
+                    if (p < 1) {
+                        revealRaf = requestAnimationFrame(stepReveal);
+                    }
+                };
+                revealRaf = requestAnimationFrame(stepReveal);
                 const orbit = instance.controls();
                 orbit.autoRotate = controlsRef.current.rotationSpeed > 0;
                 orbit.autoRotateSpeed = controlsRef.current.rotationSpeed;
@@ -423,6 +454,7 @@ export function GraphView() {
         })();
         return () => {
             disposed = true;
+            cancelAnimationFrame(revealRaf);
             observer?.disconnect();
             graphRef.current = null;
             neighborsByNodeRef.current = new Map();
