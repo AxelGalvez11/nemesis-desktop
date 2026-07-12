@@ -4,7 +4,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
 import { IconChevronDown, IconChecklist, IconFolderPlus, IconLayoutGrid, IconList, IconPlayerPause, IconSettings, IconSitemap } from '@tabler/icons-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -406,17 +406,19 @@ function DuePill({ due }) {
     return (_jsxs("span", { className: "shrink-0 rounded-full bg-(--theme-primary)/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-(--theme-primary)", children: [due, " due"] }));
 }
 function RetentionSparkline({ curve }) {
+    // SVG defs need document-unique ids — this component renders once per deck card.
+    const gradientId = useId();
     const finalDay = curve.at(-1)?.day ?? 1;
     const coordinates = curve.map(point => {
         const x = 2 + (point.day / Math.max(1, finalDay)) * 96;
-        const y = 2 + (1 - point.retention) * 28;
+        const y = 4 + (1 - point.retention) * 30;
         return [x, y];
     });
     const points = coordinates.map(([x, y]) => `${x},${y}`).join(' ');
-    const area = `M ${coordinates.map(([x, y]) => `${x} ${y}`).join(' L ')} L 98 30 L 2 30 Z`;
+    const area = `M ${coordinates.map(([x, y]) => `${x} ${y}`).join(' L ')} L 98 38 L 2 38 Z`;
     const first = curve[0];
     const last = curve.at(-1) ?? first;
-    return (_jsxs("div", { children: [_jsxs("svg", { "aria-hidden": "true", className: "h-8 w-full", preserveAspectRatio: "none", viewBox: "0 0 100 32", children: [_jsx("path", { d: area, fill: "var(--theme-primary)", opacity: "0.1" }), _jsx("polyline", { fill: "none", points: points, stroke: "var(--theme-primary)", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.5", vectorEffect: "non-scaling-stroke" }), _jsx("circle", { cx: coordinates[0][0], cy: coordinates[0][1], fill: "var(--theme-primary)", r: "1.75" })] }), _jsxs("p", { className: "mt-0.5 text-[11px] text-muted-foreground tabular-nums", children: ["Recall ", Math.round(first.retention * 100), "% \u2192 ", Math.round(last.retention * 100), "% in ", finalDay, "d"] })] }));
+    return (_jsxs("div", { children: [_jsxs("svg", { "aria-hidden": "true", className: "h-10 w-full", preserveAspectRatio: "none", viewBox: "0 0 100 40", children: [_jsxs("defs", { children: [_jsxs("linearGradient", { id: `${gradientId}-fade`, x1: "0", x2: "0", y1: "0", y2: "1", children: [_jsx("stop", { offset: "0%", stopColor: "var(--theme-primary)", stopOpacity: "0.38" }), _jsx("stop", { offset: "70%", stopColor: "var(--theme-primary)", stopOpacity: "0.08" }), _jsx("stop", { offset: "100%", stopColor: "var(--theme-primary)", stopOpacity: "0" })] }), _jsx("filter", { height: "300%", id: `${gradientId}-glow`, width: "120%", x: "-10%", y: "-100%", children: _jsx("feGaussianBlur", { in: "SourceGraphic", stdDeviation: "1.6" }) })] }), _jsx("path", { d: area, fill: `url(#${gradientId}-fade)` }), _jsx("polyline", { fill: "none", filter: `url(#${gradientId}-glow)`, opacity: "0.75", points: points, stroke: "var(--theme-primary)", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2.6" }), _jsx("polyline", { fill: "none", points: points, stroke: "var(--theme-primary)", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4", vectorEffect: "non-scaling-stroke" }), _jsx("circle", { cx: coordinates[0][0], cy: coordinates[0][1], fill: "var(--theme-primary)", filter: `url(#${gradientId}-glow)`, opacity: "0.9", r: "2.6" }), _jsx("circle", { cx: coordinates[0][0], cy: coordinates[0][1], fill: "var(--theme-primary)", r: "1.6" })] }), _jsxs("p", { className: "mt-0.5 text-[11px] text-muted-foreground tabular-nums", children: ["Recall ", Math.round(first.retention * 100), "% \u2192 ", Math.round(last.retention * 100), "% in ", finalDay, "d"] })] }));
 }
 function DeckRow({ deck, now, onBrowse, onMatch, onStudy, state }) {
     const stats = deckStats(state, deck.id, now);
@@ -447,7 +449,7 @@ function DeckCard({ curve, deck, now, onBrowse, onMatch, onStudy, state }) {
         event.preventDefault();
         openDeck();
     };
-    return (_jsxs("div", { className: "group flex cursor-pointer flex-col gap-4 rounded-2xl border border-border bg-card p-5 outline-none transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 hover:shadow-lg hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45", onClick: openDeck, onKeyDown: onKeyDown, role: "button", tabIndex: 0, children: [_jsxs("div", { className: "flex items-start justify-between gap-2", children: [_jsx("h3", { className: "text-[15px] font-semibold leading-snug tracking-tight", children: deck.name }), stats.due > 0 && _jsx(DuePill, { due: stats.due })] }), curve.length > 0 && _jsx(RetentionSparkline, { curve: curve }), _jsxs("div", { className: "mt-auto", children: [_jsxs("div", { className: "mb-1.5 flex items-baseline justify-between text-[11px] text-muted-foreground", children: [_jsxs("span", { className: "tabular-nums", children: [stats.total, " card", stats.total === 1 ? '' : 's', " \u00B7 ", stats.fresh, " new"] }), _jsxs("span", { className: "tabular-nums", children: [pct, "% studied"] })] }), _jsx(MasteryBar, { pct: pct })] }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { disabled: stats.total < 2, onClick: event => {
+    return (_jsxs("div", { className: "group flex cursor-pointer flex-col gap-4 rounded-2xl border border-border bg-card p-5 outline-none transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 hover:shadow-lg hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45", onClick: openDeck, onKeyDown: onKeyDown, role: "button", tabIndex: 0, children: [_jsxs("div", { className: "flex items-start justify-between gap-2", children: [_jsx("h3", { className: "text-[15px] font-semibold leading-snug tracking-tight", children: deck.name }), stats.due > 0 && _jsx(DuePill, { due: stats.due })] }), curve.length > 0 ? (_jsx(RetentionSparkline, { curve: curve })) : (_jsxs("div", { children: [_jsx("svg", { "aria-hidden": "true", className: "h-10 w-full", preserveAspectRatio: "none", viewBox: "0 0 100 40", children: _jsx("line", { stroke: "var(--ui-stroke-secondary)", strokeDasharray: "3 4", strokeLinecap: "round", strokeWidth: "1.2", x1: "2", x2: "98", y1: "10", y2: "30" }) }), _jsx("p", { className: "mt-0.5 text-[11px] text-muted-foreground/70", children: "Study one card to light up this deck\u2019s forgetting curve." })] })), _jsxs("div", { className: "mt-auto", children: [_jsxs("div", { className: "mb-1.5 flex items-baseline justify-between text-[11px] text-muted-foreground", children: [_jsxs("span", { className: "tabular-nums", children: [stats.total, " card", stats.total === 1 ? '' : 's', " \u00B7 ", stats.fresh, " new"] }), _jsxs("span", { className: "tabular-nums", children: [pct, "% studied"] })] }), _jsx(MasteryBar, { pct: pct })] }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { disabled: stats.total < 2, onClick: event => {
                             event.stopPropagation();
                             onMatch(deck.id);
                         }, size: "sm", variant: "outline", children: "Match" }), _jsx(Button, { onClick: event => {

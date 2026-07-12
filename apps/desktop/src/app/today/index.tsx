@@ -359,6 +359,13 @@ export function TodayView() {
     navigate(NEW_CHAT_ROUTE)
   }
 
+  const startSchoolSync = () => {
+    setComposerDraft(
+      'Sync my school — run your school-sync pipeline: sweep Blackboard and Outlook for anything new, capture the files, write lecture notes and flashcards for new material, and update my calendar and Home page. Report what changed.'
+    )
+    navigate(NEW_CHAT_ROUTE)
+  }
+
   if (!loaded) {
     return (
       <main className="grid h-full min-h-0 place-items-center bg-(--ui-editor-surface-background)">
@@ -425,12 +432,18 @@ export function TodayView() {
                 {nextAction?.reason ?? 'No urgent deadline is competing for your attention.'}
               </p>
             </div>
-            {nextAction && (
-              <Button className="self-start sm:self-auto" onClick={startNextAction} size="lg">
-                <Codicon name="play" />
-                Start
+            <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
+              <Button onClick={startSchoolSync} size="lg" variant="outline">
+                <Codicon name="sync" />
+                Sync school
               </Button>
-            )}
+              {nextAction && (
+                <Button onClick={startNextAction} size="lg">
+                  <Codicon name="play" />
+                  Start
+                </Button>
+              )}
+            </div>
           </div>
         </section>
 

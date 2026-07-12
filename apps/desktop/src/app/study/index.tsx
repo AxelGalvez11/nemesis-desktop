@@ -12,7 +12,7 @@ import {
   IconSettings,
   IconSitemap
 } from '@tabler/icons-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -1133,32 +1133,63 @@ function DuePill({ due }: { due: number }) {
 }
 
 function RetentionSparkline({ curve }: { curve: RetentionPoint[] }) {
+  // SVG defs need document-unique ids — this component renders once per deck card.
+  const gradientId = useId()
   const finalDay = curve.at(-1)?.day ?? 1
   const coordinates = curve.map(point => {
     const x = 2 + (point.day / Math.max(1, finalDay)) * 96
-    const y = 2 + (1 - point.retention) * 28
+    const y = 4 + (1 - point.retention) * 30
 
     return [x, y] as const
   })
   const points = coordinates.map(([x, y]) => `${x},${y}`).join(' ')
-  const area = `M ${coordinates.map(([x, y]) => `${x} ${y}`).join(' L ')} L 98 30 L 2 30 Z`
+  const area = `M ${coordinates.map(([x, y]) => `${x} ${y}`).join(' L ')} L 98 38 L 2 38 Z`
   const first = curve[0]
   const last = curve.at(-1) ?? first
 
   return (
     <div>
-      <svg aria-hidden="true" className="h-8 w-full" preserveAspectRatio="none" viewBox="0 0 100 32">
-        <path d={area} fill="var(--theme-primary)" opacity="0.1" />
+      <svg aria-hidden="true" className="h-10 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
+        <defs>
+          <linearGradient id={`${gradientId}-fade`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="var(--theme-primary)" stopOpacity="0.38" />
+            <stop offset="70%" stopColor="var(--theme-primary)" stopOpacity="0.08" />
+            <stop offset="100%" stopColor="var(--theme-primary)" stopOpacity="0" />
+          </linearGradient>
+          <filter height="300%" id={`${gradientId}-glow`} width="120%" x="-10%" y="-100%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" />
+          </filter>
+        </defs>
+        <path d={area} fill={`url(#${gradientId}-fade)`} />
+        {/* Soft halo under the crisp line — the "glow". */}
+        <polyline
+          fill="none"
+          filter={`url(#${gradientId}-glow)`}
+          opacity="0.75"
+          points={points}
+          stroke="var(--theme-primary)"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2.6"
+        />
         <polyline
           fill="none"
           points={points}
           stroke="var(--theme-primary)"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="1.5"
+          strokeWidth="1.4"
           vectorEffect="non-scaling-stroke"
         />
-        <circle cx={coordinates[0][0]} cy={coordinates[0][1]} fill="var(--theme-primary)" r="1.75" />
+        <circle
+          cx={coordinates[0][0]}
+          cy={coordinates[0][1]}
+          fill="var(--theme-primary)"
+          filter={`url(#${gradientId}-glow)`}
+          opacity="0.9"
+          r="2.6"
+        />
+        <circle cx={coordinates[0][0]} cy={coordinates[0][1]} fill="var(--theme-primary)" r="1.6" />
       </svg>
       <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
         Recall {Math.round(first.retention * 100)}% → {Math.round(last.retention * 100)}% in {finalDay}d
@@ -1286,7 +1317,27 @@ function DeckCard({
         {stats.due > 0 && <DuePill due={stats.due} />}
       </div>
 
-      {curve.length > 0 && <RetentionSparkline curve={curve} />}
+      {curve.length > 0 ? (
+        <RetentionSparkline curve={curve} />
+      ) : (
+        <div>
+          <svg aria-hidden="true" className="h-10 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
+            <line
+              stroke="var(--ui-stroke-secondary)"
+              strokeDasharray="3 4"
+              strokeLinecap="round"
+              strokeWidth="1.2"
+              x1="2"
+              x2="98"
+              y1="10"
+              y2="30"
+            />
+          </svg>
+          <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+            Study one card to light up this deck&rsquo;s forgetting curve.
+          </p>
+        </div>
+      )}
 
       <div className="mt-auto">
         <div className="mb-1.5 flex items-baseline justify-between text-[11px] text-muted-foreground">
