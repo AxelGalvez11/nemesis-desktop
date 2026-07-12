@@ -4,9 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Codicon } from '@/components/ui/codicon';
 import { courseTitle, dueSoon, emptyGraph, eventsOnDay, loadAcademicGraph, recentChanges, scoreNextAction } from '@/lib/academic-graph';
+import { cn } from '@/lib/utils';
 import { setComposerDraft } from '@/store/composer';
 import { dateKey, loadCalendarState, parseDateKey } from '../calendar/model';
 import { CALENDAR_ROUTE, LEDGER_ROUTE, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../routes';
+import { dueSlot, loadCadence, portalSignInStatus, readLastNudge, saveCadence, SCHOOL_PORTALS, writeLastNudge } from './school-sync-schedule';
+const SYNC_CADENCE_LABEL = {
+    daily: 'Once a day',
+    off: 'Manual only',
+    twice: 'Twice a day'
+};
 const DAY_START_MINUTES = 8 * 60;
 const DAY_END_MINUTES = 22 * 60;
 const DEFAULT_EVENT_MINUTES = 60;
@@ -241,6 +248,46 @@ export function TodayView() {
         setComposerDraft('Sync my school — run your school-sync pipeline: sweep Blackboard and Outlook for anything new, capture the files, write lecture notes and flashcards for new material, and update my calendar and Home page. Report what changed.');
         navigate(NEW_CHAT_ROUTE);
     };
+    const [cadence, setCadence] = useState(() => loadCadence());
+    const [portalStatus, setPortalStatus] = useState({});
+    // Refresh the signed-in status when Today mounts/refocuses — the student may
+    // have logged into a portal in the browser panel since last time.
+    useEffect(() => {
+        let alive = true;
+        const refresh = () => void portalSignInStatus().then(status => alive && setPortalStatus(status));
+        refresh();
+        window.addEventListener('focus', refresh);
+        return () => {
+            alive = false;
+            window.removeEventListener('focus', refresh);
+        };
+    }, []);
+    // The scheduler: while the app is open, check each minute whether a scheduled
+    // slot is due; if so, fire ONE native "time to sync" nudge (never a silent
+    // token-spending turn), tagged so it fires at most once per slot per day.
+    useEffect(() => {
+        if (cadence === 'off') {
+            return;
+        }
+        const tick = () => {
+            const slot = dueSlot(cadence, new Date(), readLastNudge());
+            if (!slot) {
+                return;
+            }
+            writeLastNudge(slot);
+            void window.hermesDesktop?.notify?.({
+                body: 'Open Nemesis and hit Sync school to pull in new lectures, files, and deadlines.',
+                title: 'Time to sync your school'
+            });
+        };
+        tick();
+        const timer = window.setInterval(tick, 60_000);
+        return () => window.clearInterval(timer);
+    }, [cadence]);
+    const changeCadence = (next) => {
+        setCadence(next);
+        saveCadence(next);
+    };
     if (!loaded) {
         return (_jsx("main", { className: "grid h-full min-h-0 place-items-center bg-(--ui-editor-surface-background)", children: _jsxs("div", { className: "flex items-center gap-2 text-xs text-(--ui-text-tertiary)", children: [_jsx(Codicon, { name: "loading", spinning: true }), "Building today"] }) }));
     }
@@ -249,7 +296,11 @@ export function TodayView() {
     }
     const greeting = now.getHours() < 12 ? 'morning' : now.getHours() < 18 ? 'afternoon' : 'evening';
     const dateLabel = now.toLocaleDateString(undefined, { day: 'numeric', month: 'short', weekday: 'long' });
-    return (_jsx("main", { className: "h-full min-h-0 overflow-y-auto bg-(--ui-editor-surface-background)", children: _jsxs("div", { className: "mx-auto flex w-full max-w-[1180px] flex-col px-5 pb-7 pt-6 sm:px-7", children: [_jsxs("header", { children: [_jsxs("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)", children: ["Today \u00B7 ", dateLabel] }), _jsxs("h1", { className: "mt-2 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl", children: ["Good ", greeting, ", ", graph.student?.name?.trim() || 'there'] }), _jsxs("p", { className: "mt-2 text-sm text-(--ui-text-secondary)", children: [formatDuration(free), " free today \u00B7 ", needsYou, " item", needsYou === 1 ? '' : 's', " need you \u00B7 ", overdue.length, ' ', "overdue"] })] }), _jsx("section", { className: "mt-6 rounded-xl border-2 border-(--theme-primary) bg-[color-mix(in_srgb,var(--theme-primary)_7%,var(--ui-bg-elevated))] p-5 shadow-[0_0_28px_color-mix(in_srgb,var(--theme-primary)_9%,transparent)]", children: _jsxs("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-center", children: [_jsx("span", { className: "grid size-11 shrink-0 place-items-center rounded-xl bg-(--theme-primary)/15 text-(--theme-primary)", children: _jsx(Codicon, { name: "target", size: "1.2rem" }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.11em] text-(--theme-primary)", children: "Start here" }), _jsx("h2", { className: "mt-1 text-lg font-semibold tracking-[-0.015em]", children: nextAction?.object.title ?? 'You are clear for the moment' }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: nextAction?.reason ?? 'No urgent deadline is competing for your attention.' })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 self-start sm:self-auto", children: [_jsxs(Button, { onClick: startSchoolSync, size: "lg", variant: "outline", children: [_jsx(Codicon, { name: "sync" }), "Sync school"] }), nextAction && (_jsxs(Button, { onClick: startNextAction, size: "lg", children: [_jsx(Codicon, { name: "play" }), "Start"] }))] })] }) }), _jsxs("div", { className: "mt-5 grid [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] gap-4", children: [_jsx(Card, { icon: "history", title: "Changed since yesterday", children: changes.length === 0 ? (_jsx(EmptyCopy, { children: "Nothing new." })) : (_jsx("div", { className: "divide-y divide-(--ui-stroke-tertiary)", children: changes.slice(0, 4).map(change => (_jsxs("div", { className: "flex gap-2.5 py-2.5 first:pt-0 last:pb-0", children: [_jsx("span", { className: changeIsTrusted(change)
+    return (_jsx("main", { className: "h-full min-h-0 overflow-y-auto bg-(--ui-editor-surface-background)", children: _jsxs("div", { className: "mx-auto flex w-full max-w-[1180px] flex-col px-5 pb-7 pt-6 sm:px-7", children: [_jsxs("header", { children: [_jsxs("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)", children: ["Today \u00B7 ", dateLabel] }), _jsxs("h1", { className: "mt-2 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl", children: ["Good ", greeting, ", ", graph.student?.name?.trim() || 'there'] }), _jsxs("p", { className: "mt-2 text-sm text-(--ui-text-secondary)", children: [formatDuration(free), " free today \u00B7 ", needsYou, " item", needsYou === 1 ? '' : 's', " need you \u00B7 ", overdue.length, ' ', "overdue"] })] }), _jsxs("section", { className: "mt-6 rounded-xl border-2 border-(--theme-primary) bg-[color-mix(in_srgb,var(--theme-primary)_7%,var(--ui-bg-elevated))] p-5 shadow-[0_0_28px_color-mix(in_srgb,var(--theme-primary)_9%,transparent)]", children: [_jsxs("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-center", children: [_jsx("span", { className: "grid size-11 shrink-0 place-items-center rounded-xl bg-(--theme-primary)/15 text-(--theme-primary)", children: _jsx(Codicon, { name: "target", size: "1.2rem" }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.11em] text-(--theme-primary)", children: "Start here" }), _jsx("h2", { className: "mt-1 text-lg font-semibold tracking-[-0.015em]", children: nextAction?.object.title ?? 'You are clear for the moment' }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: nextAction?.reason ?? 'No urgent deadline is competing for your attention.' })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 self-start sm:self-auto", children: [_jsxs(Button, { onClick: startSchoolSync, size: "lg", variant: "outline", children: [_jsx(Codicon, { name: "sync" }), "Sync school"] }), nextAction && (_jsxs(Button, { onClick: startNextAction, size: "lg", children: [_jsx(Codicon, { name: "play" }), "Start"] }))] })] }), _jsxs("div", { className: "mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-(--theme-primary)/20 pt-3.5 text-xs", children: [_jsx("span", { className: "flex flex-wrap items-center gap-2.5", children: SCHOOL_PORTALS.map(portal => {
+                                        const signedIn = portalStatus[portal.origin] === true;
+                                        const known = portal.origin in portalStatus;
+                                        return (_jsxs("span", { className: "flex items-center gap-1.5 text-(--ui-text-secondary)", children: [_jsx("span", { className: cn('size-1.5 rounded-full', signedIn ? 'bg-emerald-500' : known ? 'bg-amber-500' : 'bg-(--ui-text-quaternary)') }), portal.name, _jsx("span", { className: "text-(--ui-text-tertiary)", children: signedIn ? 'signed in' : known ? 'needs login' : '—' })] }, portal.id));
+                                    }) }), _jsxs("label", { className: "ml-auto flex items-center gap-2 text-(--ui-text-tertiary)", children: ["Auto-sync", _jsx("select", { className: "rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2 py-1 text-xs text-(--ui-text-primary) outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/40", onChange: event => changeCadence(event.target.value), value: cadence, children: ['off', 'daily', 'twice'].map(option => (_jsx("option", { value: option, children: SYNC_CADENCE_LABEL[option] }, option))) })] })] })] }), _jsxs("div", { className: "mt-5 grid [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] gap-4", children: [_jsx(Card, { icon: "history", title: "Changed since yesterday", children: changes.length === 0 ? (_jsx(EmptyCopy, { children: "Nothing new." })) : (_jsx("div", { className: "divide-y divide-(--ui-stroke-tertiary)", children: changes.slice(0, 4).map(change => (_jsxs("div", { className: "flex gap-2.5 py-2.5 first:pt-0 last:pb-0", children: [_jsx("span", { className: changeIsTrusted(change)
                                                 ? 'mt-1.5 size-1.5 shrink-0 rounded-full bg-(--theme-primary)'
                                                 : 'mt-1.5 size-1.5 shrink-0 rounded-full bg-(--ui-text-quaternary)' }), _jsxs("div", { className: "min-w-0", children: [_jsx("p", { className: "text-xs leading-relaxed text-(--ui-text-primary)", children: change.summary }), changeIsTrusted(change) && (_jsx("p", { className: "mt-1 text-[0.625rem] font-medium uppercase tracking-[0.07em] text-(--theme-primary)", children: change.kind === 'date-changed' ? 'Date changed' : 'Instructor stated' }))] })] }, `${change.objectId}:${change.ts}`))) })) }), _jsx(Card, { icon: "calendar", title: "Due soon", children: upcoming.length === 0 ? (_jsx(EmptyCopy, { children: "Nothing due \u2014 you're clear." })) : (_jsx("div", { className: "divide-y divide-(--ui-stroke-tertiary)", children: upcoming.slice(0, 5).map(object => (_jsxs("button", { className: "group flex w-full items-start justify-between gap-3 py-2.5 text-left first:pt-0 last:pb-0", onClick: () => navigate(CALENDAR_ROUTE), type: "button", children: [_jsxs("span", { className: "min-w-0", children: [_jsx("span", { className: "block truncate text-xs font-medium group-hover:text-(--theme-primary)", children: object.title }), _jsx("span", { className: "mt-0.5 block truncate text-[0.6875rem] text-(--ui-text-tertiary)", children: courseTitle(graph, object.course) || object.type })] }), _jsx("span", { className: "shrink-0 text-[0.6875rem] font-medium tabular-nums text-(--ui-text-secondary)", children: relativeDate(object.date, now) })] }, object.id))) })) }), _jsx(Card, { icon: "checklist", title: "Today's plan", children: plan.length === 0 ? (_jsx(EmptyCopy, { children: "Your day is open. Add a study block when you know what deserves the time." })) : (_jsx("div", { className: "divide-y divide-(--ui-stroke-tertiary)", children: plan.slice(0, 5).map(item => (_jsxs("div", { className: "flex gap-3 py-2.5 first:pt-0 last:pb-0", children: [_jsx("span", { className: "w-16 shrink-0 text-[0.6875rem] font-medium tabular-nums text-(--theme-primary)", children: item.time ? formatTime(item.time) : 'Any time' }), _jsxs("div", { className: "min-w-0", children: [_jsx("p", { className: "truncate text-xs font-medium", children: item.title }), _jsx("p", { className: "mt-0.5 truncate text-[0.6875rem] capitalize text-(--ui-text-tertiary)", children: [item.kind, item.subtitle].filter(Boolean).join(' · ') })] })] }, item.id))) })) }), _jsx(Card, { icon: "mail", title: "Inbox needs you", children: inbox.length === 0 ? (_jsx(EmptyCopy, { children: "Nothing waiting for you." })) : (_jsxs("div", { children: [_jsx("div", { className: "divide-y divide-(--ui-stroke-tertiary)", children: inbox.slice(0, 3).map(object => (_jsxs("div", { className: "py-2.5 first:pt-0 last:pb-0", children: [_jsx("p", { className: "truncate text-xs font-medium", children: object.title }), _jsx("p", { className: "mt-0.5 truncate text-[0.6875rem] capitalize text-(--ui-text-tertiary)", children: [object.type, courseTitle(graph, object.course)].filter(Boolean).join(' · ') })] }, object.id))) }), inbox.length > 3 && (_jsxs("p", { className: "mt-3 text-[0.6875rem] text-(--ui-text-quaternary)", children: [inbox.length - 3, " more filed"] }))] })) })] }), _jsxs("button", { className: "mt-5 flex w-full items-center justify-center gap-2 rounded-lg border border-(--ui-stroke-tertiary) px-4 py-3 text-center text-[0.6875rem] text-(--ui-text-tertiary) transition-colors hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-secondary)", onClick: () => navigate(LEDGER_ROUTE), type: "button", children: [_jsx(Codicon, { className: "shrink-0 text-(--theme-primary)", name: "shield", size: "0.85rem" }), _jsx("span", { children: "Read your accounts this morning \u00B7 sent nothing \u00B7 submitted nothing." })] })] }) }));
 }

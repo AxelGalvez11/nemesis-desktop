@@ -15,10 +15,27 @@ import {
   recentChanges,
   scoreNextAction
 } from '@/lib/academic-graph'
+import { cn } from '@/lib/utils'
 import { setComposerDraft } from '@/store/composer'
 
 import { type CalendarEvent, dateKey, loadCalendarState, parseDateKey } from '../calendar/model'
 import { CALENDAR_ROUTE, LEDGER_ROUTE, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../routes'
+import {
+  dueSlot,
+  loadCadence,
+  portalSignInStatus,
+  readLastNudge,
+  saveCadence,
+  SCHOOL_PORTALS,
+  type SyncCadence,
+  writeLastNudge
+} from './school-sync-schedule'
+
+const SYNC_CADENCE_LABEL: Record<SyncCadence, string> = {
+  daily: 'Once a day',
+  off: 'Manual only',
+  twice: 'Twice a day'
+}
 
 const DAY_START_MINUTES = 8 * 60
 const DAY_END_MINUTES = 22 * 60
@@ -366,6 +383,56 @@ export function TodayView() {
     navigate(NEW_CHAT_ROUTE)
   }
 
+  const [cadence, setCadence] = useState<SyncCadence>(() => loadCadence())
+  const [portalStatus, setPortalStatus] = useState<Record<string, boolean>>({})
+
+  // Refresh the signed-in status when Today mounts/refocuses — the student may
+  // have logged into a portal in the browser panel since last time.
+  useEffect(() => {
+    let alive = true
+    const refresh = () => void portalSignInStatus().then(status => alive && setPortalStatus(status))
+    refresh()
+    window.addEventListener('focus', refresh)
+
+    return () => {
+      alive = false
+      window.removeEventListener('focus', refresh)
+    }
+  }, [])
+
+  // The scheduler: while the app is open, check each minute whether a scheduled
+  // slot is due; if so, fire ONE native "time to sync" nudge (never a silent
+  // token-spending turn), tagged so it fires at most once per slot per day.
+  useEffect(() => {
+    if (cadence === 'off') {
+      return
+    }
+
+    const tick = () => {
+      const slot = dueSlot(cadence, new Date(), readLastNudge())
+
+      if (!slot) {
+        return
+      }
+
+      writeLastNudge(slot)
+      void window.hermesDesktop?.notify?.({
+        body: 'Open Nemesis and hit Sync school to pull in new lectures, files, and deadlines.',
+        title: 'Time to sync your school'
+      })
+    }
+
+    tick()
+    const timer = window.setInterval(tick, 60_000)
+
+    return () => window.clearInterval(timer)
+  }, [cadence])
+
+  const changeCadence = (next: SyncCadence) => {
+    setCadence(next)
+    saveCadence(next)
+  }
+
   if (!loaded) {
     return (
       <main className="grid h-full min-h-0 place-items-center bg-(--ui-editor-surface-background)">
@@ -444,6 +511,47 @@ export function TodayView() {
                 </Button>
               )}
             </div>
+          </div>
+
+          {/* Sign-in status + auto-sync cadence — the student knows whether a
+              sync will work (portals signed in) before running it, and can put
+              the sweep on a schedule. */}
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-(--theme-primary)/20 pt-3.5 text-xs">
+            <span className="flex flex-wrap items-center gap-2.5">
+              {SCHOOL_PORTALS.map(portal => {
+                const signedIn = portalStatus[portal.origin] === true
+                const known = portal.origin in portalStatus
+
+                return (
+                  <span className="flex items-center gap-1.5 text-(--ui-text-secondary)" key={portal.id}>
+                    <span
+                      className={cn(
+                        'size-1.5 rounded-full',
+                        signedIn ? 'bg-emerald-500' : known ? 'bg-amber-500' : 'bg-(--ui-text-quaternary)'
+                      )}
+                    />
+                    {portal.name}
+                    <span className="text-(--ui-text-tertiary)">
+                      {signedIn ? 'signed in' : known ? 'needs login' : '—'}
+                    </span>
+                  </span>
+                )
+              })}
+            </span>
+            <label className="ml-auto flex items-center gap-2 text-(--ui-text-tertiary)">
+              Auto-sync
+              <select
+                className="rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2 py-1 text-xs text-(--ui-text-primary) outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/40"
+                onChange={event => changeCadence(event.target.value as SyncCadence)}
+                value={cadence}
+              >
+                {(['off', 'daily', 'twice'] as const).map(option => (
+                  <option key={option} value={option}>
+                    {SYNC_CADENCE_LABEL[option]}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </section>
 
