@@ -43,6 +43,13 @@ function looksLikePathOrUrl(value) {
         value.startsWith('~/'));
 }
 function looksLikeArtifact(value) {
+    // A single artifact is one path or URL. Multi-line strings are tool OUTPUT
+    // (e.g. a `find` listing of the whole vault) — treating one as an artifact
+    // gave it the label of its last line and let an Exports/ line anywhere in
+    // the blob defeat the Library work-file filter.
+    if (/[\r\n]/.test(value)) {
+        return false;
+    }
     if (/^(?:https?:\/\/|data:image\/)/.test(value)) {
         return true;
     }
@@ -197,6 +204,9 @@ export function isLibraryWorkFile(value) {
             path = path.slice('file://'.length);
         }
     }
+    // Agent tool calls often carry shell-escaped paths ("Nemesis\ Library"),
+    // which defeat plain substring hints — unescape before matching.
+    path = path.replace(/\\ /g, ' ');
     if (path.includes(LIBRARY_EXPORTS_HINT)) {
         return false;
     }
@@ -225,6 +235,13 @@ export function collectArtifactsForSession(session, messages) {
             // vault paths are skipped EXCEPT the Exports folder (where deliverables
             // — slide decks, reports, handouts — are written).
             if (NEMESIS_STUDENT_BUILD && isLibraryWorkFile(value)) {
+                return;
+            }
+            // Student build: the agent's own machinery is never a deliverable. It
+            // edits its skills (SKILL.md), SOUL, and memories under ~/.hermes while
+            // answering, and those writes were surfacing here as "Made by Nemesis"
+            // entries named after skills (openfda-drug-label, school-portal, …).
+            if (NEMESIS_STUDENT_BUILD && /[\\/]\.hermes[\\/]/.test(value)) {
                 return;
             }
             const key = `${session.id}:${value}`;

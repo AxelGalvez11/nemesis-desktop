@@ -2264,6 +2264,13 @@ let updateInFlight = false
 // actually dies and the hand-off script can proceed immediately.
 let isQuittingForHandoff = false
 
+// True once the app is really quitting (Cmd+Q, before-quit fired). On macOS,
+// Cmd+W / the red button must NOT destroy the main window — a destroyed window
+// forced a full createWindow() re-run whose single-init wiring made reopening
+// unreliable. Instead close hides, and the existing app.on('activate') →
+// focusWindow() path (which show()s hidden windows) restores it instantly.
+let isAppQuitting = false
+
 // Resolve the staged updater binary. The Tauri installer copies itself to
 // HERMES_HOME/hermes-setup.exe on a successful install (see
 // apps/bootstrap-installer paths::copy_self_to_hermes_home). That binary owns
@@ -6871,7 +6878,17 @@ function createWindow() {
   mainWindow.on('moved', schedulePersistWindowState)
   mainWindow.on('maximize', schedulePersistWindowState)
   mainWindow.on('unmaximize', schedulePersistWindowState)
-  mainWindow.on('close', () => schedulePersistWindowState.flush())
+  mainWindow.on('close', event => {
+    schedulePersistWindowState.flush()
+
+    // macOS convention (Slack/Discord): Cmd+W and the red button hide the
+    // window with all state warm; the Dock icon brings it back. Real quits
+    // and the updater handoff pass through and actually close.
+    if (IS_MAC && !isAppQuitting && !isQuittingForHandoff && mainWindow && !mainWindow.isDestroyed()) {
+      event.preventDefault()
+      mainWindow.hide()
+    }
+  })
 
   // The overlay rides the main window — closing the app's primary window must
   // tear it down too (otherwise it strands as an orphan that blocks
@@ -8675,6 +8692,8 @@ function configureSpellChecker() {
 }
 
 app.on('before-quit', () => {
+  isAppQuitting = true
+
   // The always-on-top overlay isn't a "real" app window; close it so a stray
   // pet can't keep the process alive or float over a quit app.
   closePetOverlay()

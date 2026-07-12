@@ -3,6 +3,7 @@
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
 import {
+  IconChevronDown,
   IconChecklist,
   IconFolderPlus,
   IconLayoutGrid,
@@ -79,6 +80,7 @@ import {
   toggleSuspendCard,
   updateCard
 } from './model'
+import { deckRetentionCurve, type RetentionPoint } from './retention'
 import { TestSurface } from './test-mode'
 
 const GRADES: { key: string; label: string; rating: StudyRating }[] = [
@@ -91,6 +93,7 @@ const GRADES: { key: string; label: string; rating: StudyRating }[] = [
 type DeckViewMode = 'cards' | 'list'
 
 const VIEW_MODE_KEY = 'nemesis.study.view'
+const COLLAPSED_SECTIONS_KEY = 'nemesis.study.sections.collapsed.v1'
 
 const ORDER_OPTIONS: SegmentedControlOption<ReviewOrder>[] = [
   { id: 'due', label: 'Due first' },
@@ -102,6 +105,18 @@ function loadViewMode(): DeckViewMode {
     return window.localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'cards'
   } catch {
     return 'cards'
+  }
+}
+
+function loadCollapsedSections(): Set<string> {
+  try {
+    const stored: unknown = JSON.parse(window.localStorage.getItem(COLLAPSED_SECTIONS_KEY) ?? '[]')
+
+    return Array.isArray(stored)
+      ? new Set(stored.filter((course): course is string => typeof course === 'string'))
+      : new Set()
+  } catch {
+    return new Set()
   }
 }
 
@@ -127,6 +142,7 @@ export function StudyView() {
   const [newSectionOpen, setNewSectionOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [view, setView] = useState<DeckViewMode>(() => loadViewMode())
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => loadCollapsedSections())
   const [reducedMotion] = useState(() => prefersReducedMotion())
   const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
   const [done, setDone] = useState(0)
@@ -183,6 +199,26 @@ export function StudyView() {
   const update = useCallback((next: StudyState) => {
     setState(next)
     saveState(next)
+  }, [])
+
+  const toggleSection = useCallback((course: string) => {
+    setCollapsedSections(current => {
+      const next = new Set(current)
+
+      if (next.has(course)) {
+        next.delete(course)
+      } else {
+        next.add(course)
+      }
+
+      try {
+        window.localStorage.setItem(COLLAPSED_SECTIONS_KEY, JSON.stringify([...next]))
+      } catch {
+        // A blocked/full localStorage should not prevent the section from toggling.
+      }
+
+      return next
+    })
   }, [])
 
   // Agent-managed decks: the vault's Flashcards folder is the source of truth, so
@@ -554,6 +590,7 @@ export function StudyView() {
         />
       ) : (
         <DeckBrowser
+          collapsedSections={collapsedSections}
           mindmaps={mindmaps}
           onBrowse={setBrowseDeckId}
           onCreateDeck={setNewDeckSection}
@@ -561,6 +598,7 @@ export function StudyView() {
           onOpenMindmap={setViewingMindmap}
           onStartTest={setTakingTest}
           onStudy={startReview}
+          onToggleSection={toggleSection}
           state={state}
           testAttempts={testAttempts}
           tests={tests}
@@ -840,6 +878,7 @@ interface StudySectionGroup {
 }
 
 function DeckBrowser({
+  collapsedSections,
   mindmaps,
   onBrowse,
   onCreateDeck,
@@ -847,11 +886,13 @@ function DeckBrowser({
   onOpenMindmap,
   onStartTest,
   onStudy,
+  onToggleSection,
   state,
   testAttempts,
   tests,
   view
 }: {
+  collapsedSections: Set<string>
   mindmaps: MindmapFile[]
   onBrowse: (deckId: string) => void
   onCreateDeck: (section: string) => void
@@ -859,12 +900,30 @@ function DeckBrowser({
   onOpenMindmap: (file: MindmapFile) => void
   onStartTest: (file: TestFile) => void
   onStudy: (deckId: string) => void
+  onToggleSection: (course: string) => void
   state: StudyState
   testAttempts: TestAttemptsStore
   tests: TestFile[]
   view: DeckViewMode
 }) {
-  const now = new Date()
+  const { curvesByDeck, now } = useMemo(() => {
+    const calculationTime = new Date()
+    const curves = new Map(
+      state.decks.map(deck => [
+        deck.id,
+        deckRetentionCurve(
+          deck.cards.flatMap(card => {
+            const schedule = state.schedule[card.id]
+
+            return schedule ? [schedule] : []
+          }),
+          calculationTime
+        )
+      ])
+    )
+
+    return { curvesByDeck: curves, now: calculationTime }
+  }, [state])
   const deckGroups = groupDecks(state, now)
   const extrasByCourse = useMemo(() => groupExtras(state.sections, mindmaps, tests), [mindmaps, state.sections, tests])
 
@@ -895,11 +954,26 @@ function DeckBrowser({
         const groupMindmaps = group.extras?.mindmaps ?? []
         const groupTests = group.extras?.tests ?? []
         const hasExtras = groupMindmaps.length > 0 || groupTests.length > 0
+        const isCollapsed = collapsedSections.has(group.course)
 
         return (
           <section className="px-8 pt-7" key={group.course}>
             <div className="mb-3 flex items-baseline justify-between">
-              <h2 className="text-[15px] font-semibold tracking-tight">{group.course}</h2>
+              <h2 className="text-[15px] font-semibold tracking-tight">
+                <button
+                  aria-expanded={!isCollapsed}
+                  className="flex items-center gap-1.5 rounded-sm text-left hover:text-(--theme-primary) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
+                  onClick={() => onToggleSection(group.course)}
+                  type="button"
+                >
+                  <IconChevronDown
+                    aria-hidden="true"
+                    className={cn('transition-transform', isCollapsed && '-rotate-90')}
+                    size={15}
+                  />
+                  <span>{group.course}</span>
+                </button>
+              </h2>
               <span className="text-xs text-muted-foreground">
                 {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} ·{' '}
                 {group.stats.total} cards
@@ -908,63 +982,68 @@ function DeckBrowser({
                 {groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`}
               </span>
             </div>
-            {group.decks.length === 0 ? (
-              hasExtras ? null : (
-                <div className="rounded-xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-5">
-                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
-                    Empty section
-                  </p>
-                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>No decks yet —</span>
-                    <Button onClick={() => onCreateDeck(group.course)} size="inline" variant="textStrong">
-                      add one
-                    </Button>
+            {!isCollapsed && (
+              <>
+                {group.decks.length === 0 ? (
+                  hasExtras ? null : (
+                    <div className="rounded-xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-5">
+                      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
+                        Empty section
+                      </p>
+                      <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>No decks yet —</span>
+                        <Button onClick={() => onCreateDeck(group.course)} size="inline" variant="textStrong">
+                          add one
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                ) : view === 'list' ? (
+                  <div className="flex flex-col gap-2">
+                    {group.decks.map(deck => (
+                      <DeckRow
+                        deck={deck}
+                        key={deck.id}
+                        now={now}
+                        onBrowse={onBrowse}
+                        onMatch={onMatch}
+                        onStudy={onStudy}
+                        state={state}
+                      />
+                    ))}
                   </div>
-                </div>
-              )
-            ) : view === 'list' ? (
-              <div className="flex flex-col gap-2">
-                {group.decks.map(deck => (
-                  <DeckRow
-                    deck={deck}
-                    key={deck.id}
-                    now={now}
-                    onBrowse={onBrowse}
-                    onMatch={onMatch}
-                    onStudy={onStudy}
-                    state={state}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {group.decks.map(deck => (
-                  <DeckCard
-                    deck={deck}
-                    key={deck.id}
-                    now={now}
-                    onBrowse={onBrowse}
-                    onMatch={onMatch}
-                    onStudy={onStudy}
-                    state={state}
-                  />
-                ))}
-              </div>
-            )}
-            {hasExtras && (
-              <div className="mt-2 flex flex-col gap-2">
-                {groupMindmaps.map(mindmap => (
-                  <MindmapRow key={mindmap.fileName} mindmap={mindmap} onOpen={() => onOpenMindmap(mindmap)} />
-                ))}
-                {groupTests.map(test => (
-                  <TestRow
-                    attempts={testAttempts[test.fileName]?.attempts ?? []}
-                    key={test.fileName}
-                    onStart={() => onStartTest(test)}
-                    test={test}
-                  />
-                ))}
-              </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {group.decks.map(deck => (
+                      <DeckCard
+                        curve={curvesByDeck.get(deck.id) ?? []}
+                        deck={deck}
+                        key={deck.id}
+                        now={now}
+                        onBrowse={onBrowse}
+                        onMatch={onMatch}
+                        onStudy={onStudy}
+                        state={state}
+                      />
+                    ))}
+                  </div>
+                )}
+                {hasExtras && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {groupMindmaps.map(mindmap => (
+                      <MindmapRow key={mindmap.fileName} mindmap={mindmap} onOpen={() => onOpenMindmap(mindmap)} />
+                    ))}
+                    {groupTests.map(test => (
+                      <TestRow
+                        attempts={testAttempts[test.fileName]?.attempts ?? []}
+                        key={test.fileName}
+                        onStart={() => onStartTest(test)}
+                        test={test}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </section>
         )
@@ -1053,6 +1132,41 @@ function DuePill({ due }: { due: number }) {
   )
 }
 
+function RetentionSparkline({ curve }: { curve: RetentionPoint[] }) {
+  const finalDay = curve.at(-1)?.day ?? 1
+  const coordinates = curve.map(point => {
+    const x = 2 + (point.day / Math.max(1, finalDay)) * 96
+    const y = 2 + (1 - point.retention) * 28
+
+    return [x, y] as const
+  })
+  const points = coordinates.map(([x, y]) => `${x},${y}`).join(' ')
+  const area = `M ${coordinates.map(([x, y]) => `${x} ${y}`).join(' L ')} L 98 30 L 2 30 Z`
+  const first = curve[0]
+  const last = curve.at(-1) ?? first
+
+  return (
+    <div>
+      <svg aria-hidden="true" className="h-8 w-full" preserveAspectRatio="none" viewBox="0 0 100 32">
+        <path d={area} fill="var(--theme-primary)" opacity="0.1" />
+        <polyline
+          fill="none"
+          points={points}
+          stroke="var(--theme-primary)"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle cx={coordinates[0][0]} cy={coordinates[0][1]} fill="var(--theme-primary)" r="1.75" />
+      </svg>
+      <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+        Recall {Math.round(first.retention * 100)}% → {Math.round(last.retention * 100)}% in {finalDay}d
+      </p>
+    </div>
+  )
+}
+
 function DeckRow({
   deck,
   now,
@@ -1130,6 +1244,7 @@ function DeckRow({
 }
 
 function DeckCard({
+  curve,
   deck,
   now,
   onBrowse,
@@ -1137,6 +1252,7 @@ function DeckCard({
   onStudy,
   state
 }: {
+  curve: RetentionPoint[]
   deck: StudyDeck
   now: Date
   onBrowse: (deckId: string) => void
@@ -1169,6 +1285,8 @@ function DeckCard({
         <h3 className="text-[15px] font-semibold leading-snug tracking-tight">{deck.name}</h3>
         {stats.due > 0 && <DuePill due={stats.due} />}
       </div>
+
+      {curve.length > 0 && <RetentionSparkline curve={curve} />}
 
       <div className="mt-auto">
         <div className="mb-1.5 flex items-baseline justify-between text-[11px] text-muted-foreground">

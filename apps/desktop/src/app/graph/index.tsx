@@ -81,6 +81,7 @@ interface GraphControlsState {
   nodeSize: number
   spread: number
   repulsion: number
+  gravity: number
   rotationSpeed: number
   showNames: boolean
   neighborGlow: boolean
@@ -92,6 +93,7 @@ const MIN_LABEL_SIZE = 4
 const MAX_LABEL_SIZE = 24
 
 const DEFAULT_CONTROLS: GraphControlsState = {
+  gravity: 0.3,
   labelSize: 8,
   neighborGlow: true,
   nodeSize: 7,
@@ -99,6 +101,49 @@ const DEFAULT_CONTROLS: GraphControlsState = {
   rotationSpeed: 0,
   showNames: true,
   spread: 34
+}
+
+interface GravityNode {
+  vx?: number
+  vy?: number
+  vz?: number
+  x?: number
+  y?: number
+  z?: number
+}
+
+interface GravityForce {
+  (alpha: number): void
+  initialize?: (nodes: GravityNode[]) => void
+}
+
+/** Center-pulling force (d3's forceX/Y/Z(0) trio in one): repulsion pushes
+ *  disconnected components and lone notes apart without bound, so gravity
+ *  reels every node back toward the origin and the graph stays one cluster.
+ *  Strength is read through a callback each tick, so the settings slider
+ *  retunes the LIVE simulation without re-registering the force. */
+function makeGravityForce(strengthOf: () => number): GravityForce {
+  let nodes: GravityNode[] = []
+
+  const force: GravityForce = alpha => {
+    const pull = strengthOf() * alpha
+
+    if (pull <= 0) {
+      return
+    }
+
+    for (const node of nodes) {
+      node.vx = (node.vx ?? 0) - (node.x ?? 0) * pull
+      node.vy = (node.vy ?? 0) - (node.y ?? 0) * pull
+      node.vz = (node.vz ?? 0) - (node.z ?? 0) * pull
+    }
+  }
+
+  force.initialize = next => {
+    nodes = next
+  }
+
+  return force
 }
 
 // Always-visible node label (three-spritetext) tuning.
@@ -577,6 +622,9 @@ export function GraphView() {
           })
           .graphData({ links, nodes })
 
+        // Register gravity once; the force reads the slider live via controlsRef.
+        instance.d3Force('gravity', makeGravityForce(() => controlsRef.current.gravity))
+
         // Frame the whole graph once the force sim settles (and again as a fallback —
         // the container can report 0px at construction inside the flex layout). Generous
         // padding keeps the nodes comfortably inside the viewport rather than filling it.
@@ -642,7 +690,7 @@ export function GraphView() {
     graph.d3Force('link')?.distance?.(controls.spread)
     graph.d3Force('charge')?.strength?.(-controls.repulsion)
 
-    const layoutSignature = `${controls.nodeSize}|${controls.spread}|${controls.repulsion}`
+    const layoutSignature = `${controls.nodeSize}|${controls.spread}|${controls.repulsion}|${controls.gravity}`
 
     if (prevLayoutSignatureRef.current !== layoutSignature) {
       prevLayoutSignatureRef.current = layoutSignature
@@ -730,6 +778,14 @@ export function GraphView() {
                   onChange={repulsion => setControls(current => ({ ...current, repulsion }))}
                   step={5}
                   value={controls.repulsion}
+                />
+                <ControlSlider
+                  label="Gravity"
+                  max={0.5}
+                  min={0}
+                  onChange={gravity => setControls(current => ({ ...current, gravity }))}
+                  step={0.02}
+                  value={controls.gravity}
                 />
                 <ControlSlider
                   label="Rotation speed"
