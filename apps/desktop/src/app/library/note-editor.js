@@ -1,4 +1,4 @@
-import { jsx as _jsx } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 // NoteEditor — Obsidian-style "live preview" over CodeMirror 6 (the SAME editor engine
 // Obsidian itself is built on; @codemirror/* + @lezer/markdown, all MIT). The markdown
 // stays plain text on disk, but formatting marks melt away as you read: `# ` disappears
@@ -9,7 +9,10 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
 import { Decoration, EditorView, keymap, placeholder, ViewPlugin, WidgetType } from '@codemirror/view';
+import { IconBold, IconHeading, IconItalic, IconList } from '@tabler/icons-react';
 import { useEffect, useImperativeHandle, useRef } from 'react';
+import { Button } from '@/components/ui/button';
+import { cycleHeading, toggleBold, toggleBulletList, toggleItalic } from './note-format';
 const WIKILINK_RE = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g;
 class BulletWidget extends WidgetType {
     eq() {
@@ -277,6 +280,10 @@ export function NoteEditor({ initialValue, onChange, onOpenWikilink, ref }) {
             doc: initialValue,
             extensions: [
                 history(),
+                keymap.of([
+                    { key: 'Mod-b', run: toggleBold },
+                    { key: 'Mod-i', run: toggleItalic }
+                ]),
                 keymap.of([...defaultKeymap, ...historyKeymap]),
                 EditorView.lineWrapping,
                 markdown({ base: markdownLanguage }),
@@ -300,5 +307,20 @@ export function NoteEditor({ initialValue, onChange, onOpenWikilink, ref }) {
         // intentionally captured once per mount.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    return _jsx("div", { className: "h-full min-h-0", ref: hostRef });
+    const runFormat = (command) => {
+        const view = viewRef.current;
+        if (view) {
+            command(view);
+            view.focus();
+        }
+    };
+    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col", children: [_jsx("div", { "aria-label": "Formatting", className: "mx-auto flex w-full max-w-[46rem] shrink-0 items-center gap-0.5 border-b border-(--ui-stroke-tertiary) px-1 py-1", role: "toolbar", children: FORMAT_ACTIONS.map(action => (_jsx(Button, { "aria-label": action.label, 
+                    // Keep focus (and the selection) in the editor while the button is clicked.
+                    onMouseDown: event => event.preventDefault(), onClick: () => runFormat(action.run), size: "icon-xs", title: action.label, type: "button", variant: "ghost", children: _jsx(action.icon, {}) }, action.label))) }), _jsx("div", { className: "min-h-0 flex-1", ref: hostRef })] }));
 }
+const FORMAT_ACTIONS = [
+    { icon: IconBold, label: 'Bold (⌘B)', run: toggleBold },
+    { icon: IconItalic, label: 'Italic (⌘I)', run: toggleItalic },
+    { icon: IconHeading, label: 'Heading (cycle H1–H3)', run: cycleHeading },
+    { icon: IconList, label: 'Bullet list', run: toggleBulletList }
+];

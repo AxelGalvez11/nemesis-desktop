@@ -5,6 +5,7 @@ import { atom } from 'nanostores'
 
 import { createFolder, saveNote } from '../library/vault'
 
+import { deriveRecordingTitle } from './autoname'
 import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
 
 export const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
@@ -53,6 +54,9 @@ let sampleRate = 48_000
 let startedAt = 0
 let pausedAt = 0
 let pausedTotal = 0
+// True once the student types in the title field this recording — auto-naming then
+// stands down completely (both the live retitle and the final pass in persist()).
+let titleEdited = false
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
@@ -114,7 +118,19 @@ function lectureNoteTitle(date: Date): string {
 }
 
 function appendLiveSegment(text: string): void {
-  $liveTranscript.set([...$liveTranscript.get(), text])
+  const nextTranscript = [...$liveTranscript.get(), text]
+  $liveTranscript.set(nextTranscript)
+
+  // Live auto-naming: as soon as enough has been said, the title field renames
+  // itself from the transcript — unless the student already typed their own.
+  if (!titleEdited) {
+    const derived = deriveRecordingTitle(nextTranscript.join(' '), new Date(startedAt || Date.now()))
+
+    if (derived && derived !== $recordingTitle.get()) {
+      $recordingTitle.set(derived)
+    }
+  }
+
   const terms = detectPharmTerms(text)
 
   if (terms.length === 0) {
@@ -283,7 +299,12 @@ async function persist(): Promise<void> {
     await drainLive(sampleRate)
     const transcript = $liveTranscript.get().join(' ').replace(/\s+/g, ' ').trim()
     const typedNotes = $notepadDraft.get().trim()
-    const noteTitle = $recordingTitle.get().trim() || lectureNoteTitle(at)
+    const typedTitle = $recordingTitle.get().trim()
+    // Final naming pass over the complete transcript; a student-typed title always wins.
+    const noteTitle =
+      titleEdited && typedTitle
+        ? typedTitle
+        : (deriveRecordingTitle(transcript, at) ?? (typedTitle || lectureNoteTitle(at)))
     await createFolder(LECTURE_FOLDER)
     await saveNote(
       noteTitle,
@@ -318,6 +339,7 @@ export async function startRecording(): Promise<void> {
   $liveInsights.set([])
   $notepadDraft.set('')
   $recentLectureNote.set(null)
+  titleEdited = false
   $recordingTitle.set(lectureNoteTitle(new Date()))
 
   try {
@@ -461,6 +483,7 @@ export function setRecordingPaused(paused: boolean): Promise<void> {
 }
 
 export function setRecordingTitle(title: string): void {
+  titleEdited = true
   $recordingTitle.set(title)
 }
 

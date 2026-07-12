@@ -3,6 +3,7 @@
 // running when the student navigates elsewhere in the desktop app.
 import { atom } from 'nanostores';
 import { createFolder, saveNote } from '../library/vault';
+import { deriveRecordingTitle } from './autoname';
 import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon';
 export const RECORDINGS_DIR = '~/Documents/Nemesis Recordings';
 export const LECTURE_FOLDER = 'Lectures';
@@ -39,6 +40,9 @@ let sampleRate = 48_000;
 let startedAt = 0;
 let pausedAt = 0;
 let pausedTotal = 0;
+// True once the student types in the title field this recording — auto-naming then
+// stands down completely (both the live retitle and the final pass in persist()).
+let titleEdited = false;
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 function concatSamples(sampleChunks) {
     const total = sampleChunks.reduce((sum, chunk) => sum + chunk.length, 0);
@@ -84,7 +88,16 @@ function lectureNoteTitle(date) {
     return `Lecture ${day} ${time}`;
 }
 function appendLiveSegment(text) {
-    $liveTranscript.set([...$liveTranscript.get(), text]);
+    const nextTranscript = [...$liveTranscript.get(), text];
+    $liveTranscript.set(nextTranscript);
+    // Live auto-naming: as soon as enough has been said, the title field renames
+    // itself from the transcript — unless the student already typed their own.
+    if (!titleEdited) {
+        const derived = deriveRecordingTitle(nextTranscript.join(' '), new Date(startedAt || Date.now()));
+        if (derived && derived !== $recordingTitle.get()) {
+            $recordingTitle.set(derived);
+        }
+    }
     const terms = detectPharmTerms(text);
     if (terms.length === 0) {
         return;
@@ -218,7 +231,11 @@ async function persist() {
         await drainLive(sampleRate);
         const transcript = $liveTranscript.get().join(' ').replace(/\s+/g, ' ').trim();
         const typedNotes = $notepadDraft.get().trim();
-        const noteTitle = $recordingTitle.get().trim() || lectureNoteTitle(at);
+        const typedTitle = $recordingTitle.get().trim();
+        // Final naming pass over the complete transcript; a student-typed title always wins.
+        const noteTitle = titleEdited && typedTitle
+            ? typedTitle
+            : (deriveRecordingTitle(transcript, at) ?? (typedTitle || lectureNoteTitle(at)));
         await createFolder(LECTURE_FOLDER);
         await saveNote(noteTitle, `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`, LECTURE_FOLDER);
         $recentLectureNote.set(noteTitle);
@@ -249,6 +266,7 @@ export async function startRecording() {
     $liveInsights.set([]);
     $notepadDraft.set('');
     $recentLectureNote.set(null);
+    titleEdited = false;
     $recordingTitle.set(lectureNoteTitle(new Date()));
     try {
         const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -365,6 +383,7 @@ export function setRecordingPaused(paused) {
     return paused ? pauseRecording() : resumeRecording();
 }
 export function setRecordingTitle(title) {
+    titleEdited = true;
     $recordingTitle.set(title);
 }
 export function setNotepadDraft(draft) {
