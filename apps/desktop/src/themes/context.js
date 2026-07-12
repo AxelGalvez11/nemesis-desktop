@@ -14,6 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { matchesQuery, useMediaQuery } from '@/hooks/use-media-query';
 import { persistString, persistStringRecord, storedString, storedStringRecord } from '@/lib/storage';
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile';
+import { applyAccentTint } from './accent-tint';
 import { hexToRgb, mix, readableOn } from './color';
 import { BUILTIN_THEME_LIST, BUILTIN_THEMES, DEFAULT_SKIN_NAME, DEFAULT_TYPOGRAPHY, nousTheme } from './presets';
 import { $userThemes, resolveTheme } from './user-themes';
@@ -189,6 +190,9 @@ function applyTheme(theme, mode) {
     for (const [k, v] of Object.entries({ ...seeds, ...mixesFor(isDark), ...palette })) {
         root.style.setProperty(k, v);
     }
+    // Student build: repaint the accent tokens with the user's chosen tint over this
+    // monochrome base. No-op (keeps the theme's own accent) unless a tint is set.
+    applyAccentTint(root, c.background, isDark);
     const chromeBg = chromeBackground(c.background, isDark);
     window.hermesDesktop?.setTitleBarTheme?.({
         background: chromeBg,

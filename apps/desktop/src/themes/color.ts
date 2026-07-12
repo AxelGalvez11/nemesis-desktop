@@ -26,6 +26,32 @@ export const rgbToHex = ([r, g, b]: [number, number, number]): string =>
     )
     .join('')}`
 
+/** HSL → #rrggbb. `h` in degrees (wraps), `s`/`l` in 0..1. Used by the accent
+ *  tint so a user picks a HUE and we synthesize a saturation/lightness-controlled
+ *  color, never a raw arbitrary hex. */
+export function hslToHex(h: number, s: number, l: number): string {
+  const hue = (((h % 360) + 360) % 360) / 60
+  const sat = Math.min(1, Math.max(0, s))
+  const lig = Math.min(1, Math.max(0, l))
+  const c = (1 - Math.abs(2 * lig - 1)) * sat
+  const x = c * (1 - Math.abs((hue % 2) - 1))
+  const m = lig - c / 2
+  const [r, g, b] =
+    hue < 1
+      ? [c, x, 0]
+      : hue < 2
+        ? [x, c, 0]
+        : hue < 3
+          ? [0, c, x]
+          : hue < 4
+            ? [0, x, c]
+            : hue < 5
+              ? [x, 0, c]
+              : [c, 0, x]
+
+  return rgbToHex([(r + m) * 255, (g + m) * 255, (b + m) * 255])
+}
+
 export function mix(a: string, b: string, amount: number): string {
   const ar = hexToRgb(a)
   const br = hexToRgb(b)

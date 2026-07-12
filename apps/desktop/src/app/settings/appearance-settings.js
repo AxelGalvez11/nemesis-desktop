@@ -17,6 +17,8 @@ import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/p
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view';
 import { $translucency, setTranslucency } from '@/store/translucency';
 import { $zoomPercent, setZoomPercent } from '@/store/zoom';
+import { ACCENT_CHANGED_EVENT, ACCENT_SWATCHES, accentSwatchHex, DEFAULT_ACCENT_ID, loadAccentSelection, saveAccentCustomHue, saveAccentSwatch } from '@/themes/accent-tint';
+import { readableOn } from '@/themes/color';
 import { getBaseColors, useTheme } from '@/themes/context';
 import { installVscodeThemeFromMarketplace } from '@/themes/install';
 import { $marketplaceInstalls, isUserTheme, removeUserTheme } from '@/themes/user-themes';
@@ -119,6 +121,34 @@ function MarketplaceThemeResults({ query, installs, onInstalled }) {
                     return (_jsxs("button", { className: cn('flex items-center gap-2.5 px-2.5 py-2 text-left disabled:opacity-60', selectableCardClass({ prominent: done })), disabled: Boolean(installingId) && !busy, onClick: () => select(item), type: "button", children: [_jsx(Palette, { className: "size-4 shrink-0 text-(--ui-text-tertiary)" }), _jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate text-[length:var(--conversation-text-font-size)] font-medium", children: item.displayName }), _jsxs("span", { className: "block truncate text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)", children: [item.publisher, item.installs > 0 ? ` · ${copy.installs(compactNumber.format(item.installs))}` : ''] })] }), _jsx("span", { className: "shrink-0 text-(--ui-text-tertiary)", children: busy ? (_jsx(Loader2, { className: "size-4 animate-spin" })) : done ? (_jsx(Check, { className: "size-4 text-(--ui-green)" })) : (_jsx(Download, { className: "size-4" })) })] }, item.extensionId));
                 }) })] }));
 }
+// Student build: the ONLY appearance control is the accent tint. A curated swatch row
+// plus one constrained custom-hue slider. Every color is contrast-checked at apply time
+// (accent-tint.ts), so the picker can't produce an unreadable UI, and semantic red/green
+// are never touched. Previews are shown in the currently-selected light/dark mode.
+function AccentPicker() {
+    const [selection, setSelection] = useState(() => loadAccentSelection());
+    useEffect(() => {
+        const sync = () => setSelection(loadAccentSelection());
+        window.addEventListener(ACCENT_CHANGED_EVENT, sync);
+        return () => window.removeEventListener(ACCENT_CHANGED_EVENT, sync);
+    }, []);
+    const isCustom = selection.id === null;
+    const customHue = isCustom ? selection.hue : 210;
+    const customColor = accentSwatchHex(customHue);
+    return (_jsxs("div", { className: "mt-3 flex flex-col gap-4", children: [_jsx("div", { className: "flex flex-wrap gap-2.5", children: ACCENT_SWATCHES.map(swatch => {
+                    const active = selection.id === swatch.id;
+                    const color = swatch.id === DEFAULT_ACCENT_ID ? '#ff2740' : accentSwatchHex(swatch.hue);
+                    return (_jsx("button", { "aria-label": swatch.label, "aria-pressed": active, className: cn('relative size-8 rounded-full outline-none transition-transform duration-150 active:scale-95', active ? 'scale-105' : 'opacity-90 hover:scale-105 hover:opacity-100'), onClick: () => {
+                            triggerHaptic('crisp');
+                            saveAccentSwatch(swatch.id);
+                        }, style: {
+                            backgroundColor: color,
+                            boxShadow: active ? `0 0 0 2px var(--ui-bg-card), 0 0 0 4px ${color}` : undefined
+                        }, title: swatch.label, type: "button", children: active && (_jsx(Check, { className: "absolute inset-0 m-auto size-4", strokeWidth: 3, style: { color: readableOn(color) } })) }, swatch.id));
+                }) }), _jsxs("div", { className: "flex items-center gap-3", children: [_jsx("span", { className: "w-14 shrink-0 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)", children: "Custom" }), _jsx("input", { "aria-label": "Custom accent hue", className: cn('h-2 flex-1 cursor-pointer appearance-none rounded-full outline-none', isCustom && 'ring-2 ring-(--theme-primary)/50'), max: 359, min: 0, onChange: event => saveAccentCustomHue(Number(event.target.value)), style: {
+                            background: 'linear-gradient(to right, hsl(0 82% 50%), hsl(60 82% 50%), hsl(120 82% 50%), hsl(180 82% 50%), hsl(240 82% 50%), hsl(300 82% 50%), hsl(360 82% 50%))'
+                        }, type: "range", value: customHue }), _jsx("span", { "aria-hidden": true, className: "size-7 shrink-0 rounded-full border border-(--ui-stroke-tertiary)", style: { backgroundColor: customColor, boxShadow: isCustom ? `0 0 0 2px ${customColor}` : undefined } })] }), _jsx("p", { className: "text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)", children: "One monochrome look, your accent. Every color is auto-adjusted so it stays readable in both light and dark \u2014 and alert red and success green never change, so warnings always read as warnings." })] }));
+}
 export function AppearanceSettings() {
     const { t, isSavingLocale } = useI18n();
     const { themeName, mode, resolvedMode, availableThemes, setTheme, setMode } = useTheme();
@@ -159,7 +189,7 @@ export function AppearanceSettings() {
     ];
     const uiScaleOptions = UI_SCALE_PRESETS.map(preset => ({ id: preset, label: `${preset}%` }));
     const matchedScalePreset = matchUiScalePreset(zoomPercent);
-    return (_jsxs(SettingsContent, { children: [_jsxs("div", { children: [_jsx(SectionHeading, { icon: Palette, title: a.title }), _jsx("p", { className: "max-w-2xl text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)", children: a.intro }), _jsxs("div", { className: "mt-2", children: [_jsx(ListRow, { action: _jsx(LanguageSwitcher, {}), description: isSavingLocale ? t.language.saving : t.language.description, title: t.language.label }), _jsx(ListRow, { below: _jsxs(_Fragment, { children: [_jsx("div", { className: "mt-3", children: _jsx("input", { className: "w-full rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) px-3 py-1.5 text-[length:var(--conversation-caption-font-size)] outline-none placeholder:text-(--ui-text-tertiary) focus:border-(--ui-stroke-secondary)", onChange: event => setQuery(event.target.value), placeholder: "Search your themes or the VS Code Marketplace\u2026", spellCheck: false, value: query }) }), _jsxs("div", { className: "mt-3 max-h-96 overflow-y-auto pr-1", children: [filteredThemes.length === 0 ? (needle ? (_jsxs("p", { className: "text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)", children: ["No installed themes match \"", query.trim(), "\"."] })) : null) : (_jsx("div", { className: "grid gap-3 sm:grid-cols-2 xl:grid-cols-3", children: filteredThemes.map(theme => {
+    return (_jsxs(SettingsContent, { children: [_jsxs("div", { children: [_jsx(SectionHeading, { icon: Palette, title: a.title }), _jsx("p", { className: "max-w-2xl text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)", children: a.intro }), _jsxs("div", { className: "mt-2", children: [_jsx(ListRow, { action: _jsx(LanguageSwitcher, {}), description: isSavingLocale ? t.language.saving : t.language.description, title: t.language.label }), _jsx(ListRow, { below: NEMESIS_STUDENT_BUILD ? (_jsx(AccentPicker, {})) : (_jsxs(_Fragment, { children: [_jsx("div", { className: "mt-3", children: _jsx("input", { className: "w-full rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) px-3 py-1.5 text-[length:var(--conversation-caption-font-size)] outline-none placeholder:text-(--ui-text-tertiary) focus:border-(--ui-stroke-secondary)", onChange: event => setQuery(event.target.value), placeholder: "Search your themes or the VS Code Marketplace\u2026", spellCheck: false, value: query }) }), _jsxs("div", { className: "mt-3 max-h-96 overflow-y-auto pr-1", children: [filteredThemes.length === 0 ? (needle ? (_jsxs("p", { className: "text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)", children: ["No installed themes match \"", query.trim(), "\"."] })) : null) : (_jsx("div", { className: "grid gap-3 sm:grid-cols-2 xl:grid-cols-3", children: filteredThemes.map(theme => {
                                                         const active = themeName === theme.name;
                                                         const removable = isUserTheme(theme.name);
                                                         return (_jsxs("div", { className: "group relative", children: [_jsxs("button", { className: cn('w-full p-2 text-left', selectableCardClass({ active, prominent: true })), onClick: () => {
@@ -173,7 +203,7 @@ export function AppearanceSettings() {
                                                                             setTheme(theme.name);
                                                                         }
                                                                     }, title: a.removeTheme, type: "button", children: _jsx(Trash2, { className: "size-3.5" }) }))] }, theme.name));
-                                                    }) })), _jsx(MarketplaceThemeResults, { installs: installs, onInstalled: name => setTheme(name), query: query })] }), showProfileNote && (_jsx("p", { className: "mt-3 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)", children: a.themeProfileNote(activeProfileName) }))] }), description: a.themeDesc, title: _jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx("span", { children: a.themeTitle }), _jsx(SegmentedControl, { onChange: id => {
+                                                    }) })), _jsx(MarketplaceThemeResults, { installs: installs, onInstalled: name => setTheme(name), query: query })] }), showProfileNote && (_jsx("p", { className: "mt-3 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)", children: a.themeProfileNote(activeProfileName) }))] })), description: NEMESIS_STUDENT_BUILD ? 'One clean monochrome look. Pick the accent color that runs through it.' : a.themeDesc, title: _jsxs("div", { className: "flex items-center justify-between gap-3", children: [_jsx("span", { children: a.themeTitle }), _jsx(SegmentedControl, { onChange: id => {
                                                 triggerHaptic('crisp');
                                                 setMode(id);
                                             }, options: modeOptions, value: mode })] }), wide: true }), _jsx(ListRow, { action: _jsx(SegmentedControl, { onChange: id => {

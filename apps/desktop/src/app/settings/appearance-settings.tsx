@@ -18,6 +18,16 @@ import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/p
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view'
 import { $translucency, setTranslucency } from '@/store/translucency'
 import { $zoomPercent, setZoomPercent } from '@/store/zoom'
+import {
+  ACCENT_CHANGED_EVENT,
+  ACCENT_SWATCHES,
+  accentSwatchHex,
+  DEFAULT_ACCENT_ID,
+  loadAccentSelection,
+  saveAccentCustomHue,
+  saveAccentSwatch
+} from '@/themes/accent-tint'
+import { readableOn } from '@/themes/color'
 import { getBaseColors, useTheme } from '@/themes/context'
 import { installVscodeThemeFromMarketplace } from '@/themes/install'
 import type { DesktopTheme } from '@/themes/types'
@@ -241,6 +251,94 @@ function MarketplaceThemeResults({
   )
 }
 
+// Student build: the ONLY appearance control is the accent tint. A curated swatch row
+// plus one constrained custom-hue slider. Every color is contrast-checked at apply time
+// (accent-tint.ts), so the picker can't produce an unreadable UI, and semantic red/green
+// are never touched. Previews are shown in the currently-selected light/dark mode.
+function AccentPicker() {
+  const [selection, setSelection] = useState(() => loadAccentSelection())
+
+  useEffect(() => {
+    const sync = () => setSelection(loadAccentSelection())
+    window.addEventListener(ACCENT_CHANGED_EVENT, sync)
+
+    return () => window.removeEventListener(ACCENT_CHANGED_EVENT, sync)
+  }, [])
+
+  const isCustom = selection.id === null
+  const customHue = isCustom ? selection.hue : 210
+  const customColor = accentSwatchHex(customHue)
+
+  return (
+    <div className="mt-3 flex flex-col gap-4">
+      <div className="flex flex-wrap gap-2.5">
+        {ACCENT_SWATCHES.map(swatch => {
+          const active = selection.id === swatch.id
+          const color = swatch.id === DEFAULT_ACCENT_ID ? '#ff2740' : accentSwatchHex(swatch.hue)
+
+          return (
+            <button
+              aria-label={swatch.label}
+              aria-pressed={active}
+              className={cn(
+                'relative size-8 rounded-full outline-none transition-transform duration-150 active:scale-95',
+                active ? 'scale-105' : 'opacity-90 hover:scale-105 hover:opacity-100'
+              )}
+              key={swatch.id}
+              onClick={() => {
+                triggerHaptic('crisp')
+                saveAccentSwatch(swatch.id)
+              }}
+              style={{
+                backgroundColor: color,
+                boxShadow: active ? `0 0 0 2px var(--ui-bg-card), 0 0 0 4px ${color}` : undefined
+              }}
+              title={swatch.label}
+              type="button"
+            >
+              {active && (
+                <Check className="absolute inset-0 m-auto size-4" strokeWidth={3} style={{ color: readableOn(color) }} />
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="w-14 shrink-0 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
+          Custom
+        </span>
+        <input
+          aria-label="Custom accent hue"
+          className={cn(
+            'h-2 flex-1 cursor-pointer appearance-none rounded-full outline-none',
+            isCustom && 'ring-2 ring-(--theme-primary)/50'
+          )}
+          max={359}
+          min={0}
+          onChange={event => saveAccentCustomHue(Number(event.target.value))}
+          style={{
+            background:
+              'linear-gradient(to right, hsl(0 82% 50%), hsl(60 82% 50%), hsl(120 82% 50%), hsl(180 82% 50%), hsl(240 82% 50%), hsl(300 82% 50%), hsl(360 82% 50%))'
+          }}
+          type="range"
+          value={customHue}
+        />
+        <span
+          aria-hidden
+          className="size-7 shrink-0 rounded-full border border-(--ui-stroke-tertiary)"
+          style={{ backgroundColor: customColor, boxShadow: isCustom ? `0 0 0 2px ${customColor}` : undefined }}
+        />
+      </div>
+
+      <p className="text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
+        One monochrome look, your accent. Every color is auto-adjusted so it stays readable in both light and dark — and
+        alert red and success green never change, so warnings always read as warnings.
+      </p>
+    </div>
+  )
+}
+
 export function AppearanceSettings() {
   const { t, isSavingLocale } = useI18n()
   const { themeName, mode, resolvedMode, availableThemes, setTheme, setMode } = useTheme()
@@ -313,6 +411,10 @@ export function AppearanceSettings() {
 
           <ListRow
             below={
+              NEMESIS_STUDENT_BUILD ? (
+                // Student build: ONE monochrome identity; the only knob is the accent tint.
+                <AccentPicker />
+              ) : (
               <>
                 {/* One search box: filters your installed themes (the grid)
                     and live-searches the VS Code Marketplace below. */}
@@ -393,8 +495,9 @@ export function AppearanceSettings() {
                   </p>
                 )}
               </>
+              )
             }
-            description={a.themeDesc}
+            description={NEMESIS_STUDENT_BUILD ? 'One clean monochrome look. Pick the accent color that runs through it.' : a.themeDesc}
             title={
               <div className="flex items-center justify-between gap-3">
                 <span>{a.themeTitle}</span>
