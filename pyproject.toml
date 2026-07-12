@@ -153,6 +153,10 @@ parallel-web = ["parallel-web==0.4.2"]
 # build so web_search stays available before any paid key is configured
 # (check_web_api_key gates ALL web tools off when no backend is usable).
 ddgs = ["ddgs==9.14.4"]
+# Spreadsheet reading for the Nemesis student build — .xlsx gradebooks/lab data.
+# openpyxl only (pure Python + et-xmlfile); deliberately NOT pandas (huge numpy
+# dependency tree, larger supply-chain surface). CSV/TSV need no dep (stdlib csv).
+openpyxl = ["openpyxl==3.1.5"]
 # Image generation backends
 fal = ["fal-client==0.13.1"]
 # Edge TTS — default TTS provider but still optional (users can pick
