@@ -1,7 +1,10 @@
 import { getSessionMessages, listAllProfileSessions } from '@/hermes';
 import { readDesktopFileDataUrl } from '@/lib/desktop-fs';
 import { downloadGatewayMediaFile, filePathFromMediaPath, isRemoteGateway, mediaExternalUrl } from '@/lib/media';
+import { localPreviewTarget } from '@/lib/local-preview';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
+import { openBrowserRail } from '@/store/browser-rail';
+import { setPreviewTarget } from '@/store/preview';
 // Student build: Artifacts = things the agent MADE (files, images). Web links —
 // including every cited source URL — live in the chat's Sources rail instead, so
 // they don't double-report here as "artifacts".
@@ -228,6 +231,14 @@ export function collectArtifactsForSession(session, messages) {
             if (NEMESIS_STUDENT_BUILD && artifactKind(value) === 'link' && /^https?:\/\//.test(value)) {
                 return;
             }
+            // Student build: a REMOTE image URL (https://cdn…/photo.jpg) is something the
+            // agent SAW while browsing — an article image, a favicon, a CDN asset — not
+            // something it MADE. These were flooding "Made by Nemesis" with hash-named
+            // web images from research sessions. A real image deliverable is one the agent
+            // generated (a data:image) or wrote into the vault; keep only those.
+            if (NEMESIS_STUDENT_BUILD && artifactKind(value) === 'image' && /^https?:\/\//.test(value)) {
+                return;
+            }
             // Student build: the Library pages already own the student's working
             // files — notes, decks, calendar, captured course files, recordings.
             // Echoing every vault path the agent touched here made Artifacts a
@@ -282,6 +293,26 @@ export async function openArtifactHref(href) {
     if (isRemoteGateway() && /^file:/i.test(href)) {
         await downloadGatewayMediaFile(href);
         return;
+    }
+    // Student build: keep everything INSIDE Nemesis, never the system browser.
+    // A local file (an HTML report/handout the agent made) opens in the PREVIEW
+    // pane, which renders local HTML/images/text — the browser rail's school
+    // partition can't load local-file URLs. A web link opens in the rail browser.
+    if (NEMESIS_STUDENT_BUILD) {
+        const isLocalFile = /^file:/i.test(href) || href.startsWith('/') || href.startsWith('~');
+        if (isLocalFile) {
+            const target = localPreviewTarget(href);
+            if (target) {
+                setPreviewTarget(target);
+                return;
+            }
+        }
+        const railTab = window.hermesDesktop?.schoolView?.newTab;
+        if (railTab && /^https?:\/\//i.test(href)) {
+            openBrowserRail();
+            await railTab(href);
+            return;
+        }
     }
     if (window.hermesDesktop?.openExternal) {
         await window.hermesDesktop.openExternal(href);

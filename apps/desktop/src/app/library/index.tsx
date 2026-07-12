@@ -159,7 +159,14 @@ export function LibraryView() {
 
   const openDeliverable = useCallback(async (artifact: ArtifactRecord) => {
     try {
-      await openArtifactHref(artifact.href)
+      // A vault file deliverable is often recorded as a vault-RELATIVE path
+      // ("Exports/report.html"); resolve it against the vault root so it opens in
+      // the preview pane rather than falling through to an unresolvable href.
+      const isSchemeOrAbsolute = /^(?:[a-z]+:|\/|~)/i.test(artifact.value)
+      const target =
+        artifact.kind === 'file' && !isSchemeOrAbsolute ? `${VAULT_DIR}/${artifact.value}` : artifact.href
+
+      await openArtifactHref(target)
     } catch (err) {
       notifyError(err, 'Could not open this deliverable.')
     }

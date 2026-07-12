@@ -7,7 +7,7 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { syntaxTree } from '@codemirror/language'
-import type { Extension, Range } from '@codemirror/state'
+import { type EditorState, type Extension, type Range, StateField } from '@codemirror/state'
 import {
   Decoration,
   type DecorationSet,
@@ -83,6 +83,87 @@ class WikilinkWidget extends WidgetType {
 
     return span
   }
+}
+
+/** Split a markdown table row into trimmed cell strings ("| a | b |" → ["a","b"]). */
+function tableCells(line: string): string[] {
+  return line
+    .replace(/^\s*\|/, '')
+    .replace(/\|\s*$/, '')
+    .split('|')
+    .map(cell => cell.trim())
+}
+
+const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/
+
+class TableWidget extends WidgetType {
+  constructor(readonly header: string[], readonly rows: string[][]) {
+    super()
+  }
+
+  eq(other: TableWidget): boolean {
+    return JSON.stringify([this.header, this.rows]) === JSON.stringify([other.header, other.rows])
+  }
+
+  toDOM(): HTMLElement {
+    const table = document.createElement('table')
+    table.className = 'cm-np-table'
+    const thead = table.createTHead()
+    const hr = thead.insertRow()
+
+    for (const cell of this.header) {
+      const th = document.createElement('th')
+      th.textContent = cell
+      hr.appendChild(th)
+    }
+
+    const tbody = table.createTBody()
+
+    for (const row of this.rows) {
+      const tr = tbody.insertRow()
+
+      for (let i = 0; i < this.header.length; i++) {
+        tr.insertCell().textContent = row[i] ?? ''
+      }
+    }
+
+    return table
+  }
+}
+
+/** GFM table blocks in the doc: a header row, a `|---|` separator, then body rows.
+ *  Returned as whole-line ranges so the caller can block-replace or skip them. */
+function findTableBlocks(doc: EditorView['state']['doc']): { from: number; to: number; header: string[]; rows: string[][] }[] {
+  const blocks: { from: number; to: number; header: string[]; rows: string[][] }[] = []
+  const total = doc.lines
+
+  for (let n = 1; n < total; n++) {
+    const header = doc.line(n)
+    const sep = doc.line(n + 1)
+
+    if (!header.text.includes('|') || !TABLE_SEP_RE.test(sep.text)) {
+      continue
+    }
+
+    let last = n + 1
+    const rows: string[][] = []
+
+    for (let m = n + 2; m <= total; m++) {
+      const body = doc.line(m)
+
+      if (!body.text.includes('|') || body.text.trim() === '') {
+        break
+      }
+
+      rows.push(tableCells(body.text))
+      last = m
+    }
+
+    blocks.push({ from: header.from, header: tableCells(header.text), rows, to: doc.line(last).to })
+    n = last
+  }
+
+  return blocks
 }
 
 function buildDecorations(view: EditorView, onOpen: (target: string) => void): DecorationSet {
@@ -220,7 +301,51 @@ function buildDecorations(view: EditorView, onOpen: (target: string) => void): D
     }
   }
 
+  // Tables render via a separate StateField (tableField below) — CodeMirror forbids
+  // block-replace-across-lines decorations from a ViewPlugin. Here we only DROP the
+  // inline decorations that fall inside a rendered table block so they don't collide
+  // with the StateField's block widget.
+  const renderedTables = findTableBlocks(doc).filter(block => !selectionTouches(block.from, block.to))
+
+  if (renderedTables.length > 0) {
+    const inRendered = (pos: number) => renderedTables.some(block => pos >= block.from && pos <= block.to)
+
+    return Decoration.set(decorations.filter(range => !inRendered(range.from)), true)
+  }
+
   return Decoration.set(decorations, true)
+}
+
+/** Table block-replace decorations. In a StateField (not the ViewPlugin) because
+ *  CodeMirror only allows line-break-replacing block decorations from state, not
+ *  plugins. Recomputes on doc + selection changes so the raw markdown reappears
+ *  when the caret enters the table. */
+const tableField = StateField.define<DecorationSet>({
+  create: state => buildTableDecorations(state),
+  provide: field => EditorView.decorations.from(field),
+  update(value, tr) {
+    return tr.docChanged || tr.selection ? buildTableDecorations(tr.state) : value
+  }
+})
+
+function buildTableDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+
+  for (const block of findTableBlocks(doc)) {
+    const touched = state.selection.ranges.some(r => r.to >= block.from && r.from <= block.to)
+
+    if (!touched) {
+      ranges.push(
+        Decoration.replace({ block: true, widget: new TableWidget(block.header, block.rows) }).range(
+          block.from,
+          block.to
+        )
+      )
+    }
+  }
+
+  return Decoration.set(ranges, true)
 }
 
 function livePreview(onOpen: (target: string) => void): Extension {
@@ -313,6 +438,25 @@ const noteTheme = EditorView.theme({
     margin: '0.75em 0',
     verticalAlign: 'middle',
     width: '100%'
+  },
+  '.cm-np-table': {
+    borderCollapse: 'collapse',
+    fontSize: '0.9em',
+    margin: '0.5em 0',
+    width: '100%'
+  },
+  '.cm-np-table th, .cm-np-table td': {
+    border: '1px solid var(--ui-stroke-tertiary)',
+    padding: '0.35em 0.6em',
+    textAlign: 'left',
+    verticalAlign: 'top'
+  },
+  '.cm-np-table th': {
+    backgroundColor: 'var(--ui-bg-quaternary)',
+    fontWeight: '600'
+  },
+  '.cm-np-table tbody tr:nth-child(even)': {
+    backgroundColor: 'color-mix(in srgb, var(--ui-bg-quaternary) 45%, transparent)'
   }
 })
 
@@ -378,6 +522,7 @@ export function NoteEditor({ initialValue, onChange, onOpenWikilink, ref }: Note
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.lineWrapping,
         markdown({ base: markdownLanguage }),
+        tableField,
         livePreview(target => onOpenRef.current(target)),
         placeholder('Write. # heading, **bold**, - list, [[link another note]]'),
         noteTheme,
