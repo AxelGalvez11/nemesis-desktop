@@ -527,6 +527,9 @@ export function GraphView() {
     // builds, so it materializes gently instead of snapping on. Cancelled on unmount. (Labels
     // are left alone — fading their sprites left ones created after the window stuck invisible.)
     let revealRaf = 0
+    // Fallback timer for the one-time camera fit (see below). Retained so unmount can cancel it —
+    // otherwise it could call zoomToFit on a destroyed instance if the user leaves within ~2s.
+    let frameTimer = 0
 
     void (async () => {
       try {
@@ -710,15 +713,22 @@ export function GraphView() {
         // 0px-at-construction case. After this the camera is the user's (scroll to zoom).
         let framed = false
         const frameOnce = () => {
-          if (framed) {
+          if (framed || disposed) {
             return
           }
 
           framed = true
+          if (frameTimer) {
+            window.clearTimeout(frameTimer)
+            frameTimer = 0
+          }
           instance.zoomToFit(600, 45)
         }
+        // Primary: the engine settling. Fallback: a timer for the 0px-at-construction case where
+        // onEngineStop may not fire. onEngineStop clears the timer so only one fit ever runs, and
+        // the 2s window gives the real settle time to win on larger graphs before the fallback bites.
         instance.onEngineStop(frameOnce)
-        window.setTimeout(frameOnce, 1400)
+        frameTimer = window.setTimeout(frameOnce, 2000)
 
         // Reveal: ramp node spheres, links, and label sprites from invisible to their
         // resting opacity over ~1.6s (ease-out cubic) so the graph materializes gently.
@@ -767,6 +777,9 @@ export function GraphView() {
     return () => {
       disposed = true
       cancelAnimationFrame(revealRaf)
+      if (frameTimer) {
+        window.clearTimeout(frameTimer)
+      }
       observer?.disconnect()
       graphRef.current = null
       neighborsByNodeRef.current = new Map()
