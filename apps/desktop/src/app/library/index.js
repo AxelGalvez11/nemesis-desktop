@@ -214,14 +214,25 @@ export function LibraryView() {
         if (!loaded) {
             return;
         }
-        const existing = loaded.notes.find(n => n.title.toLowerCase() === target.toLowerCase());
+        // Obsidian-style targets: plain [[Title]] or path-qualified
+        // [[Folder/Title]] (the agent writes the latter into Home.md). Resolve
+        // both; a missing path-qualified note is created IN its folder rather
+        // than as a root note with a slash jammed into the name.
+        const wanted = target.toLowerCase();
+        const existing = loaded.notes.find(n => n.title.toLowerCase() === wanted || `${n.folder}/${n.title}`.toLowerCase() === wanted);
         if (existing) {
             openSelection({ kind: 'note', note: existing });
             return;
         }
-        await saveNote(target, `# ${target}\n\n`);
+        const slash = target.lastIndexOf('/');
+        const folder = slash > 0 ? target.slice(0, slash) : '';
+        const title = slash > 0 ? target.slice(slash + 1) : target;
+        if (folder) {
+            await createFolder(folder);
+        }
+        await saveNote(title, `# ${title}\n\n`, folder);
         const after = await refresh();
-        const created = after?.notes.find(n => n.title.toLowerCase() === target.toLowerCase());
+        const created = after?.notes.find(n => n.title.toLowerCase() === title.toLowerCase() && (!folder || n.folder.toLowerCase() === folder.toLowerCase()));
         if (created) {
             openSelection({ kind: 'note', note: created });
         }
