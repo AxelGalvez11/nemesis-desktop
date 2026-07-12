@@ -1111,19 +1111,6 @@ function TestRow({ attempts, onStart, test }: { attempts: TestAttempt[]; onStart
   )
 }
 
-// Fraction of a deck's cards that have been studied at least once (not "new").
-function masteryPct(stats: DeckStats): number {
-  return stats.total > 0 ? Math.round(((stats.total - stats.fresh) / stats.total) * 100) : 0
-}
-
-function MasteryBar({ pct }: { pct: number }) {
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,color-mix(in_srgb,gray_18%,transparent))">
-      <div className="h-full rounded-full bg-(--theme-primary)" style={{ width: `${pct}%` }} />
-    </div>
-  )
-}
-
 function DuePill({ due }: { due: number }) {
   return (
     <span className="shrink-0 rounded-full bg-(--theme-primary)/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-(--theme-primary)">
@@ -1238,14 +1225,9 @@ function DeckRow({
           <span className="truncate text-sm font-medium">{deck.name}</span>
           {stats.due > 0 && <DuePill due={stats.due} />}
         </div>
-        <div className="mt-1.5 flex items-center gap-2">
-          <div className="h-1 w-28 max-w-[40%] overflow-hidden rounded-full bg-(--ui-bg-tertiary,color-mix(in_srgb,gray_18%,transparent))">
-            <div className="h-full rounded-full bg-(--theme-primary)" style={{ width: `${masteryPct(stats)}%` }} />
-          </div>
-          <span className="text-[11px] text-muted-foreground tabular-nums">
-            {stats.total} cards · {stats.fresh} new
-          </span>
-        </div>
+        <p className="mt-1.5 text-[11px] text-muted-foreground tabular-nums">
+          {stats.total} cards · {stats.fresh} new
+        </p>
       </div>
       <div className="flex shrink-0 gap-1.5 opacity-80 transition-opacity group-hover:opacity-100">
         <Button
@@ -1292,7 +1274,6 @@ function DeckCard({
   state: StudyState
 }) {
   const stats = deckStats(state, deck.id, now)
-  const pct = masteryPct(stats)
 
   const openDeck = () => onStudy(deck.id)
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1339,15 +1320,10 @@ function DeckCard({
         </div>
       )}
 
-      <div className="mt-auto">
-        <div className="mb-1.5 flex items-baseline justify-between text-[11px] text-muted-foreground">
-          <span className="tabular-nums">
-            {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
-          </span>
-          <span className="tabular-nums">{pct}% studied</span>
-        </div>
-        <MasteryBar pct={pct} />
-      </div>
+      {/* The forgetting curve above is the deck's progress story — no second bar. */}
+      <p className="mt-auto text-[11px] tabular-nums text-muted-foreground">
+        {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
+      </p>
 
       <div className="flex gap-2">
         <Button
