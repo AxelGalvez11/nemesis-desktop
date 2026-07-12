@@ -248,6 +248,10 @@ export function TodayView() {
         setComposerDraft('Sync my school — run your school-sync pipeline: sweep Blackboard and Outlook for anything new, capture the files, write lecture notes and flashcards for new material, and update my calendar and Home page. Report what changed.');
         navigate(NEW_CHAT_ROUTE);
     };
+    const startSemesterScaffold = () => {
+        setComposerDraft('Set up my semester — run your semester-scaffold skill: find my course syllabi, and for each course build the skeleton (weekly topic schedule, every exam and assignment with its date and grade weight, the grading breakdown) into my graph and a per-course overview note. Frame the whole term first; I\'ll pull materials after. Report what you set up.');
+        navigate(NEW_CHAT_ROUTE);
+    };
     const [cadence, setCadence] = useState(() => loadCadence());
     const [portalStatus, setPortalStatus] = useState({});
     // Refresh the signed-in status when Today mounts/refocuses — the student may
@@ -292,7 +296,7 @@ export function TodayView() {
         return (_jsx("main", { className: "grid h-full min-h-0 place-items-center bg-(--ui-editor-surface-background)", children: _jsxs("div", { className: "flex items-center gap-2 text-xs text-(--ui-text-tertiary)", children: [_jsx(Codicon, { name: "loading", spinning: true }), "Building today"] }) }));
     }
     if (graph.objects.length === 0) {
-        return (_jsx("main", { className: "grid h-full min-h-0 place-items-center overflow-y-auto bg-(--ui-editor-surface-background) px-6", children: _jsxs("div", { className: "max-w-md text-center", children: [_jsx("span", { className: "mx-auto grid size-12 place-items-center rounded-xl border border-(--theme-primary)/35 bg-(--theme-primary)/10 text-(--theme-primary)", children: _jsx(Codicon, { name: "dashboard", size: "1.35rem" }) }), _jsx("h1", { className: "mt-4 text-xl font-semibold tracking-[-0.02em]", children: "Your semester will live here" }), _jsx("p", { className: "mt-2 text-sm leading-relaxed text-(--ui-text-secondary)", children: "Connect your school accounts and I'll build your semester here." }), _jsxs(Button, { className: "mt-5", onClick: () => navigate(`${SETTINGS_ROUTE}?tab=connections`), children: [_jsx(Codicon, { name: "plug" }), "Open Connections"] })] }) }));
+        return (_jsx("main", { className: "grid h-full min-h-0 place-items-center overflow-y-auto bg-(--ui-editor-surface-background) px-6", children: _jsxs("div", { className: "max-w-md text-center", children: [_jsx("span", { className: "mx-auto grid size-12 place-items-center rounded-xl border border-(--theme-primary)/35 bg-(--theme-primary)/10 text-(--theme-primary)", children: _jsx(Codicon, { name: "dashboard", size: "1.35rem" }) }), _jsx("h1", { className: "mt-4 text-xl font-semibold tracking-[-0.02em]", children: "Your semester will live here" }), _jsx("p", { className: "mt-2 text-sm leading-relaxed text-(--ui-text-secondary)", children: "Give me a syllabus and I\u2019ll frame your whole term \u2014 weekly topics, every exam and its weight, the grading breakdown \u2014 then fill it in as materials arrive." }), _jsxs("div", { className: "mt-5 flex flex-col items-center gap-2", children: [_jsxs(Button, { onClick: startSemesterScaffold, children: [_jsx(Codicon, { name: "milestone" }), "Set up my semester"] }), _jsxs(Button, { className: "text-(--ui-text-secondary)", onClick: () => navigate(`${SETTINGS_ROUTE}?tab=connections`), size: "sm", variant: "ghost", children: [_jsx(Codicon, { name: "plug" }), "Connect school accounts first"] })] })] }) }));
     }
     const greeting = now.getHours() < 12 ? 'morning' : now.getHours() < 18 ? 'afternoon' : 'evening';
     const dateLabel = now.toLocaleDateString(undefined, { day: 'numeric', month: 'short', weekday: 'long' });

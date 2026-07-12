@@ -383,6 +383,13 @@ export function TodayView() {
     navigate(NEW_CHAT_ROUTE)
   }
 
+  const startSemesterScaffold = () => {
+    setComposerDraft(
+      'Set up my semester — run your semester-scaffold skill: find my course syllabi, and for each course build the skeleton (weekly topic schedule, every exam and assignment with its date and grade weight, the grading breakdown) into my graph and a per-course overview note. Frame the whole term first; I\'ll pull materials after. Report what you set up.'
+    )
+    navigate(NEW_CHAT_ROUTE)
+  }
+
   const [cadence, setCadence] = useState<SyncCadence>(() => loadCadence())
   const [portalStatus, setPortalStatus] = useState<Record<string, boolean>>({})
 
@@ -453,12 +460,24 @@ export function TodayView() {
           </span>
           <h1 className="mt-4 text-xl font-semibold tracking-[-0.02em]">Your semester will live here</h1>
           <p className="mt-2 text-sm leading-relaxed text-(--ui-text-secondary)">
-            Connect your school accounts and I'll build your semester here.
+            Give me a syllabus and I&rsquo;ll frame your whole term — weekly topics, every
+            exam and its weight, the grading breakdown — then fill it in as materials arrive.
           </p>
-          <Button className="mt-5" onClick={() => navigate(`${SETTINGS_ROUTE}?tab=connections`)}>
-            <Codicon name="plug" />
-            Open Connections
-          </Button>
+          <div className="mt-5 flex flex-col items-center gap-2">
+            <Button onClick={startSemesterScaffold}>
+              <Codicon name="milestone" />
+              Set up my semester
+            </Button>
+            <Button
+              className="text-(--ui-text-secondary)"
+              onClick={() => navigate(`${SETTINGS_ROUTE}?tab=connections`)}
+              size="sm"
+              variant="ghost"
+            >
+              <Codicon name="plug" />
+              Connect school accounts first
+            </Button>
+          </div>
         </div>
       </main>
     )
