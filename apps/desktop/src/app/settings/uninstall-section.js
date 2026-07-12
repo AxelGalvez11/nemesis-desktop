@@ -15,7 +15,7 @@ const OPTIONS = [
     {
         mode: 'lite',
         title: 'Uninstall GUI + agent, keep my data',
-        description: 'Remove the app and the Hermes agent, but keep config, chats, and secrets for a future reinstall.',
+        description: 'Remove the app and the Nemesis agent, but keep config, chats, and secrets for a future reinstall.',
         consequence: 'the Chat GUI and the Nemesis agent (config, chats, and secrets are kept)',
         needsAgent: true
     },

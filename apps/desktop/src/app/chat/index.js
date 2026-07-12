@@ -176,7 +176,7 @@ export function ChatView({ className, gateway, modelMenuContent, onToggleSelecte
                 return getGlobalModelOptions();
             }
             if (!gateway) {
-                throw new Error('Hermes gateway unavailable');
+                throw new Error('Nemesis is unavailable');
             }
             return gateway.request('model.options', {
                 session_id: activeSessionId,

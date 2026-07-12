@@ -66,19 +66,27 @@ function ConfigField({
   const { t } = useI18n()
   const c = t.settings.config
 
-  const label =
+  // Field labels/descriptions can arrive from backend-provided schema text (getHermesConfigSchema),
+  // which still says "Hermes". Rebrand any upstream mention to the student product name so nothing
+  // leaks the engine's internal name in the UI. Word-boundary match keeps identifiers/URLs intact.
+  const rebrand = (v: string) => v.replace(/\bHermes\b/g, 'Nemesis')
+
+  const label = rebrand(
     fieldCopyForSchemaKey(t.settings.fieldLabels, schemaKey) ??
-    fieldCopyForSchemaKey(FIELD_LABELS, schemaKey) ??
-    prettyName(schemaKey.split('.').pop() ?? schemaKey)
+      fieldCopyForSchemaKey(FIELD_LABELS, schemaKey) ??
+      prettyName(schemaKey.split('.').pop() ?? schemaKey),
+  )
 
   const normalize = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, '')
 
-  const rawDescription = (
-    fieldCopyForSchemaKey(t.settings.fieldDescriptions, schemaKey) ??
-    fieldCopyForSchemaKey(FIELD_DESCRIPTIONS, schemaKey) ??
-    schema.description ??
-    ''
-  ).trim()
+  const rawDescription = rebrand(
+    (
+      fieldCopyForSchemaKey(t.settings.fieldDescriptions, schemaKey) ??
+      fieldCopyForSchemaKey(FIELD_DESCRIPTIONS, schemaKey) ??
+      schema.description ??
+      ''
+    ).trim(),
+  )
 
   const normalizedDesc = normalize(rawDescription)
 

@@ -233,7 +233,7 @@ export function ModelEditSubmenu({
 }
 
 function isThinkingEnabled(effort: string): boolean {
-  // Empty = Hermes default (medium) = on; only an explicit "none" is off.
+  // Empty = Nemesis default (medium) = on; only an explicit "none" is off.
   return normalize(effort || 'medium') !== 'none'
 }
 

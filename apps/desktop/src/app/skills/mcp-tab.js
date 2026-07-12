@@ -33,7 +33,7 @@ const STARTER_ENTRY = { command: 'npx', args: ['-y', '@modelcontextprotocol/serv
 const pretty = (value) => JSON.stringify(value, null, 2);
 const wrapDoc = (entries) => pretty({ mcpServers: entries });
 const isServerShape = (value) => typeof value.command === 'string' || typeof value.url === 'string';
-// Cursor/Claude write `type`; Hermes reads `transport`. Normalize on the way
+// Cursor/Claude write `type`; Nemesis reads `transport`. Normalize on the way
 // in so pasted configs behave identically under the CLI/TUI loader.
 function normalizeEntry(entry) {
     if (typeof entry.type === 'string' && entry.transport === undefined) {

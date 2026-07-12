@@ -110,9 +110,9 @@ export function AboutSettings() {
         <SectionHeading icon={RefreshCw} title={a.updates} />
 
         {/* Student build: the source self-updater is DISABLED. It tracks the
-            upstream Hermes main branch — running it swaps the Nemesis build
+            upstream Nemesis main branch — running it swaps the Nemesis build
             (UI reskin, school browser, study pipeline, agent patches) for
-            stock Hermes and discards local work. Nemesis updates ship as new
+            stock Nemesis and discards local work. Nemesis updates ship as new
             app versions instead. */}
         {NEMESIS_STUDENT_BUILD ? (
           <div className="rounded-xl border border-border/70 bg-muted/20 px-4 py-3 text-sm">

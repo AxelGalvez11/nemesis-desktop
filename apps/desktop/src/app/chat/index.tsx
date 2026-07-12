@@ -362,7 +362,7 @@ export function ChatView({
       }
 
       if (!gateway) {
-        throw new Error('Hermes gateway unavailable')
+        throw new Error('Nemesis is unavailable')
       }
 
       return gateway.request<ModelOptionsResponse>('model.options', {

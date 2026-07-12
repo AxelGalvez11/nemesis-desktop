@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Switch } from '@/components/ui/switch';
+import { hslToHex } from '@/themes/color';
 import { useTheme } from '@/themes/context';
 import { buildIndex, extractWikilinks, loadVault, saveNote } from '../library/vault';
 import { LIBRARY_ROUTE } from '../routes';
@@ -106,25 +107,47 @@ function readGraphPalette(mode) {
         node: resolveCssColor('var(--ui-text-secondary)', dark ? '#c8c8c8' : '#3f3f43')
     };
 }
+// The accent's hue, extracted from its resolved rgb() so the glow ramp uses the user's
+// chosen tint but its OWN saturation/lightness (the accent itself is contrast-darkened in
+// light mode, so we can't just ramp toward it — hubs would go dark). Falls back to crimson.
+function accentHue(accent) {
+    const rgb = parseRgbTriplet(accent);
+    if (!rgb) {
+        return 351;
+    }
+    const [r, g, b] = rgb.map(channel => channel / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max === min) {
+        return 351;
+    }
+    const d = max - min;
+    const h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h / 6) * 360;
+}
 // Node color as a CONNECTIVITY HEATMAP: an unconnected note is a quiet gray that recedes;
-// the more a note links to others, the brighter it glows in the theme accent, so hubs pop
-// and orphans fade. `maxDegree` scales the ramp to this graph's busiest node. (Combined with
-// the size ramp on nodeVal = 1 + degree, well-connected notes read as big and hot.)
+// the more a note links to others, the BRIGHTER it glows in the accent hue — saturation and
+// lightness both ramp up with degree, so a busy hub is a vivid, luminous point and a
+// one-link note is a dim-but-clearly-colored one. Never black. `maxDegree` scales the ramp;
+// combined with the size ramp (nodeVal = 1 + degree), hubs read big AND hot.
 function graphNodeColor(node, palette, maxDegree) {
     const graphNode = node;
     if (graphNode.ghost) {
-        return palette.ghost;
+        // Uncreated wikilink target → a very light, faded gray placeholder. (palette.ghost is a
+        // 38%-alpha color whose alpha gets dropped on parse, rendering near-BLACK — the "black
+        // nodes" the graph kept showing. A light gray reads correctly as "not made yet".)
+        return hslToHex(accentHue(palette.accent), 0.05, 0.72);
     }
     const degree = graphNode.degree ?? 0;
     if (degree <= 0) {
-        // Unconnected → soft gray, nudged toward the background so it clearly recedes.
-        return mixRgb(palette.node, palette.background, 0.35);
+        // Unconnected → a light, nearly-neutral gray (faint accent warmth) so it clearly recedes.
+        return hslToHex(accentHue(palette.accent), 0.05, 0.62);
     }
-    // Connected: one link → a soft, dim accent (blended toward the background so it glows
-    // faintly rather than reading as black); the busiest hub → the full vivid accent.
     const t = maxDegree > 1 ? Math.min(1, (degree - 1) / (maxDegree - 1)) : 1;
-    const faint = mixRgb(palette.accent, palette.background, 0.5);
-    return mixRgb(faint, palette.accent, t);
+    // Lightness stays HIGH the whole ramp (no dark/black nodes); SATURATION climbs with degree,
+    // so a one-link note is a soft rose and the busiest hub is a vivid, hot accent. A small
+    // lightness lift at the top makes hubs read as genuinely glowing.
+    return hslToHex(accentHue(palette.accent), 0.45 + 0.5 * t, 0.56 + 0.08 * t);
 }
 function parseRgbTriplet(color) {
     const match = color.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
@@ -296,10 +319,10 @@ export function GraphView() {
         let disposed = false;
         let graph = null;
         let observer = null;
-        // Nodes, links, and labels start invisible and ramp in together (~1.6s ease-out) when the
-        // graph first builds, so it materializes gently instead of snapping on. Cancelled on unmount.
+        // Node spheres + links start invisible and ramp in (~1.6s ease-out) when the graph first
+        // builds, so it materializes gently instead of snapping on. Cancelled on unmount. (Labels
+        // are left alone — fading their sprites left ones created after the window stuck invisible.)
         let revealRaf = 0;
-        const revealSprites = [];
         void (async () => {
             try {
                 const [{ default: ForceGraph3D }, { default: SpriteText }, notes] = await Promise.all([
@@ -388,11 +411,6 @@ export function GraphView() {
                     // label grows upward from just outside the sphere instead of straddling it.
                     object3d.center.set(0.5, 0);
                     object3d.position.set(0, radius * LABEL_OFFSET_SCALE, 0);
-                    // Start the label transparent so it fades in with its node during the reveal.
-                    const withMaterial = sprite;
-                    withMaterial.material.transparent = true;
-                    withMaterial.material.opacity = 0;
-                    revealSprites.push(withMaterial);
                     return sprite;
                 })
                     .nodeThreeObjectExtend(true)
@@ -436,8 +454,20 @@ export function GraphView() {
                 // Frame the whole graph once the force sim settles (and again as a fallback —
                 // the container can report 0px at construction inside the flex layout). Generous
                 // padding keeps the nodes comfortably inside the viewport rather than filling it.
-                instance.onEngineStop(() => instance.zoomToFit(500, 110));
-                window.setTimeout(() => instance.zoomToFit(700, 110), 1500);
+                // Frame ONCE, at the first settle. Re-fitting on every onEngineStop made the camera
+                // "keep zooming out" as the low-gravity layout kept drifting wider. A tight padding
+                // keeps the map readable (not a distant speck) on open; the 1.4s fallback covers the
+                // 0px-at-construction case. After this the camera is the user's (scroll to zoom).
+                let framed = false;
+                const frameOnce = () => {
+                    if (framed) {
+                        return;
+                    }
+                    framed = true;
+                    instance.zoomToFit(600, 45);
+                };
+                instance.onEngineStop(frameOnce);
+                window.setTimeout(frameOnce, 1400);
                 // Reveal: ramp node spheres, links, and label sprites from invisible to their
                 // resting opacity over ~1.6s (ease-out cubic) so the graph materializes gently.
                 const REVEAL_MS = 1600;
@@ -452,9 +482,6 @@ export function GraphView() {
                     const p = Math.min(1, (now - revealStart) / REVEAL_MS);
                     const eased = 1 - (1 - p) ** 3;
                     instance.nodeOpacity(NODE_TARGET * eased).linkOpacity(LINK_TARGET * eased);
-                    for (const sprite of revealSprites) {
-                        sprite.material.opacity = eased;
-                    }
                     if (p < 1) {
                         revealRaf = requestAnimationFrame(stepReveal);
                     }
