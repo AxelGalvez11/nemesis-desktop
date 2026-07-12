@@ -9,12 +9,16 @@ import { Codicon } from '@/components/ui/codicon';
 import { chatMessageText } from '@/lib/chat-messages';
 import { useLinkTitle } from '@/lib/external-link';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { openBrowserRail } from '@/store/browser-rail';
 import { $messages } from '@/store/session';
 import { $focusedSourceUrl } from '@/store/source-focus';
 export const SOURCE_CHIP_CLASS_NAME = 'group/source inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/35 bg-card/65 px-2 py-1 text-[11px] leading-none text-muted-foreground shadow-[0_1px_1px_rgb(0_0_0/0.04)] transition-[background-color,border-color,color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border/70 hover:bg-card hover:text-foreground hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/35';
 const MD_LINK = /\[([^\]\n]{1,160})\]\((https?:\/\/[^\s)]+)\)/g;
 const BARE_URL = /https?:\/\/[^\s<>"'()[\]{}]+/g;
+// Scheme-less citations ("www.gov.uk/drug-safety-update/…") — models write these
+// from memory; without this they render as links but never become pills.
+const WWW_URL = /\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"'()[\]{}]*/gi;
 const PMID_RE = /\bPMID:?\s*(\d{6,9})\b/gi;
 const NCT_RE = /\bNCT\d{8}\b/gi;
 const DOI_RE = /\b10\.\d{4,9}\/[^\s<>"'()[\]{}]+/g;
@@ -69,6 +73,9 @@ function harvestText(text, sink) {
     const stripped = text.replace(MD_LINK, ' ');
     for (const match of stripped.matchAll(BARE_URL)) {
         sink.push(match[0]);
+    }
+    for (const match of stripped.replace(BARE_URL, ' ').matchAll(WWW_URL)) {
+        sink.push(`https://${match[0]}`);
     }
     for (const match of stripped.matchAll(PMID_RE)) {
         sink.push(`https://pubmed.ncbi.nlm.nih.gov/${match[1]}/`, `PMID ${match[1]}`);
@@ -188,7 +195,7 @@ function SourceRow({ focused, refCb, source }) {
     return (_jsxs("div", { className: "group/source relative", children: [_jsxs("button", { className: cn('flex w-full flex-col items-start gap-0.5 rounded-lg px-2 py-2 pr-7 text-left transition-colors hover:bg-(--chrome-action-hover)', focused && 'bg-card ring-2 ring-(--theme-primary)/70 ring-offset-1 ring-offset-background'), onClick: () => {
                     void window.hermesDesktop?.schoolView?.newTab?.(source.url);
                     openBrowserRail();
-                }, ref: refCb, title: `${title}\n${source.url}\nClick: read here · ↗: open in your browser`, type: "button", children: [_jsxs("span", { className: "flex min-w-0 max-w-full items-center gap-1.5 text-[0.65rem] text-muted-foreground", children: [_jsx(SourceFavicon, { domain: source.domain }), _jsx("span", { className: "truncate", children: source.badge })] }), _jsx("span", { className: "line-clamp-2 text-xs font-medium leading-snug text-foreground/90", children: title }), _jsx("span", { className: "max-w-full truncate text-[0.65rem] text-muted-foreground/60", children: source.domain })] }), _jsx("button", { "aria-label": "Open in your browser", className: "absolute right-1.5 top-2 grid place-items-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-focus-within/source:opacity-70 group-hover/source:opacity-70", onClick: () => void window.hermesDesktop?.openExternal?.(source.url), title: "Open in your browser", type: "button", children: _jsx(Codicon, { name: "link-external", size: "0.625rem" }) })] }));
+                }, ref: refCb, title: `${title}\n${source.url}\nClick: read here · ↗: open in your browser`, type: "button", children: [_jsxs("span", { className: "flex min-w-0 max-w-full items-center gap-1.5 text-[0.65rem] text-muted-foreground", children: [_jsx(SourceFavicon, { domain: source.domain }), _jsx("span", { className: "truncate", children: source.badge })] }), _jsx("span", { className: "line-clamp-2 text-xs font-medium leading-snug text-foreground/90", children: title }), _jsx("span", { className: "max-w-full truncate text-[0.65rem] text-muted-foreground/60", children: source.domain })] }), !NEMESIS_STUDENT_BUILD && (_jsx("button", { "aria-label": "Open in your browser", className: "absolute right-1.5 top-2 grid place-items-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-focus-within/source:opacity-70 group-hover/source:opacity-70", onClick: () => void window.hermesDesktop?.openExternal?.(source.url), title: "Open in your browser", type: "button", children: _jsx(Codicon, { name: "link-external", size: "0.625rem" }) }))] }));
 }
 export function SourcesTab() {
     const messages = useStore($messages);

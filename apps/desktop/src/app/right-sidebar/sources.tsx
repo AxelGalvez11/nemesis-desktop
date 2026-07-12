@@ -9,6 +9,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { type ChatMessage, chatMessageText } from '@/lib/chat-messages'
 import { useLinkTitle } from '@/lib/external-link'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { openBrowserRail } from '@/store/browser-rail'
 import { $messages } from '@/store/session'
 import { $focusedSourceUrl } from '@/store/source-focus'
@@ -25,6 +26,9 @@ export const SOURCE_CHIP_CLASS_NAME =
 
 const MD_LINK = /\[([^\]\n]{1,160})\]\((https?:\/\/[^\s)]+)\)/g
 const BARE_URL = /https?:\/\/[^\s<>"'()[\]{}]+/g
+// Scheme-less citations ("www.gov.uk/drug-safety-update/…") — models write these
+// from memory; without this they render as links but never become pills.
+const WWW_URL = /\bwww\.[a-z0-9-]+(?:\.[a-z0-9-]+)+[^\s<>"'()[\]{}]*/gi
 const PMID_RE = /\bPMID:?\s*(\d{6,9})\b/gi
 const NCT_RE = /\bNCT\d{8}\b/gi
 const DOI_RE = /\b10\.\d{4,9}\/[^\s<>"'()[\]{}]+/g
@@ -101,6 +105,10 @@ function harvestText(text: string, sink: SourceSink): void {
 
   for (const match of stripped.matchAll(BARE_URL)) {
     sink.push(match[0])
+  }
+
+  for (const match of stripped.replace(BARE_URL, ' ').matchAll(WWW_URL)) {
+    sink.push(`https://${match[0]}`)
   }
 
   for (const match of stripped.matchAll(PMID_RE)) {
@@ -289,15 +297,18 @@ function SourceRow({
         <span className="line-clamp-2 text-xs font-medium leading-snug text-foreground/90">{title}</span>
         <span className="max-w-full truncate text-[0.65rem] text-muted-foreground/60">{source.domain}</span>
       </button>
-      <button
-        aria-label="Open in your browser"
-        className="absolute right-1.5 top-2 grid place-items-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-focus-within/source:opacity-70 group-hover/source:opacity-70"
-        onClick={() => void window.hermesDesktop?.openExternal?.(source.url)}
-        title="Open in your browser"
-        type="button"
-      >
-        <Codicon name="link-external" size="0.625rem" />
-      </button>
+      {/* Student build: research stays inside Nemesis — no external-browser escape hatch. */}
+      {!NEMESIS_STUDENT_BUILD && (
+        <button
+          aria-label="Open in your browser"
+          className="absolute right-1.5 top-2 grid place-items-center rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-focus-within/source:opacity-70 group-hover/source:opacity-70"
+          onClick={() => void window.hermesDesktop?.openExternal?.(source.url)}
+          title="Open in your browser"
+          type="button"
+        >
+          <Codicon name="link-external" size="0.625rem" />
+        </button>
+      )}
     </div>
   )
 }

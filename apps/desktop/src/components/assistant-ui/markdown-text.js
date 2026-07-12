@@ -10,6 +10,8 @@ import { chunkByLines, SyntaxHighlighter } from '@/components/chat/shiki-highlig
 import { ZoomableImage } from '@/components/chat/zoomable-image';
 import { normalizeExternalUrl, openExternalLink, PrettyLink } from '@/lib/external-link';
 import { createMemoizedMathPlugin } from '@/lib/katex-memo';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
+import { openBrowserRail } from '@/store/browser-rail';
 import { preprocessMarkdown } from '@/lib/markdown-preprocess';
 import { downloadGatewayMediaFile, filePathFromMediaPath, gatewayMediaDataUrl, isRemoteGateway, mediaExternalUrl, mediaKind, mediaName, mediaPathFromMarkdownHref, mediaStreamUrl } from '@/lib/media';
 import { previewTargetFromMarkdownHref } from '@/lib/preview-targets';
@@ -196,7 +198,16 @@ function MarkdownLink({ children, className, href, ...props }) {
         }
     }
     const fallbackLabel = text && normalizeExternalUrl(text) !== target ? text : undefined;
-    return (_jsx(PrettyLink, { className: cn('wrap-anywhere', className), fallbackLabel: fallbackLabel, href: target, ...props }));
+    // Student build: answer citations open INSIDE Nemesis — the right-rail
+    // browser — never the system browser, so research stays in the app.
+    const openInRail = NEMESIS_STUDENT_BUILD && window.hermesDesktop?.schoolView?.newTab
+        ? (event) => {
+            event.preventDefault();
+            openBrowserRail();
+            void window.hermesDesktop?.schoolView?.newTab?.(target);
+        }
+        : undefined;
+    return (_jsx(PrettyLink, { className: cn('wrap-anywhere', className), fallbackLabel: fallbackLabel, href: target, ...props, onClick: openInRail }));
 }
 function MarkdownImage({ className, src, alt, ...props }) {
     return (_jsx(ZoomableImage, { alt: alt, className: cn('m-0 block h-auto w-auto max-h-(--image-preview-height) max-w-[min(100%,var(--image-preview-max-width))] rounded-lg object-contain shadow-[0_0.0625rem_0.125rem_color-mix(in_srgb,#000_4%,transparent),0_0.625rem_1.5rem_color-mix(in_srgb,#000_5%,transparent)]', className), containerClassName: "my-2 block w-fit max-w-full", slot: "aui_markdown-image", src: src, ...props }));

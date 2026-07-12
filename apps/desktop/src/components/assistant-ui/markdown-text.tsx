@@ -25,6 +25,8 @@ import { chunkByLines, SyntaxHighlighter } from '@/components/chat/shiki-highlig
 import { ZoomableImage } from '@/components/chat/zoomable-image'
 import { normalizeExternalUrl, openExternalLink, PrettyLink } from '@/lib/external-link'
 import { createMemoizedMathPlugin } from '@/lib/katex-memo'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
+import { openBrowserRail } from '@/store/browser-rail'
 import { preprocessMarkdown } from '@/lib/markdown-preprocess'
 import {
   downloadGatewayMediaFile,
@@ -327,8 +329,25 @@ function MarkdownLink({ children, className, href, ...props }: ComponentProps<'a
 
   const fallbackLabel = text && normalizeExternalUrl(text) !== target ? text : undefined
 
+  // Student build: answer citations open INSIDE Nemesis — the right-rail
+  // browser — never the system browser, so research stays in the app.
+  const openInRail =
+    NEMESIS_STUDENT_BUILD && window.hermesDesktop?.schoolView?.newTab
+      ? (event: { preventDefault: () => void }) => {
+          event.preventDefault()
+          openBrowserRail()
+          void window.hermesDesktop?.schoolView?.newTab?.(target)
+        }
+      : undefined
+
   return (
-    <PrettyLink className={cn('wrap-anywhere', className)} fallbackLabel={fallbackLabel} href={target} {...props} />
+    <PrettyLink
+      className={cn('wrap-anywhere', className)}
+      fallbackLabel={fallbackLabel}
+      href={target}
+      {...props}
+      onClick={openInRail}
+    />
   )
 }
 
