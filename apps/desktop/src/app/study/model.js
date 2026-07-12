@@ -332,7 +332,9 @@ function reconcileCards(existing, parsed) {
             : { ...match, back: entry.back, front: entry.front };
     });
     const removedIds = [...pool.values()].flat().map(card => card.id);
-    const unchanged = removedIds.length === 0 && cards.length === existing.length && cards.every((card, index) => card === existing[index]);
+    const unchanged = removedIds.length === 0 &&
+        cards.length === existing.length &&
+        cards.every((card, index) => card === existing[index]);
     return { cards: unchanged ? existing : cards, removedIds };
 }
 /** Reconcile agent-managed decks against the vault's deck files. Pure.
@@ -539,27 +541,27 @@ export function groupDecks(state, now) {
             return { due: sum.due + s.due, fresh: sum.fresh + s.fresh, total: sum.total + s.total };
         }, { due: 0, fresh: 0, total: 0 })
     }))
-        .sort((a, b) => (b.stats.due - a.stats.due) || a.course.localeCompare(b.course));
+        .sort((a, b) => b.stats.due - a.stats.due || a.course.localeCompare(b.course));
 }
-/** GitHub-style contribution grid: review counts per day for the last `weeks` weeks,
- *  laid out oldest→newest, each column a Sun-anchored week. Pure. */
-export function reviewHeatmap(state, todayIso, weeks = 53) {
+/** Rolling GitHub-style contribution window: exactly `weeks` weeks ending today,
+ *  laid out oldest→newest. The view supplies blank leading cells to keep the
+ *  dates aligned with Sunday-anchored columns. Pure. */
+export function reviewHeatmap(state, todayIso, weeks = 52) {
     const perDay = new Map();
     for (const review of state.reviews) {
         const day = review.at.slice(0, 10); // UTC calendar day from the ISO timestamp
         perDay.set(day, (perDay.get(day) ?? 0) + 1);
     }
     // Work entirely in UTC so the per-day keys (UTC) and cell dates (UTC) always agree,
-    // regardless of the machine's timezone. Anchor on the UTC Sunday that starts the window.
+    // regardless of the machine's timezone. Do not pad forward to Saturday: the
+    // rolling window ends on today, so no future cells displace an older month.
     const DAY = 86_400_000;
     const todayUtc = new Date(`${todayIso.slice(0, 10)}T00:00:00.000Z`);
-    // End the grid on this week's Saturday (so today is always in the last column, GitHub-style)
-    // and start `weeks` Sundays back — columns stay Sun→Sat aligned.
-    const endMs = todayUtc.getTime() + (6 - todayUtc.getUTCDay()) * DAY;
-    const startMs = endMs - (weeks * 7 - 1) * DAY;
+    const dayCount = weeks * 7;
+    const startMs = todayUtc.getTime() - (dayCount - 1) * DAY;
     const cells = [];
     let total = 0;
-    for (let i = 0; i < weeks * 7; i++) {
+    for (let i = 0; i < dayCount; i++) {
         const iso = new Date(startMs + i * DAY).toISOString().slice(0, 10);
         const count = perDay.get(iso) ?? 0;
         total += count;

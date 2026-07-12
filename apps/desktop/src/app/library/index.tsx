@@ -23,6 +23,9 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { notifyError } from '@/store/notifications'
+
+import { type ArtifactRecord, loadRecentArtifacts, openArtifactHref } from '../artifacts/artifact-utils'
 
 import { NoteEditor, type NoteEditorHandle } from './note-editor'
 import { NoteRail } from './note-rail'
@@ -77,7 +80,13 @@ function buildTree(contents: VaultContents): TreeNode {
       if (next) {
         node = next
       } else {
-        const created: TreeNode = { files: [], folders: [], name: part, notes: [], path: node.path ? `${node.path}/${part}` : part }
+        const created: TreeNode = {
+          files: [],
+          folders: [],
+          name: part,
+          notes: [],
+          path: node.path ? `${node.path}/${part}` : part
+        }
         node.folders.push(created)
         node = created
       }
@@ -103,6 +112,7 @@ function buildTree(contents: VaultContents): TreeNode {
 
 export function LibraryView() {
   const [contents, setContents] = useState<VaultContents | null>(null)
+  const [deliverables, setDeliverables] = useState<ArtifactRecord[] | null>(null)
   const [error, setError] = useState<null | string>(null)
   // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
   const [tabs, setTabs] = useState<TabItem[]>([])
@@ -138,6 +148,23 @@ export function LibraryView() {
     }
   }, [])
 
+  const refreshDeliverables = useCallback(async () => {
+    try {
+      setDeliverables(await loadRecentArtifacts())
+    } catch (err) {
+      setDeliverables([])
+      notifyError(err, 'Could not load files made by Nemesis.')
+    }
+  }, [])
+
+  const openDeliverable = useCallback(async (artifact: ArtifactRecord) => {
+    try {
+      await openArtifactHref(artifact.href)
+    } catch (err) {
+      notifyError(err, 'Could not open this deliverable.')
+    }
+  }, [])
+
   const openSelection = useCallback((next: TabItem) => {
     const key = tabKey(next)
     setTabs(current => {
@@ -155,10 +182,13 @@ export function LibraryView() {
     })
   }, [])
 
-  const closeTab = useCallback((index: number) => {
-    setTabs(current => current.filter((_, i) => i !== index))
-    setActiveTab(current => (index < current ? current - 1 : Math.max(0, Math.min(current, tabs.length - 2))))
-  }, [tabs.length])
+  const closeTab = useCallback(
+    (index: number) => {
+      setTabs(current => current.filter((_, i) => i !== index))
+      setActiveTab(current => (index < current ? current - 1 : Math.max(0, Math.min(current, tabs.length - 2))))
+    },
+    [tabs.length]
+  )
 
   useEffect(() => {
     void (async () => {
@@ -168,6 +198,7 @@ export function LibraryView() {
         openSelection({ kind: 'note', note: loaded.notes[0] })
       }
     })()
+    void refreshDeliverables()
 
     return () => {
       if (saveTimer.current) {
@@ -175,7 +206,7 @@ export function LibraryView() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh])
+  }, [refresh, refreshDeliverables])
 
   // Re-read the vault when the window regains focus so files the agent moved,
   // renamed, or created while you were away show up without a manual reload.
@@ -192,12 +223,13 @@ export function LibraryView() {
 
       last = now
       void refresh()
+      void refreshDeliverables()
     }
 
     window.addEventListener('focus', onFocus)
 
     return () => window.removeEventListener('focus', onFocus)
-  }, [refresh])
+  }, [refresh, refreshDeliverables])
 
   const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents])
   const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents])
@@ -243,9 +275,7 @@ export function LibraryView() {
 
   const scheduleSave = useCallback((note: VaultNote, content: string) => {
     setContents(current =>
-      current
-        ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) }
-        : current
+      current ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) } : current
     )
 
     if (saveTimer.current) {
@@ -350,7 +380,10 @@ export function LibraryView() {
               <Button
                 aria-label="New note"
                 className="transition-transform duration-200 ease-out active:scale-[0.98]"
-                onClick={() => { setCreating('note'); setDraft('') }}
+                onClick={() => {
+                  setCreating('note')
+                  setDraft('')
+                }}
                 size="icon-xs"
                 variant="ghost"
               >
@@ -361,7 +394,10 @@ export function LibraryView() {
               <Button
                 aria-label="New folder"
                 className="transition-transform duration-200 ease-out active:scale-[0.98]"
-                onClick={() => { setCreating('folder'); setDraft('') }}
+                onClick={() => {
+                  setCreating('folder')
+                  setDraft('')
+                }}
                 size="icon-xs"
                 variant="ghost"
               >
@@ -376,8 +412,13 @@ export function LibraryView() {
               autoFocus
               onChange={event => setDraft(event.target.value)}
               onKeyDown={event => {
-                if (event.key === 'Enter') void submitCreate()
-                if (event.key === 'Escape') setCreating(null)
+                if (event.key === 'Enter') {
+                  void submitCreate()
+                }
+
+                if (event.key === 'Escape') {
+                  setCreating(null)
+                }
               }}
               placeholder={creating === 'folder' ? 'Folder name' : 'Note title'}
               value={draft}
@@ -386,6 +427,45 @@ export function LibraryView() {
           </div>
         )}
         <nav className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
+          <section className="mb-3 border-b border-(--ui-stroke-quaternary) pb-3">
+            <div className="mb-1.5 flex items-center justify-between gap-2 px-2">
+              <h2 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
+                Made by Nemesis
+              </h2>
+              {deliverables && deliverables.length > 0 && (
+                <span className="text-[0.625rem] tabular-nums text-(--ui-text-quaternary)">{deliverables.length}</span>
+              )}
+            </div>
+            {!deliverables ? (
+              <p className="px-2 py-1 text-xs text-(--ui-text-tertiary)">Finding deliverables…</p>
+            ) : deliverables.length === 0 ? (
+              <p className="px-2 py-1 text-xs text-(--ui-text-tertiary)">Chat-made files will appear here.</p>
+            ) : (
+              <div className="space-y-0.5">
+                {deliverables.map(artifact => (
+                  <button
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-colors hover:bg-(--ui-row-hover-background) hover:text-foreground"
+                    key={artifact.id}
+                    onClick={() => void openDeliverable(artifact)}
+                    title={`${artifact.label} · ${artifact.sessionTitle}`}
+                    type="button"
+                  >
+                    {artifact.kind === 'image' ? (
+                      <IconPhoto className="shrink-0 text-(--theme-primary)" size={14} />
+                    ) : (
+                      <IconFileText className="shrink-0 text-(--theme-primary)" size={14} />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{artifact.label}</span>
+                      <span className="block truncate text-[0.625rem] text-(--ui-text-tertiary)">
+                        {artifact.sessionTitle}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
           <TreeLevel
             collapsed={collapsed}
             depth={0}
@@ -425,7 +505,11 @@ export function LibraryView() {
               >
                 {i === activeTab && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-(--theme-primary)" />}
                 <span className="flex min-w-0 items-center gap-1.5 py-2 pl-3 pr-8">
-                  {tab.kind === 'note' ? <IconFileText className="shrink-0 opacity-60" size={13} /> : <FileGlyph kind={tab.file.kind} />}
+                  {tab.kind === 'note' ? (
+                    <IconFileText className="shrink-0 opacity-60" size={13} />
+                  ) : (
+                    <FileGlyph kind={tab.file.kind} />
+                  )}
                   <span className="truncate">{tabLabel(tab)}</span>
                 </span>
                 <button
@@ -450,12 +534,15 @@ export function LibraryView() {
                 <div className="min-w-0">
                   <div className="mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
                     <span>Library</span>
-                    {selection.note.folder.split('/').filter(Boolean).map((part, index) => (
-                      <span className="contents" key={`${part}-${index}`}>
-                        <IconChevronRight className="shrink-0 opacity-50" size={11} />
-                        <span className="truncate">{part}</span>
-                      </span>
-                    ))}
+                    {selection.note.folder
+                      .split('/')
+                      .filter(Boolean)
+                      .map((part, index) => (
+                        <span className="contents" key={`${part}-${index}`}>
+                          <IconChevronRight className="shrink-0 opacity-50" size={11} />
+                          <span className="truncate">{part}</span>
+                        </span>
+                      ))}
                   </div>
                   <h2 className="truncate text-2xl font-semibold tracking-[-0.025em]">{selection.note.title}</h2>
                 </div>
@@ -550,7 +637,10 @@ function TreeLevel({
                   size={12}
                 />
                 {isCollapsed ? (
-                  <IconFolder className="shrink-0 text-(--ui-text-tertiary) group-hover/folder:text-(--theme-primary)" size={14} />
+                  <IconFolder
+                    className="shrink-0 text-(--ui-text-tertiary) group-hover/folder:text-(--theme-primary)"
+                    size={14}
+                  />
                 ) : (
                   <IconFolderOpen className="shrink-0 text-(--theme-primary)" size={14} />
                 )}
@@ -576,7 +666,9 @@ function TreeLevel({
           <button
             className={cn(
               'relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]',
-              selection?.kind === 'note' && selection.note.path === note.path && 'font-semibold text-foreground before:bg-(--theme-primary)'
+              selection?.kind === 'note' &&
+                selection.note.path === note.path &&
+                'font-semibold text-foreground before:bg-(--theme-primary)'
             )}
             key={note.path}
             onClick={() => onSelect({ kind: 'note', note })}
@@ -593,7 +685,9 @@ function TreeLevel({
           <button
             className={cn(
               'relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-tertiary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]',
-              selection?.kind === 'file' && selection.file.path === file.path && 'font-semibold text-foreground before:bg-(--theme-primary)'
+              selection?.kind === 'file' &&
+                selection.file.path === file.path &&
+                'font-semibold text-foreground before:bg-(--theme-primary)'
             )}
             key={file.path}
             onClick={() => onSelect({ file, kind: 'file' })}

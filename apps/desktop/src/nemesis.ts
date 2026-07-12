@@ -5,7 +5,7 @@
 export const NEMESIS_STUDENT_BUILD = true
 
 /** Sidebar pages hidden for students (machinery stays alive underneath). */
-export const STUDENT_HIDDEN_NAV: ReadonlySet<string> = new Set(['skills', 'messaging'])
+export const STUDENT_HIDDEN_NAV: ReadonlySet<string> = new Set(['skills', 'messaging', 'artifacts'])
 
 /** ⌘K palette entries hidden for students. */
 export const STUDENT_HIDDEN_PALETTE: ReadonlySet<string> = new Set(['nav-terminal', 'nav-skills', 'nav-messaging'])
@@ -39,7 +39,13 @@ export const STUDENT_HIDDEN_STATUSBAR: ReadonlySet<string> = new Set([
 
 /** ⌘K palette entries hidden for students, beyond STUDENT_HIDDEN_PALETTE — the whole
  *  command-center / gateway / dev-nav surface. Matched by id prefix OR exact id. */
-export const STUDENT_HIDDEN_PALETTE_PREFIXES: readonly string[] = ['cc-', 'nav-cron', 'nav-profiles', 'nav-agents', 'nav-starmap']
+export const STUDENT_HIDDEN_PALETTE_PREFIXES: readonly string[] = [
+  'cc-',
+  'nav-cron',
+  'nav-profiles',
+  'nav-agents',
+  'nav-starmap'
+]
 
 /** True when this palette item id should be hidden in the student build. */
 export function studentHidesPaletteId(id: string | undefined): boolean {

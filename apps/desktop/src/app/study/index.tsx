@@ -138,7 +138,10 @@ export function StudyView() {
   const [takingTest, setTakingTest] = useState<null | TestFile>(null)
 
   const now = useMemo(() => new Date(), [state, reviewing])
-  const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now])
+  const queue = useMemo(
+    () => (reviewing ? buildQueue(state, reviewDeckId, now) : []),
+    [state, reviewDeckId, reviewing, now]
+  )
   const current: QueueItem | undefined = queue[0]
 
   const remainingCounts = useMemo(
@@ -167,7 +170,10 @@ export function StudyView() {
   const totals = deckStats(state, null, now)
 
   const sections = useMemo(
-    () => groupDecks(state, now).map(group => group.course).filter(course => course.toLocaleLowerCase() !== 'other'),
+    () =>
+      groupDecks(state, now)
+        .map(group => group.course)
+        .filter(course => course.toLocaleLowerCase() !== 'other'),
     [now, state]
   )
 
@@ -190,7 +196,11 @@ export function StudyView() {
 
     const reconcile = async () => {
       lastRun = Date.now()
-      const [candidates, mindmapFiles, testFiles] = await Promise.all([scanAllDeckFiles(), scanMindmapFiles(), scanTestFiles()])
+      const [candidates, mindmapFiles, testFiles] = await Promise.all([
+        scanAllDeckFiles(),
+        scanMindmapFiles(),
+        scanTestFiles()
+      ])
 
       if (cancelled) {
         return
@@ -433,7 +443,9 @@ export function StudyView() {
                 <button
                   className={cn(
                     'px-2 py-1.5 transition-colors',
-                    view === 'cards' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
+                    view === 'cards'
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
                   )}
                   onClick={() => setViewMode('cards')}
                   title="Card view"
@@ -511,12 +523,19 @@ export function StudyView() {
         ) : (
           <EmptyState
             className="flex-1"
-            description={done > 0 ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.` : 'Nothing is due right now.'}
+            description={
+              done > 0
+                ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.`
+                : 'Nothing is due right now.'
+            }
             title="All caught up"
           />
         )
       ) : matchDeckId ? (
-        <MatchGame deck={state.decks.find(deck => deck.id === matchDeckId) ?? null} onExit={() => setMatchDeckId(null)} />
+        <MatchGame
+          deck={state.decks.find(deck => deck.id === matchDeckId) ?? null}
+          onExit={() => setMatchDeckId(null)}
+        />
       ) : browseDeckId ? (
         <CardBrowser
           deck={state.decks.find(deck => deck.id === browseDeckId) ?? null}
@@ -560,11 +579,7 @@ export function StudyView() {
         />
       )}
       {newSectionOpen && (
-        <NewSectionDialog
-          onClose={() => setNewSectionOpen(false)}
-          onCreate={createSection}
-          sections={sections}
-        />
+        <NewSectionDialog onClose={() => setNewSectionOpen(false)} onCreate={createSection} sections={sections} />
       )}
       <StudySettingsDialog
         onChange={patch => update(setSettings(state, patch))}
@@ -681,7 +696,9 @@ function NewSectionDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New section</DialogTitle>
-          <DialogDescription>Create a home for related decks. Empty sections remain visible until you add one.</DialogDescription>
+          <DialogDescription>
+            Create a home for related decks. Empty sections remain visible until you add one.
+          </DialogDescription>
         </DialogHeader>
         <Input
           autoFocus
@@ -695,7 +712,9 @@ function NewSectionDialog({
           value={name}
         />
         {normalized && unavailable && (
-          <p className="text-xs text-muted-foreground">That section already exists. “Other” is reserved for ungrouped decks.</p>
+          <p className="text-xs text-muted-foreground">
+            That section already exists. “Other” is reserved for ungrouped decks.
+          </p>
         )}
         <DialogFooter>
           <Button onClick={onClose} variant="outline">
@@ -864,7 +883,9 @@ function DeckBrowser({
   ]
 
   if (!groups.length) {
-    return <EmptyState className="flex-1" description="Create a deck or import cards to get going." title="No decks yet" />
+    return (
+      <EmptyState className="flex-1" description="Create a deck or import cards to get going." title="No decks yet" />
+    )
   }
 
   return (
@@ -880,8 +901,10 @@ function DeckBrowser({
             <div className="mb-3 flex items-baseline justify-between">
               <h2 className="text-[15px] font-semibold tracking-tight">{group.course}</h2>
               <span className="text-xs text-muted-foreground">
-                {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} · {group.stats.total} cards
-                {groupMindmaps.length > 0 && ` · ${groupMindmaps.length} mind map${groupMindmaps.length === 1 ? '' : 's'}`}
+                {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} ·{' '}
+                {group.stats.total} cards
+                {groupMindmaps.length > 0 &&
+                  ` · ${groupMindmaps.length} mind map${groupMindmaps.length === 1 ? '' : 's'}`}
                 {groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`}
               </span>
             </div>
@@ -902,13 +925,29 @@ function DeckBrowser({
             ) : view === 'list' ? (
               <div className="flex flex-col gap-2">
                 {group.decks.map(deck => (
-                  <DeckRow deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
+                  <DeckRow
+                    deck={deck}
+                    key={deck.id}
+                    now={now}
+                    onBrowse={onBrowse}
+                    onMatch={onMatch}
+                    onStudy={onStudy}
+                    state={state}
+                  />
                 ))}
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {group.decks.map(deck => (
-                  <DeckCard deck={deck} key={deck.id} now={now} onBrowse={onBrowse} onMatch={onMatch} onStudy={onStudy} state={state} />
+                  <DeckCard
+                    deck={deck}
+                    key={deck.id}
+                    now={now}
+                    onBrowse={onBrowse}
+                    onMatch={onMatch}
+                    onStudy={onStudy}
+                    state={state}
+                  />
                 ))}
               </div>
             )}
@@ -948,21 +987,28 @@ function MindmapRow({ mindmap, onOpen }: { mindmap: MindmapFile; onOpen: () => v
   )
 }
 
-function TestRow({
-  attempts,
-  onStart,
-  test
-}: {
-  attempts: TestAttempt[]
-  onStart: () => void
-  test: TestFile
-}) {
+function TestRow({ attempts, onStart, test }: { attempts: TestAttempt[]; onStart: () => void; test: TestFile }) {
   const best = bestAttempt(attempts)
   const last = lastAttempt(attempts)
   const count = test.questions.length
 
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
+      return
+    }
+
+    event.preventDefault()
+    onStart()
+  }
+
   return (
-    <div className="group flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+    <div
+      className="group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 outline-none transition-[box-shadow,border-color] hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
+      onClick={onStart}
+      onKeyDown={onKeyDown}
+      role="button"
+      tabIndex={0}
+    >
       <IconChecklist className="shrink-0 text-muted-foreground" size={16} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{test.title}</div>
@@ -982,9 +1028,6 @@ function TestRow({
           )}
         </div>
       </div>
-      <Button onClick={onStart} size="sm" variant="secondary">
-        Take test
-      </Button>
     </div>
   )
 }
@@ -1027,8 +1070,24 @@ function DeckRow({
 }) {
   const stats = deckStats(state, deck.id, now)
 
+  const openDeck = () => onStudy(deck.id)
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
+      return
+    }
+
+    event.preventDefault()
+    openDeck()
+  }
+
   return (
-    <div className="group flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-(--theme-primary)/40">
+    <div
+      className="group flex cursor-pointer items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 outline-none transition-[box-shadow,border-color] hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
+      onClick={openDeck}
+      onKeyDown={onKeyDown}
+      role="button"
+      tabIndex={0}
+    >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">{deck.name}</span>
@@ -1044,13 +1103,25 @@ function DeckRow({
         </div>
       </div>
       <div className="flex shrink-0 gap-1.5 opacity-80 transition-opacity group-hover:opacity-100">
-        <Button disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm" variant="secondary">
-          Study
-        </Button>
-        <Button disabled={stats.total < 2} onClick={() => onMatch(deck.id)} size="sm" variant="ghost">
+        <Button
+          disabled={stats.total < 2}
+          onClick={event => {
+            event.stopPropagation()
+            onMatch(deck.id)
+          }}
+          size="sm"
+          variant="ghost"
+        >
           Match
         </Button>
-        <Button onClick={() => onBrowse(deck.id)} size="sm" variant="ghost">
+        <Button
+          onClick={event => {
+            event.stopPropagation()
+            onBrowse(deck.id)
+          }}
+          size="sm"
+          variant="ghost"
+        >
           Cards
         </Button>
       </div>
@@ -1076,8 +1147,24 @@ function DeckCard({
   const stats = deckStats(state, deck.id, now)
   const pct = masteryPct(stats)
 
+  const openDeck = () => onStudy(deck.id)
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
+      return
+    }
+
+    event.preventDefault()
+    openDeck()
+  }
+
   return (
-    <div className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-(--theme-primary)/40 hover:shadow-lg hover:shadow-black/20">
+    <div
+      className="group flex cursor-pointer flex-col gap-4 rounded-2xl border border-border bg-card p-5 outline-none transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 hover:shadow-lg hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
+      onClick={openDeck}
+      onKeyDown={onKeyDown}
+      role="button"
+      tabIndex={0}
+    >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-[15px] font-semibold leading-snug tracking-tight">{deck.name}</h3>
         {stats.due > 0 && <DuePill due={stats.due} />}
@@ -1094,13 +1181,25 @@ function DeckCard({
       </div>
 
       <div className="flex gap-2">
-        <Button className="flex-1" disabled={stats.due === 0} onClick={() => onStudy(deck.id)} size="sm">
-          {stats.due > 0 ? 'Study' : 'Done for now'}
-        </Button>
-        <Button disabled={stats.total < 2} onClick={() => onMatch(deck.id)} size="sm" variant="outline">
+        <Button
+          disabled={stats.total < 2}
+          onClick={event => {
+            event.stopPropagation()
+            onMatch(deck.id)
+          }}
+          size="sm"
+          variant="outline"
+        >
           Match
         </Button>
-        <Button onClick={() => onBrowse(deck.id)} size="sm" variant="ghost">
+        <Button
+          onClick={event => {
+            event.stopPropagation()
+            onBrowse(deck.id)
+          }}
+          size="sm"
+          variant="ghost"
+        >
           Cards
         </Button>
       </div>
@@ -1134,20 +1233,21 @@ function Heatmap({ state }: { state: StudyState }) {
   const { cells, total } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso])
   const stats = useMemo(() => studyMotivation(state, todayIso), [state, todayIso])
   const todayKey = todayIso.slice(0, 10)
-  const weeks = Math.ceil(cells.length / 7)
+  const firstDayOffset = cells[0] ? new Date(`${cells[0].date}T00:00:00.000Z`).getUTCDay() : 0
+  const weeks = Math.ceil((firstDayOffset + cells.length) / 7)
 
   const monthLabels: { col: number; label: string }[] = []
-  let lastMonth = -1
+  if (cells[0]) {
+    monthLabels.push({ col: 0, label: MONTHS[Number(cells[0].date.slice(5, 7)) - 1] })
 
-  for (let w = 0; w < weeks; w++) {
-    const first = cells[w * 7]
+    for (let index = 1; index < cells.length; index++) {
+      const cell = cells[index]
 
-    if (first) {
-      const month = Number(first.date.slice(5, 7)) - 1
-
-      if (month !== lastMonth) {
-        monthLabels.push({ col: w, label: MONTHS[month] })
-        lastMonth = month
+      if (cell.date.endsWith('-01')) {
+        monthLabels.push({
+          col: Math.floor((firstDayOffset + index) / 7),
+          label: MONTHS[Number(cell.date.slice(5, 7)) - 1]
+        })
       }
     }
   }
@@ -1156,13 +1256,15 @@ function Heatmap({ state }: { state: StudyState }) {
     <div className="px-8 pt-2">
       <div className="rounded-2xl border border-border bg-card p-5">
         <div className="mb-4">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Review activity</p>
+          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
+            Review activity
+          </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs">
             <Stat label="day streak" value={stats.currentStreak} />
             <Stat label="longest" value={stats.longestStreak} />
             <Stat label="days active" value={`${stats.daysLearnedPct}%`} />
             {stats.retentionPct !== null && <Stat label="retention (30d)" value={`${stats.retentionPct}%`} />}
-            <span className="text-muted-foreground">{total} reviews · past 53 weeks</span>
+            <span className="text-muted-foreground">{total} reviews · past 12 months</span>
           </div>
           {total === 0 && <p className="mt-1 text-xs text-muted-foreground">Your year fills in as you grade cards.</p>}
         </div>
@@ -1194,6 +1296,9 @@ function Heatmap({ state }: { state: StudyState }) {
                 className="grid grid-flow-col grid-rows-7 gap-[3px]"
                 style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}
               >
+                {Array.from({ length: firstDayOffset }, (_, index) => (
+                  <span aria-hidden="true" key={`leading-${index}`} />
+                ))}
                 {cells.map(cell => (
                   <Tip
                     key={cell.date}
@@ -1259,7 +1364,12 @@ function CardBrowser({
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <div className="w-40">
-            <SectionSelect label="Move deck to section" onChange={onMoveDeck} sections={sections} value={deck.course ?? ''} />
+            <SectionSelect
+              label="Move deck to section"
+              onChange={onMoveDeck}
+              sections={sections}
+              value={deck.course ?? ''}
+            />
           </div>
           <Button
             className={cn(armDelete && 'text-destructive')}
@@ -1295,7 +1405,10 @@ function CardBrowser({
             <tbody>
               {deck.cards.map(card => (
                 <tr
-                  className={cn('cursor-pointer border-t border-border hover:bg-accent', card.suspended && 'opacity-45')}
+                  className={cn(
+                    'cursor-pointer border-t border-border hover:bg-accent',
+                    card.suspended && 'opacity-45'
+                  )}
                   key={card.id}
                   onClick={() => setEditing(card)}
                 >
@@ -1305,7 +1418,9 @@ function CardBrowser({
                     )}
                     {card.front}
                   </td>
-                  <td className="hidden max-w-xs truncate px-3 py-2 text-muted-foreground md:table-cell">{card.back}</td>
+                  <td className="hidden max-w-xs truncate px-3 py-2 text-muted-foreground md:table-cell">
+                    {card.back}
+                  </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1">
                       {card.tags.map(tag => (
@@ -1379,8 +1494,18 @@ function EditCardDialog({
           <DialogDescription>Suspend hides a card from review without deleting it.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <Textarea className="min-h-20" onChange={event => setFront(event.target.value)} placeholder="Front" value={front} />
-          <Textarea className="min-h-20" onChange={event => setBack(event.target.value)} placeholder="Back" value={back} />
+          <Textarea
+            className="min-h-20"
+            onChange={event => setFront(event.target.value)}
+            placeholder="Front"
+            value={front}
+          />
+          <Textarea
+            className="min-h-20"
+            onChange={event => setBack(event.target.value)}
+            placeholder="Back"
+            value={back}
+          />
           <Input onChange={event => setTags(event.target.value)} placeholder="Tags (comma-separated)" value={tags} />
         </div>
         <DialogFooter className="flex-wrap gap-2 sm:justify-between">
@@ -1399,7 +1524,10 @@ function EditCardDialog({
                 ...card,
                 back: back.trim(),
                 front: front.trim(),
-                tags: tags.split(',').map(tag => tag.trim()).filter(Boolean)
+                tags: tags
+                  .split(',')
+                  .map(tag => tag.trim())
+                  .filter(Boolean)
               })
             }
           >
@@ -1430,8 +1558,18 @@ function AddCardDialog({
           <DialogDescription>New cards enter the review queue as “new”.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <Textarea className="min-h-20" onChange={event => setFront(event.target.value)} placeholder="Front" value={front} />
-          <Textarea className="min-h-20" onChange={event => setBack(event.target.value)} placeholder="Back" value={back} />
+          <Textarea
+            className="min-h-20"
+            onChange={event => setFront(event.target.value)}
+            placeholder="Front"
+            value={front}
+          />
+          <Textarea
+            className="min-h-20"
+            onChange={event => setBack(event.target.value)}
+            placeholder="Back"
+            value={back}
+          />
           <Input onChange={event => setTags(event.target.value)} placeholder="Tags (comma-separated)" value={tags} />
         </div>
         <DialogFooter>
@@ -1440,7 +1578,16 @@ function AddCardDialog({
           </Button>
           <Button
             disabled={!front.trim() || !back.trim()}
-            onClick={() => onCreate(front.trim(), back.trim(), tags.split(',').map(tag => tag.trim()).filter(Boolean))}
+            onClick={() =>
+              onCreate(
+                front.trim(),
+                back.trim(),
+                tags
+                  .split(',')
+                  .map(tag => tag.trim())
+                  .filter(Boolean)
+              )
+            }
           >
             Add card
           </Button>
@@ -1683,7 +1830,10 @@ function ReviewSurface({
               </Badge>
             )}
           </span>
-          <span aria-label="Cards remaining" className="flex shrink-0 items-center gap-3 font-mono text-[0.6875rem] tabular-nums">
+          <span
+            aria-label="Cards remaining"
+            className="flex shrink-0 items-center gap-3 font-mono text-[0.6875rem] tabular-nums"
+          >
             <span className="text-(--ui-blue)" title="New cards remaining">
               {remainingCounts.new} <span className="font-sans text-muted-foreground">New</span>
             </span>
@@ -1716,14 +1866,18 @@ function ReviewSurface({
         ) : (
           <div className="flex min-h-64 flex-1 flex-col justify-center gap-5 rounded-xl border border-border bg-card p-8">
             <div>
-              <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Question</div>
+              <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                Question
+              </div>
               <div className="text-lg leading-relaxed">{item.card.front}</div>
             </div>
             {revealed && (
               <>
                 <div className="border-t border-border" />
                 <div>
-                  <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Answer</div>
+                  <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                    Answer
+                  </div>
                   <div className="text-lg leading-relaxed text-foreground/80">{item.card.back}</div>
                 </div>
               </>

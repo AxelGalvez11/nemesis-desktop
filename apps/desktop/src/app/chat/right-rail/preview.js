@@ -1,15 +1,15 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useStore } from '@nanostores/react';
 import { useEffect, useMemo, useState } from 'react';
+import { SourcesTab } from '@/app/right-sidebar/sources';
 import { Button } from '@/components/ui/button';
 import { Codicon } from '@/components/ui/codicon';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { Tip } from '@/components/ui/tooltip';
 import { SegmentedControl } from '@/components/ui/segmented-control';
+import { Tip } from '@/components/ui/tooltip';
 import { translateNow, useI18n } from '@/i18n';
 import { formatCombo } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
-import { SourcesTab } from '@/app/right-sidebar/sources';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $browserRailOpen } from '@/store/browser-rail';
 import { $panesFlipped, $rightRailActiveTabId, RIGHT_RAIL_BROWSER_TAB_ID, RIGHT_RAIL_PREVIEW_TAB_ID, RIGHT_RAIL_SOURCES_TAB_ID, selectRightRailTab } from '@/store/layout';
@@ -34,6 +34,7 @@ const SOURCES_TAB_TARGET = {
 export const PREVIEW_RAIL_MIN_WIDTH = '18rem';
 export const PREVIEW_RAIL_MAX_WIDTH = '38rem';
 const INTRINSIC = `clamp(${PREVIEW_RAIL_MIN_WIDTH}, 36vw, 32rem)`;
+const IS_MACOS = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac');
 // Track for <Pane id="preview">. Folds the intrinsic clamp with a min-floor
 // against --chat-min-width so the chat surface never gets squeezed below it.
 // Subtracts the project browser width so preview yields rather than crushing
@@ -127,11 +128,9 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [fullscreen]);
-    return (_jsxs("aside", { className: cn('flex min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)', fullscreen
+    return (_jsxs("aside", { className: cn('isolate flex min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)', fullscreen
             ? 'fixed inset-0 z-40 border-none'
-            : cn('relative h-full w-full', panesFlipped ? 'border-r' : 'border-l')), style: fullscreen ? undefined : { paddingTop: 'var(--right-rail-top-inset, 0px)' }, children: [_jsxs("div", { className: "flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2 [-webkit-app-region:no-drag]", children: [_jsx(SegmentedControl, { className: "min-w-0 max-w-full bg-(--ui-bg-tertiary) [&>button]:min-w-0 [&>button]:truncate [&>button]:transition-none [&>button]:active:scale-[0.98] [&>button]:motion-reduce:active:scale-100 [&>button[aria-pressed=true]]:bg-(--theme-primary)/15 [&>button[aria-pressed=true]]:text-(--theme-primary) [&>button[aria-pressed=true]]:shadow-none", onChange: selectSegment, options: segments, value: activeSegmentId }), _jsx(Tip, { label: fullscreen ? 'Exit full screen' : 'Full screen', children: _jsx(Button, { "aria-label": fullscreen ? 'Exit full screen' : 'Full screen', className: "ml-auto shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100", onClick: () => setFullscreen(current => !current), size: "icon-xs", type: "button", variant: "ghost", children: _jsx(Codicon, { name: fullscreen ? 'screen-normal' : 'screen-full', size: "0.75rem" }) }) }), _jsx(Tip, { label: activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
-                            ? t.preview.closePane
-                            : t.preview.closeTab(activeSegmentLabel), children: _jsx(Button, { "aria-label": activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
+            : cn('relative h-full w-full', panesFlipped ? 'border-r' : 'border-l')), style: fullscreen ? undefined : { paddingTop: 'var(--right-rail-top-inset, 0px)' }, children: [_jsxs("div", { className: cn('relative z-10 flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) pr-3 [-webkit-app-region:no-drag]', fullscreen && IS_MACOS ? 'pl-[84px]' : 'pl-2'), "data-rail-chrome": "", children: [_jsx(SegmentedControl, { className: "min-w-0 max-w-full bg-(--ui-bg-tertiary) [&>button]:min-w-0 [&>button]:truncate [&>button]:transition-none [&>button]:active:scale-[0.98] [&>button]:motion-reduce:active:scale-100 [&>button[aria-pressed=true]]:bg-(--theme-primary)/15 [&>button[aria-pressed=true]]:text-(--theme-primary) [&>button[aria-pressed=true]]:shadow-none", onChange: selectSegment, options: segments, value: activeSegmentId }), _jsx(Tip, { label: fullscreen ? 'Exit full screen' : 'Full screen', children: _jsx(Button, { "aria-label": fullscreen ? 'Exit full screen' : 'Full screen', className: "ml-auto shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100", onClick: () => setFullscreen(current => !current), size: "icon-xs", type: "button", variant: "ghost", children: _jsx(Codicon, { name: fullscreen ? 'screen-normal' : 'screen-full', size: "0.75rem" }) }) }), _jsx(Tip, { label: activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? t.preview.closePane : t.preview.closeTab(activeSegmentLabel), children: _jsx(Button, { "aria-label": activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
                                 ? t.preview.closePane
                                 : t.preview.closeTab(activeSegmentLabel), className: "shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100", onClick: () => {
                                 setFullscreen(false);
@@ -142,7 +141,7 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
                     return (_jsxs("div", { className: cn('group/file-tab relative flex h-full min-w-24 max-w-40 shrink-0 items-center border-r border-(--ui-stroke-quaternary) text-[0.65rem] font-medium [-webkit-app-region:no-drag]', active
                             ? 'bg-(--ui-editor-surface-background) text-foreground'
                             : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'), children: [active && (_jsx("span", { "aria-hidden": "true", className: "absolute inset-x-0 bottom-0 h-px bg-(--theme-primary)" })), _jsx(Tip, { label: tab.target.path || tab.target.url || tab.label, children: _jsx("button", { "aria-selected": active, className: "min-w-0 flex-1 truncate py-1 pl-2 pr-1 text-left outline-none active:scale-[0.98] motion-reduce:active:scale-100", onClick: () => selectRightRailTab(tab.id), role: "tab", type: "button", children: tab.label }) }), dirty && _jsx("span", { "aria-hidden": "true", className: "size-1.5 shrink-0 rounded-full bg-(--theme-primary)" }), _jsx("button", { "aria-label": t.preview.closeTab(tab.label), className: "mx-1 grid size-4 shrink-0 place-items-center rounded-sm text-(--ui-text-tertiary) opacity-0 hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 group-hover/file-tab:opacity-100 active:scale-[0.97] motion-reduce:active:scale-100", onClick: () => closeRightRailTab(tab.id), type: "button", children: _jsx(Codicon, { name: "close", size: "0.65rem" }) })] }, tab.id));
-                }) })), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden", children: activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? (_jsx("div", { className: "flex h-full min-h-0 flex-col bg-(--ui-sidebar-surface-background)", children: _jsx(SourcesTab, {}) })) : activeSegmentId === RIGHT_RAIL_BROWSER_TAB_ID ? (_jsx(SchoolBrowserPanel, {})) : activePreviewTarget ? (_jsx(PreviewPane, { embedded: true, onRestartServer: activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID ? onRestartServer : undefined, reloadRequest: previewReloadRequest, setTitlebarToolGroup: setTitlebarToolGroup, target: activePreviewTarget })) : null })] }));
+                }) })), _jsx("div", { className: "relative z-0 min-h-0 flex-1 overflow-hidden", children: activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? (_jsx("div", { className: "flex h-full min-h-0 flex-col bg-(--ui-sidebar-surface-background)", children: _jsx(SourcesTab, {}) })) : activeSegmentId === RIGHT_RAIL_BROWSER_TAB_ID ? (_jsx(SchoolBrowserPanel, {})) : activePreviewTarget ? (_jsx(PreviewPane, { embedded: true, onRestartServer: activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID ? onRestartServer : undefined, reloadRequest: previewReloadRequest, setTitlebarToolGroup: setTitlebarToolGroup, target: activePreviewTarget })) : null })] }));
 }
 function DefaultChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
     const { t } = useI18n();

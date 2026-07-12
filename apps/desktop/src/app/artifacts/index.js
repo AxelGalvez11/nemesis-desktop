@@ -8,11 +8,9 @@ import { CopyButton } from '@/components/ui/copy-button';
 import { Pagination, PaginationButton, PaginationContent, PaginationEllipsis, PaginationItem, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
 import { RowButton } from '@/components/ui/row-button';
 import { Tip } from '@/components/ui/tooltip';
-import { getSessionMessages, listAllProfileSessions } from '@/hermes';
 import { useI18n } from '@/i18n';
 import { ExternalLink, ExternalLinkIcon, hostPathLabel, urlSlugTitleLabel, useLinkTitle } from '@/lib/external-link';
 import { FileImage, FileText, FolderOpen, Link2, Loader2, RefreshCw } from '@/lib/icons';
-import { downloadGatewayMediaFile, isRemoteGateway } from '@/lib/media';
 import { normalize } from '@/lib/text';
 import { fmtDayTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -21,7 +19,7 @@ import { useRefreshHotkey } from '../hooks/use-refresh-hotkey';
 import { useRouteEnumParam } from '../hooks/use-route-enum-param';
 import { PageSearchShell } from '../page-search-shell';
 import { sessionRoute } from '../routes';
-import { ARTIFACT_FILTERS, artifactImageSrc, collectArtifactsForSession } from './artifact-utils';
+import { ARTIFACT_FILTERS, artifactImageSrc, loadRecentArtifacts, openArtifactHref } from './artifact-utils';
 function formatArtifactTime(timestamp) {
     return fmtDayTime.format(new Date(timestamp));
 }
@@ -67,17 +65,7 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
     const refreshArtifacts = useCallback(async () => {
         setRefreshing(true);
         try {
-            const sessions = (await listAllProfileSessions(30, 1)).sessions;
-            const results = await Promise.allSettled(sessions.map(session => getSessionMessages(session.id, session.profile)));
-            const nextArtifacts = [];
-            results.forEach((result, index) => {
-                if (result.status !== 'fulfilled') {
-                    return;
-                }
-                const session = sessions[index];
-                nextArtifacts.push(...collectArtifactsForSession(session, result.value.messages));
-            });
-            setArtifacts(nextArtifacts.sort((left, right) => right.timestamp - left.timestamp));
+            setArtifacts(await loadRecentArtifacts());
         }
         catch (err) {
             notifyError(err, a.failedLoad);
@@ -147,20 +135,7 @@ export function ArtifactsView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
     }, [artifacts]);
     const openArtifact = useCallback(async (href) => {
         try {
-            // A gateway-local file resolves to file:// in remote mode (the file
-            // lives on the gateway, not this disk). Opening that locally fails —
-            // and an OAuth remote connection has no query token to build a download
-            // URL. Fetch the bytes over the authenticated fs bridge instead.
-            if (isRemoteGateway() && /^file:/i.test(href)) {
-                await downloadGatewayMediaFile(href);
-                return;
-            }
-            if (window.hermesDesktop?.openExternal) {
-                await window.hermesDesktop.openExternal(href);
-            }
-            else {
-                window.open(href, '_blank', 'noopener,noreferrer');
-            }
+            await openArtifactHref(href);
         }
         catch (err) {
             notifyError(err, a.openFailed);

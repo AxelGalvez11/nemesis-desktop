@@ -500,7 +500,9 @@ function reconcileCards(
   const removedIds = [...pool.values()].flat().map(card => card.id)
 
   const unchanged =
-    removedIds.length === 0 && cards.length === existing.length && cards.every((card, index) => card === existing[index])
+    removedIds.length === 0 &&
+    cards.length === existing.length &&
+    cards.every((card, index) => card === existing[index])
 
   return { cards: unchanged ? existing : cards, removedIds }
 }
@@ -780,7 +782,7 @@ export function groupDecks(state: StudyState, now: Date): DeckGroup[] {
         { due: 0, fresh: 0, total: 0 }
       )
     }))
-    .sort((a, b) => (b.stats.due - a.stats.due) || a.course.localeCompare(b.course))
+    .sort((a, b) => b.stats.due - a.stats.due || a.course.localeCompare(b.course))
 }
 
 export interface HeatCell {
@@ -790,9 +792,10 @@ export interface HeatCell {
   level: number
 }
 
-/** GitHub-style contribution grid: review counts per day for the last `weeks` weeks,
- *  laid out oldest→newest, each column a Sun-anchored week. Pure. */
-export function reviewHeatmap(state: StudyState, todayIso: string, weeks = 53): { cells: HeatCell[]; total: number } {
+/** Rolling GitHub-style contribution window: exactly `weeks` weeks ending today,
+ *  laid out oldest→newest. The view supplies blank leading cells to keep the
+ *  dates aligned with Sunday-anchored columns. Pure. */
+export function reviewHeatmap(state: StudyState, todayIso: string, weeks = 52): { cells: HeatCell[]; total: number } {
   const perDay = new Map<string, number>()
 
   for (const review of state.reviews) {
@@ -801,18 +804,17 @@ export function reviewHeatmap(state: StudyState, todayIso: string, weeks = 53): 
   }
 
   // Work entirely in UTC so the per-day keys (UTC) and cell dates (UTC) always agree,
-  // regardless of the machine's timezone. Anchor on the UTC Sunday that starts the window.
+  // regardless of the machine's timezone. Do not pad forward to Saturday: the
+  // rolling window ends on today, so no future cells displace an older month.
   const DAY = 86_400_000
   const todayUtc = new Date(`${todayIso.slice(0, 10)}T00:00:00.000Z`)
-  // End the grid on this week's Saturday (so today is always in the last column, GitHub-style)
-  // and start `weeks` Sundays back — columns stay Sun→Sat aligned.
-  const endMs = todayUtc.getTime() + (6 - todayUtc.getUTCDay()) * DAY
-  const startMs = endMs - (weeks * 7 - 1) * DAY
+  const dayCount = weeks * 7
+  const startMs = todayUtc.getTime() - (dayCount - 1) * DAY
 
   const cells: HeatCell[] = []
   let total = 0
 
-  for (let i = 0; i < weeks * 7; i++) {
+  for (let i = 0; i < dayCount; i++) {
     const iso = new Date(startMs + i * DAY).toISOString().slice(0, 10)
     const count = perDay.get(iso) ?? 0
     total += count

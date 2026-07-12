@@ -11,6 +11,8 @@ import { LIBRARY_ROUTE } from '../routes';
 import { MINDMAP_DIR } from './extras';
 import { parseMindmapMarkdown } from './mindmap-parser';
 const LAYOUT_STORAGE_PREFIX = 'nemesis.study.mindmap.layout:';
+const LAYOUT_MOTION_MS = 180;
+const LAYOUT_EASING = 'cubic-bezier(0, 0, 0.2, 1)';
 const MINDMAP_THEME = {
     cssVar: {
         '--accent-color': 'var(--theme-primary)',
@@ -33,6 +35,63 @@ const MINDMAP_THEME = {
     palette: ['#b3382e', '#94683c', '#54745f', '#4e7082', '#735f86', '#8b5c66'],
     type: 'light'
 };
+function reducedMotionRequested() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+function mindmapTopics(host) {
+    return Array.from(host.querySelectorAll('me-parent > me-tpc'));
+}
+/** mind-elixir reflows nested inline/flex custom elements and directly removes a
+ * collapsed subtree, so CSS top/left transitions never see changing properties
+ * and an exit fade cannot run. FLIP the surviving me-parent wrappers after the
+ * synchronous re-layout, and fade the newly-created subtree wrappers in. */
+function animateMindmapRelayout(host, updateLayout) {
+    if (reducedMotionRequested()) {
+        updateLayout();
+        return;
+    }
+    const before = new Map(mindmapTopics(host).flatMap(topic => {
+        const id = topic.nodeObj?.id;
+        return id ? [[id, topic.getBoundingClientRect()]] : [];
+    }));
+    updateLayout();
+    window.requestAnimationFrame(() => {
+        for (const topic of mindmapTopics(host)) {
+            const wrapper = topic.parentElement;
+            const id = topic.nodeObj?.id;
+            if (!wrapper || !id) {
+                continue;
+            }
+            const previous = before.get(id);
+            if (!previous) {
+                wrapper.animate([
+                    { opacity: 0, transform: 'scale(0.97)' },
+                    { opacity: 1, transform: 'scale(1)' }
+                ], { duration: LAYOUT_MOTION_MS, easing: LAYOUT_EASING });
+                continue;
+            }
+            const current = topic.getBoundingClientRect();
+            const deltaX = previous.left - current.left;
+            const deltaY = previous.top - current.top;
+            if (Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5) {
+                wrapper.animate([{ transform: `translate(${deltaX}px, ${deltaY}px)` }, { transform: 'translate(0, 0)' }], {
+                    duration: LAYOUT_MOTION_MS,
+                    easing: LAYOUT_EASING
+                });
+            }
+        }
+    });
+}
+function scaleFitSmooth(host, mind) {
+    const canvas = host.querySelector('.map-canvas');
+    if (!canvas || reducedMotionRequested()) {
+        mind.scaleFit();
+        return;
+    }
+    canvas.classList.add('mindmap-smooth-transform');
+    mind.scaleFit();
+    window.setTimeout(() => canvas.classList.remove('mindmap-smooth-transform'), LAYOUT_MOTION_MS);
+}
 function mapPath(file) {
     return `${MINDMAP_DIR}/${file.fileName}`;
 }
@@ -219,15 +278,16 @@ function MindmapCanvas({ file }) {
                 pointerOrigin = { x: event.clientX, y: event.clientY };
             };
             const onTopicClick = (event) => {
-                const dragged = pointerOrigin &&
-                    Math.hypot(event.clientX - pointerOrigin.x, event.clientY - pointerOrigin.y) > 6;
+                const dragged = pointerOrigin && Math.hypot(event.clientX - pointerOrigin.x, event.clientY - pointerOrigin.y) > 6;
                 if (dragged) {
                     return;
                 }
                 const topic = event.target.closest('me-tpc');
                 const node = topic?.nodeObj;
                 if (mind && topic && node?.children?.length) {
-                    mind.expandNode(topic, node.expanded === false);
+                    animateMindmapRelayout(host, () => {
+                        mind?.expandNode(topic, node.expanded === false);
+                    });
                     persistLayout(file, mind);
                 }
             };
@@ -238,12 +298,14 @@ function MindmapCanvas({ file }) {
                 host.removeEventListener('click', onTopicClick);
             };
             mind.bus.addListener('operation', (operation) => {
-                if (operation.name === 'moveNodeAfter' || operation.name === 'moveNodeBefore' || operation.name === 'moveNodeIn') {
+                if (operation.name === 'moveNodeAfter' ||
+                    operation.name === 'moveNodeBefore' ||
+                    operation.name === 'moveNodeIn') {
                     persistLayout(file, mind);
                 }
             });
-            animationFrame = window.requestAnimationFrame(() => mind?.scaleFit());
-            resizeObserver = new ResizeObserver(() => mind?.scaleFit());
+            animationFrame = window.requestAnimationFrame(() => mind && scaleFitSmooth(host, mind));
+            resizeObserver = new ResizeObserver(() => mind && scaleFitSmooth(host, mind));
             resizeObserver.observe(host);
         }
         catch {
@@ -260,7 +322,11 @@ function MindmapCanvas({ file }) {
     if (failed) {
         return _jsx(OutlineFallback, { file: file });
     }
-    return (_jsxs("div", { className: "flex min-h-0 flex-1 bg-(--ui-editor-surface-background)", children: [_jsxs("div", { className: "relative min-w-0 flex-1", children: [_jsx("div", { className: "study-mindmap-host h-full w-full", ref: hostRef }), _jsx("div", { className: "pointer-events-none absolute bottom-3 left-3 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated)/90 px-2.5 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary) shadow-sm", children: "Drag nodes to arrange \u00B7 scroll to pan \u00B7 Ctrl/\u2318 + scroll to zoom" }), _jsx(Button, { className: "absolute bottom-3 right-3", onClick: () => mindRef.current?.scaleFit(), size: "sm", variant: "outline", children: "Fit" })] }), selectedDetail && (_jsxs("aside", { className: "w-72 shrink-0 overflow-y-auto border-l border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-6", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-(--theme-primary)", children: "Explanation" }), _jsx("h3", { className: "mt-2 text-base font-semibold tracking-tight text-(--ui-text-primary)", children: selectedDetail.topic }), _jsx("p", { className: "mt-3 whitespace-pre-wrap text-sm leading-6 text-(--ui-text-secondary)", children: selectedDetail.note })] }))] }));
+    return (_jsxs("div", { className: "flex min-h-0 flex-1 bg-(--ui-editor-surface-background)", children: [_jsxs("div", { className: "relative min-w-0 flex-1", children: [_jsx("div", { className: "study-mindmap-host h-full w-full", ref: hostRef }), _jsx("div", { className: "pointer-events-none absolute bottom-3 left-3 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated)/90 px-2.5 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary) shadow-sm", children: "Drag nodes to arrange \u00B7 scroll to pan \u00B7 Ctrl/\u2318 + scroll to zoom" }), _jsx(Button, { className: "absolute bottom-3 right-3", onClick: () => {
+                            if (mindRef.current && hostRef.current) {
+                                scaleFitSmooth(hostRef.current, mindRef.current);
+                            }
+                        }, size: "sm", variant: "outline", children: "Fit" })] }), selectedDetail && (_jsxs("aside", { className: "w-72 shrink-0 overflow-y-auto border-l border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-5 py-6", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-(--theme-primary)", children: "Explanation" }), _jsx("h3", { className: "mt-2 text-base font-semibold tracking-tight text-(--ui-text-primary)", children: selectedDetail.topic }), _jsx("p", { className: "mt-3 whitespace-pre-wrap text-sm leading-6 text-(--ui-text-secondary)", children: selectedDetail.note })] }))] }));
 }
 export function MindmapViewerDialog({ file, onOpenChange }) {
     const navigate = useNavigate();

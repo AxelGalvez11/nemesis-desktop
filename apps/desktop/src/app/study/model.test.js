@@ -3,7 +3,7 @@
 // page drifting — and, critically, without torching FSRS review progress. These tests
 // pin that contract.
 import { beforeEach, describe, expect, it } from 'vitest';
-import { adoptLegacyDeckFiles, buildQueue, DEFAULT_STUDY_SETTINGS, getSettings, loadState, reconcileDeckFiles, saveState, setSettings } from './model';
+import { adoptLegacyDeckFiles, buildQueue, DEFAULT_STUDY_SETTINGS, getSettings, loadState, reconcileDeckFiles, reviewHeatmap, saveState, setSettings } from './model';
 function card(id, front, back, extra = {}) {
     return { back, front, id, tags: [], ...extra };
 }
@@ -20,6 +20,26 @@ function candidate(fileName, cards, course) {
 function scheduled() {
     return { due: '2026-07-09T00:00:00.000Z' };
 }
+describe('reviewHeatmap', () => {
+    it('renders exactly 52 rolling weeks and ends on today without future padding', () => {
+        const result = reviewHeatmap(state([]), '2026-06-10T18:30:00.000Z');
+        expect(result.cells).toHaveLength(52 * 7);
+        expect(result.cells[0]?.date).toBe('2025-06-12');
+        expect(result.cells.at(-1)?.date).toBe('2026-06-10');
+    });
+    it('keeps reviews on both ends of the rolling window and excludes the day before it', () => {
+        const result = reviewHeatmap(state([], {
+            reviews: [
+                { at: '2025-06-11T23:59:00.000Z', cardId: 'too-old', rating: 'good' },
+                { at: '2025-06-12T00:01:00.000Z', cardId: 'first', rating: 'good' },
+                { at: '2026-06-10T23:59:00.000Z', cardId: 'today', rating: 'easy' }
+            ]
+        }), '2026-06-10T18:30:00.000Z');
+        expect(result.total).toBe(2);
+        expect(result.cells[0]?.count).toBe(1);
+        expect(result.cells.at(-1)?.count).toBe(1);
+    });
+});
 describe('reconcileDeckFiles', () => {
     it('imports a new deck file with fresh ids and files it under its course', () => {
         const before = state([]);

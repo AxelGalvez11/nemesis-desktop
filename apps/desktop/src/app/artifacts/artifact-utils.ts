@@ -1,5 +1,6 @@
+import { getSessionMessages, listAllProfileSessions } from '@/hermes'
 import { readDesktopFileDataUrl } from '@/lib/desktop-fs'
-import { filePathFromMediaPath, isRemoteGateway, mediaExternalUrl } from '@/lib/media'
+import { downloadGatewayMediaFile, filePathFromMediaPath, isRemoteGateway, mediaExternalUrl } from '@/lib/media'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import type { SessionInfo, SessionMessage } from '@/types/hermes'
 
@@ -327,4 +328,37 @@ export function collectArtifactsForSession(session: SessionInfo, messages: Sessi
   }
 
   return Array.from(found.values())
+}
+
+/** The shared Artifacts/Library indexer. Keep the fetch breadth and ordering in
+ * one place so the student Library's deliverables match the legacy route. */
+export async function loadRecentArtifacts(sessionLimit = 30): Promise<ArtifactRecord[]> {
+  const sessions = (await listAllProfileSessions(sessionLimit, 1)).sessions
+  const results = await Promise.allSettled(sessions.map(session => getSessionMessages(session.id, session.profile)))
+  const artifacts: ArtifactRecord[] = []
+
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      artifacts.push(...collectArtifactsForSession(sessions[index], result.value.messages))
+    }
+  })
+
+  return artifacts.sort((left, right) => right.timestamp - left.timestamp)
+}
+
+/** Open a collected deliverable through the same local/remote path used by
+ * Artifacts. Remote gateway files must be downloaded through the authenticated
+ * bridge because their file:// URL does not exist on this machine. */
+export async function openArtifactHref(href: string): Promise<void> {
+  if (isRemoteGateway() && /^file:/i.test(href)) {
+    await downloadGatewayMediaFile(href)
+
+    return
+  }
+
+  if (window.hermesDesktop?.openExternal) {
+    await window.hermesDesktop.openExternal(href)
+  } else {
+    window.open(href, '_blank', 'noopener,noreferrer')
+  }
 }

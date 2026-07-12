@@ -142,81 +142,84 @@ export function ConnectionsSettings({ onClose }: { onClose?: () => void }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8">
-      <div className="flex flex-col gap-1">
-        <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70">
-          Connections
-        </span>
-        <h2 className="text-lg font-semibold text-foreground">Connect your school accounts</h2>
-        <p className="text-sm text-muted-foreground">
-          No API keys, no setup codes. You just sign in once in Nemesis&apos;s own browser — then the agent works inside
-          that signed-in session for you. Your passwords are never shown to or stored by the agent.
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8">
+        <div className="flex flex-col gap-1">
+          <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70">
+            Connections
+          </span>
+          <h2 className="text-lg font-semibold text-foreground">Connect to apps &amp; websites</h2>
+          <p className="text-sm text-muted-foreground">
+            No API keys or setup codes — sign in once in Nemesis&apos;s own browser to any app or website you use for
+            school. Then the agent works inside that signed-in session for you. Your passwords are never shown to or
+            stored by the agent.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {PORTALS.map(portal => {
+            const connected = status[portal.origin]
+
+            return (
+              <div
+                className="flex items-center gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-3"
+                key={portal.id}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-foreground">{portal.name}</span>
+                    {connected && (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-(--theme-primary)/15 px-1.5 py-0.5 text-[0.6rem] font-semibold text-(--theme-primary)">
+                        <Codicon name="check" size="0.6rem" />
+                        Connected
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">{portal.hint}</div>
+                </div>
+                {connected ? (
+                  <Button onClick={() => disconnect(portal.origin)} size="sm" variant="ghost">
+                    Sign out
+                  </Button>
+                ) : (
+                  <Button onClick={() => connect(portal.url)} size="sm" variant="secondary">
+                    Connect
+                  </Button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-xl border border-dashed border-(--ui-stroke-tertiary) px-4 py-4">
+          <span className="text-xs font-medium text-foreground">Another site</span>
+          <span className="text-xs text-muted-foreground">
+            A different school portal, a library database, anything you log into on the web.
+          </span>
+          <div className="flex items-center gap-2">
+            <Input
+              className="flex-1"
+              onChange={event => setCustomUrl(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  connectCustom()
+                }
+              }}
+              placeholder="paste the site's address"
+              value={customUrl}
+            />
+            <Button disabled={!customUrl.trim()} onClick={connectCustom} size="sm" variant="secondary">
+              Open &amp; sign in
+            </Button>
+          </div>
+        </div>
+
+        <p className="text-xs leading-relaxed text-muted-foreground/70">
+          Once connected, ask Nemesis things like &ldquo;what&apos;s due this week?&rdquo; or &ldquo;pull my new lecture
+          slides into the Library.&rdquo; It reads these accounts for you — it never sends email or submits anything
+          without you saying so.
         </p>
       </div>
-
-      <div className="flex flex-col gap-2">
-        {PORTALS.map(portal => {
-          const connected = status[portal.origin]
-
-          return (
-            <div
-              className="flex items-center gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-3"
-              key={portal.id}
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">{portal.name}</span>
-                  {connected && (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-(--theme-primary)/15 px-1.5 py-0.5 text-[0.6rem] font-semibold text-(--theme-primary)">
-                      <Codicon name="check" size="0.6rem" />
-                      Connected
-                    </span>
-                  )}
-                </div>
-                <div className="truncate text-xs text-muted-foreground">{portal.hint}</div>
-              </div>
-              {connected ? (
-                <Button onClick={() => disconnect(portal.origin)} size="sm" variant="ghost">
-                  Sign out
-                </Button>
-              ) : (
-                <Button onClick={() => connect(portal.url)} size="sm" variant="secondary">
-                  Connect
-                </Button>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      <div className="flex flex-col gap-2 rounded-xl border border-dashed border-(--ui-stroke-tertiary) px-4 py-4">
-        <span className="text-xs font-medium text-foreground">Another site</span>
-        <span className="text-xs text-muted-foreground">
-          A different school portal, a library database, anything you log into on the web.
-        </span>
-        <div className="flex items-center gap-2">
-          <Input
-            className="flex-1"
-            onChange={event => setCustomUrl(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                connectCustom()
-              }
-            }}
-            placeholder="paste the site's address"
-            value={customUrl}
-          />
-          <Button disabled={!customUrl.trim()} onClick={connectCustom} size="sm" variant="secondary">
-            Open &amp; sign in
-          </Button>
-        </div>
-      </div>
-
-      <p className="text-xs leading-relaxed text-muted-foreground/70">
-        Once connected, ask Nemesis things like &ldquo;what&apos;s due this week?&rdquo; or &ldquo;pull my new lecture
-        slides into the Library.&rdquo; It reads these accounts for you — it never sends email or submits anything
-        without you saying so.
-      </p>
     </div>
   )
 }

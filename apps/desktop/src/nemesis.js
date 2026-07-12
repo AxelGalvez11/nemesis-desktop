@@ -4,7 +4,7 @@
 // docs/design/nemesis-product-reskin-plan-2026-07.md). Flip to false → stock Hermes UI.
 export const NEMESIS_STUDENT_BUILD = true;
 /** Sidebar pages hidden for students (machinery stays alive underneath). */
-export const STUDENT_HIDDEN_NAV = new Set(['skills', 'messaging']);
+export const STUDENT_HIDDEN_NAV = new Set(['skills', 'messaging', 'artifacts']);
 /** ⌘K palette entries hidden for students. */
 export const STUDENT_HIDDEN_PALETTE = new Set(['nav-terminal', 'nav-skills', 'nav-messaging']);
 /** Settings sections students see. Everything else (model/providers/keys/gateway/workspace/
@@ -34,7 +34,13 @@ export const STUDENT_HIDDEN_STATUSBAR = new Set([
 ]);
 /** ⌘K palette entries hidden for students, beyond STUDENT_HIDDEN_PALETTE — the whole
  *  command-center / gateway / dev-nav surface. Matched by id prefix OR exact id. */
-export const STUDENT_HIDDEN_PALETTE_PREFIXES = ['cc-', 'nav-cron', 'nav-profiles', 'nav-agents', 'nav-starmap'];
+export const STUDENT_HIDDEN_PALETTE_PREFIXES = [
+    'cc-',
+    'nav-cron',
+    'nav-profiles',
+    'nav-agents',
+    'nav-starmap'
+];
 /** True when this palette item id should be hidden in the student build. */
 export function studentHidesPaletteId(id) {
     if (!NEMESIS_STUDENT_BUILD || !id) {

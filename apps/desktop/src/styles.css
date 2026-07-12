@@ -1909,6 +1909,9 @@ text-* variant utilities. */ .btn-arc {
 .study-mindmap-host .map-container me-parent me-tpc {
   padding: 0.25rem 0.45rem;
 }
+.study-mindmap-host .map-container .map-canvas.mindmap-smooth-transform {
+  transition: transform 180ms cubic-bezier(0, 0, 0.2, 1);
+}
 .study-mindmap-host .map-container .selected {
   outline-width: 1px;
   outline-offset: 3px;
@@ -1932,4 +1935,5 @@ text-* variant utilities. */ .btn-arc {
   .nemesis-flip-inner { transition: none; }
   .nemesis-shake { animation: none; }
   .nemesis-activity-phrase { animation: none; }
+  .study-mindmap-host .map-container .map-canvas.mindmap-smooth-transform { transition: none; }
 }

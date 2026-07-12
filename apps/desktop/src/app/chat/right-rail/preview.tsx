@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useState } from 'react'
 
+import { SourcesTab } from '@/app/right-sidebar/sources'
 import type { SetTitlebarToolGroup } from '@/app/shell/titlebar-controls'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -11,12 +12,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
-import { Tip } from '@/components/ui/tooltip'
 import { SegmentedControl, type SegmentedControlOption } from '@/components/ui/segmented-control'
+import { Tip } from '@/components/ui/tooltip'
 import { translateNow, useI18n } from '@/i18n'
 import { formatCombo } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
-import { SourcesTab } from '@/app/right-sidebar/sources'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { $browserRailOpen } from '@/store/browser-rail'
 import {
@@ -63,6 +63,7 @@ export const PREVIEW_RAIL_MIN_WIDTH = '18rem'
 export const PREVIEW_RAIL_MAX_WIDTH = '38rem'
 
 const INTRINSIC = `clamp(${PREVIEW_RAIL_MIN_WIDTH}, 36vw, 32rem)`
+const IS_MACOS = typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac')
 
 // Track for <Pane id="preview">. Folds the intrinsic clamp with a min-floor
 // against --chat-min-width so the chat surface never gets squeezed below it.
@@ -211,14 +212,20 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
   return (
     <aside
       className={cn(
-        'flex min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)',
+        'isolate flex min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)',
         fullscreen
           ? 'fixed inset-0 z-40 border-none'
           : cn('relative h-full w-full', panesFlipped ? 'border-r' : 'border-l')
       )}
       style={fullscreen ? undefined : { paddingTop: 'var(--right-rail-top-inset, 0px)' }}
     >
-      <div className="flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2 [-webkit-app-region:no-drag]">
+      <div
+        className={cn(
+          'relative z-10 flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) pr-3 [-webkit-app-region:no-drag]',
+          fullscreen && IS_MACOS ? 'pl-[84px]' : 'pl-2'
+        )}
+        data-rail-chrome=""
+      >
         <SegmentedControl
           className="min-w-0 max-w-full bg-(--ui-bg-tertiary) [&>button]:min-w-0 [&>button]:truncate [&>button]:transition-none [&>button]:active:scale-[0.98] [&>button]:motion-reduce:active:scale-100 [&>button[aria-pressed=true]]:bg-(--theme-primary)/15 [&>button[aria-pressed=true]]:text-(--theme-primary) [&>button[aria-pressed=true]]:shadow-none"
           onChange={selectSegment}
@@ -239,9 +246,7 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
         </Tip>
         <Tip
           label={
-            activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
-              ? t.preview.closePane
-              : t.preview.closeTab(activeSegmentLabel)
+            activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? t.preview.closePane : t.preview.closeTab(activeSegmentLabel)
           }
         >
           <Button
@@ -312,7 +317,7 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="relative z-0 min-h-0 flex-1 overflow-hidden">
         {activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? (
           <div className="flex h-full min-h-0 flex-col bg-(--ui-sidebar-surface-background)">
             <SourcesTab />

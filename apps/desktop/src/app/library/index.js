@@ -11,6 +11,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { notifyError } from '@/store/notifications';
+import { loadRecentArtifacts, openArtifactHref } from '../artifacts/artifact-utils';
 import { NoteEditor } from './note-editor';
 import { NoteRail } from './note-rail';
 import { PdfViewer } from './pdf-viewer';
@@ -37,7 +39,13 @@ function buildTree(contents) {
                 node = next;
             }
             else {
-                const created = { files: [], folders: [], name: part, notes: [], path: node.path ? `${node.path}/${part}` : part };
+                const created = {
+                    files: [],
+                    folders: [],
+                    name: part,
+                    notes: [],
+                    path: node.path ? `${node.path}/${part}` : part
+                };
                 node.folders.push(created);
                 node = created;
             }
@@ -57,6 +65,7 @@ function buildTree(contents) {
 }
 export function LibraryView() {
     const [contents, setContents] = useState(null);
+    const [deliverables, setDeliverables] = useState(null);
     const [error, setError] = useState(null);
     // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
     const [tabs, setTabs] = useState([]);
@@ -86,6 +95,23 @@ export function LibraryView() {
             return null;
         }
     }, []);
+    const refreshDeliverables = useCallback(async () => {
+        try {
+            setDeliverables(await loadRecentArtifacts());
+        }
+        catch (err) {
+            setDeliverables([]);
+            notifyError(err, 'Could not load files made by Nemesis.');
+        }
+    }, []);
+    const openDeliverable = useCallback(async (artifact) => {
+        try {
+            await openArtifactHref(artifact.href);
+        }
+        catch (err) {
+            notifyError(err, 'Could not open this deliverable.');
+        }
+    }, []);
     const openSelection = useCallback((next) => {
         const key = tabKey(next);
         setTabs(current => {
@@ -109,13 +135,14 @@ export function LibraryView() {
                 openSelection({ kind: 'note', note: loaded.notes[0] });
             }
         })();
+        void refreshDeliverables();
         return () => {
             if (saveTimer.current) {
                 clearTimeout(saveTimer.current);
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [refresh]);
+    }, [refresh, refreshDeliverables]);
     // Re-read the vault when the window regains focus so files the agent moved,
     // renamed, or created while you were away show up without a manual reload.
     // Debounced so an incidental refocus doesn't hammer the disk.
@@ -128,10 +155,11 @@ export function LibraryView() {
             }
             last = now;
             void refresh();
+            void refreshDeliverables();
         };
         window.addEventListener('focus', onFocus);
         return () => window.removeEventListener('focus', onFocus);
-    }, [refresh]);
+    }, [refresh, refreshDeliverables]);
     const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents]);
     const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents]);
     // Deep links from the Graph page: /library?note=Title opens a note,
@@ -164,9 +192,7 @@ export function LibraryView() {
     }, [activeTab, contents, tabs]);
     const activeNote = selection?.kind === 'note' ? selection.note : null;
     const scheduleSave = useCallback((note, content) => {
-        setContents(current => current
-            ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) }
-            : current);
+        setContents(current => current ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) } : current);
         if (saveTimer.current) {
             clearTimeout(saveTimer.current);
         }
@@ -230,21 +256,32 @@ export function LibraryView() {
     }
     const noteCount = contents.notes.length;
     const fileCount = contents.files.length;
-    return (_jsxs("div", { className: "flex h-full min-h-0 bg-(--ui-editor-surface-background)", children: [_jsxs("aside", { className: "flex w-64 shrink-0 flex-col border-r border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)", children: [_jsxs("div", { className: "flex items-center justify-between gap-3 px-4 pb-3 pt-5", children: [_jsxs("div", { className: "min-w-0", children: [_jsx("h1", { className: "text-lg font-semibold tracking-tight", children: "Library" }), _jsxs("p", { className: "mt-0.5 text-[0.65rem] font-medium tabular-nums text-(--ui-text-tertiary)", children: [noteCount, " note", noteCount === 1 ? '' : 's', " \u00B7 ", fileCount, " file", fileCount === 1 ? '' : 's'] })] }), _jsxs("div", { className: "flex gap-0.5", children: [_jsx(Tip, { label: "New note", children: _jsx(Button, { "aria-label": "New note", className: "transition-transform duration-200 ease-out active:scale-[0.98]", onClick: () => { setCreating('note'); setDraft(''); }, size: "icon-xs", variant: "ghost", children: _jsx(IconFilePlus, {}) }) }), _jsx(Tip, { label: "New folder", children: _jsx(Button, { "aria-label": "New folder", className: "transition-transform duration-200 ease-out active:scale-[0.98]", onClick: () => { setCreating('folder'); setDraft(''); }, size: "icon-xs", variant: "ghost", children: _jsx(IconFolderPlus, {}) }) })] })] }), creating && (_jsxs("div", { className: "mx-3 mb-2 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-2 shadow-sm", children: [_jsx(Input, { autoFocus: true, onChange: event => setDraft(event.target.value), onKeyDown: event => {
-                                    if (event.key === 'Enter')
+    return (_jsxs("div", { className: "flex h-full min-h-0 bg-(--ui-editor-surface-background)", children: [_jsxs("aside", { className: "flex w-64 shrink-0 flex-col border-r border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)", children: [_jsxs("div", { className: "flex items-center justify-between gap-3 px-4 pb-3 pt-5", children: [_jsxs("div", { className: "min-w-0", children: [_jsx("h1", { className: "text-lg font-semibold tracking-tight", children: "Library" }), _jsxs("p", { className: "mt-0.5 text-[0.65rem] font-medium tabular-nums text-(--ui-text-tertiary)", children: [noteCount, " note", noteCount === 1 ? '' : 's', " \u00B7 ", fileCount, " file", fileCount === 1 ? '' : 's'] })] }), _jsxs("div", { className: "flex gap-0.5", children: [_jsx(Tip, { label: "New note", children: _jsx(Button, { "aria-label": "New note", className: "transition-transform duration-200 ease-out active:scale-[0.98]", onClick: () => {
+                                                setCreating('note');
+                                                setDraft('');
+                                            }, size: "icon-xs", variant: "ghost", children: _jsx(IconFilePlus, {}) }) }), _jsx(Tip, { label: "New folder", children: _jsx(Button, { "aria-label": "New folder", className: "transition-transform duration-200 ease-out active:scale-[0.98]", onClick: () => {
+                                                setCreating('folder');
+                                                setDraft('');
+                                            }, size: "icon-xs", variant: "ghost", children: _jsx(IconFolderPlus, {}) }) })] })] }), creating && (_jsxs("div", { className: "mx-3 mb-2 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-2 shadow-sm", children: [_jsx(Input, { autoFocus: true, onChange: event => setDraft(event.target.value), onKeyDown: event => {
+                                    if (event.key === 'Enter') {
                                         void submitCreate();
-                                    if (event.key === 'Escape')
+                                    }
+                                    if (event.key === 'Escape') {
                                         setCreating(null);
-                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: _jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
-                                const next = new Set(current);
-                                next.has(path) ? next.delete(path) : next.add(path);
-                                return next;
-                            }), selection: selection }) })] }), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [tabs.length > 0 && (_jsx("div", { className: "flex h-(--titlebar-height) shrink-0 overflow-x-auto overflow-y-hidden border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out', i === activeTab
+                                    }
+                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsxs("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: [_jsxs("section", { className: "mb-3 border-b border-(--ui-stroke-quaternary) pb-3", children: [_jsxs("div", { className: "mb-1.5 flex items-center justify-between gap-2 px-2", children: [_jsx("h2", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: "Made by Nemesis" }), deliverables && deliverables.length > 0 && (_jsx("span", { className: "text-[0.625rem] tabular-nums text-(--ui-text-quaternary)", children: deliverables.length }))] }), !deliverables ? (_jsx("p", { className: "px-2 py-1 text-xs text-(--ui-text-tertiary)", children: "Finding deliverables\u2026" })) : deliverables.length === 0 ? (_jsx("p", { className: "px-2 py-1 text-xs text-(--ui-text-tertiary)", children: "Chat-made files will appear here." })) : (_jsx("div", { className: "space-y-0.5", children: deliverables.map(artifact => (_jsxs("button", { className: "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-colors hover:bg-(--ui-row-hover-background) hover:text-foreground", onClick: () => void openDeliverable(artifact), title: `${artifact.label} · ${artifact.sessionTitle}`, type: "button", children: [artifact.kind === 'image' ? (_jsx(IconPhoto, { className: "shrink-0 text-(--theme-primary)", size: 14 })) : (_jsx(IconFileText, { className: "shrink-0 text-(--theme-primary)", size: 14 })), _jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate", children: artifact.label }), _jsx("span", { className: "block truncate text-[0.625rem] text-(--ui-text-tertiary)", children: artifact.sessionTitle })] })] }, artifact.id))) }))] }), _jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
+                                    const next = new Set(current);
+                                    next.has(path) ? next.delete(path) : next.add(path);
+                                    return next;
+                                }), selection: selection })] })] }), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [tabs.length > 0 && (_jsx("div", { className: "flex h-(--titlebar-height) shrink-0 overflow-x-auto overflow-y-hidden border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out', i === activeTab
                                 ? 'bg-(--ui-bg-editor) text-foreground'
-                                : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'), onClick: () => setActiveTab(i), role: "tab", children: [i === activeTab && _jsx("span", { "aria-hidden": true, className: "absolute inset-x-0 top-0 h-px bg-(--theme-primary)" }), _jsxs("span", { className: "flex min-w-0 items-center gap-1.5 py-2 pl-3 pr-8", children: [tab.kind === 'note' ? _jsx(IconFileText, { className: "shrink-0 opacity-60", size: 13 }) : _jsx(FileGlyph, { kind: tab.file.kind }), _jsx("span", { className: "truncate", children: tabLabel(tab) })] }), _jsx("button", { "aria-label": "Close tab", className: "absolute right-1.5 grid size-5 place-items-center rounded opacity-0 transition-[opacity,color] duration-200 ease-out hover:bg-(--chrome-action-hover) group-hover/tab:opacity-100 group-focus-within/tab:opacity-100", onClick: event => {
+                                : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'), onClick: () => setActiveTab(i), role: "tab", children: [i === activeTab && _jsx("span", { "aria-hidden": true, className: "absolute inset-x-0 top-0 h-px bg-(--theme-primary)" }), _jsxs("span", { className: "flex min-w-0 items-center gap-1.5 py-2 pl-3 pr-8", children: [tab.kind === 'note' ? (_jsx(IconFileText, { className: "shrink-0 opacity-60", size: 13 })) : (_jsx(FileGlyph, { kind: tab.file.kind })), _jsx("span", { className: "truncate", children: tabLabel(tab) })] }), _jsx("button", { "aria-label": "Close tab", className: "absolute right-1.5 grid size-5 place-items-center rounded opacity-0 transition-[opacity,color] duration-200 ease-out hover:bg-(--chrome-action-hover) group-hover/tab:opacity-100 group-focus-within/tab:opacity-100", onClick: event => {
                                         event.stopPropagation();
                                         closeTab(i);
-                                    }, type: "button", children: _jsx(IconX, { size: 11 }) })] }, tabKey(tab)))) })), selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "shrink-0 border-b border-(--ui-stroke-quaternary) px-7 pb-4 pt-6", children: _jsxs("div", { className: "flex items-end justify-between gap-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [_jsx("span", { children: "Library" }), selection.note.folder.split('/').filter(Boolean).map((part, index) => (_jsxs("span", { className: "contents", children: [_jsx(IconChevronRight, { className: "shrink-0 opacity-50", size: 11 }), _jsx("span", { className: "truncate", children: part })] }, `${part}-${index}`)))] }), _jsx("h2", { className: "truncate text-2xl font-semibold tracking-[-0.025em]", children: selection.note.title })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)", children: [_jsxs("span", { className: "tabular-nums", children: [countWords(selection.note.content), " words"] }), _jsx("span", { className: "rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 font-medium", children: saving ? 'Saving…' : 'Saved to disk' })] })] }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-7 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target), ref: noteEditorRef }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx(EmptyState, { className: "flex-1", description: "Pick a note on the left, or create one.", title: "No note open" }))] }), activeNote && index && (_jsx(NoteRail, { activeNote: activeNote, index: index, notes: contents.notes, onOpenNote: note => openSelection({ kind: 'note', note }), onSelectHeading: handleSelectHeading }))] }));
+                                    }, type: "button", children: _jsx(IconX, { size: 11 }) })] }, tabKey(tab)))) })), selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "shrink-0 border-b border-(--ui-stroke-quaternary) px-7 pb-4 pt-6", children: _jsxs("div", { className: "flex items-end justify-between gap-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [_jsx("span", { children: "Library" }), selection.note.folder
+                                                            .split('/')
+                                                            .filter(Boolean)
+                                                            .map((part, index) => (_jsxs("span", { className: "contents", children: [_jsx(IconChevronRight, { className: "shrink-0 opacity-50", size: 11 }), _jsx("span", { className: "truncate", children: part })] }, `${part}-${index}`)))] }), _jsx("h2", { className: "truncate text-2xl font-semibold tracking-[-0.025em]", children: selection.note.title })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)", children: [_jsxs("span", { className: "tabular-nums", children: [countWords(selection.note.content), " words"] }), _jsx("span", { className: "rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2.5 py-1 font-medium", children: saving ? 'Saving…' : 'Saved to disk' })] })] }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-7 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target), ref: noteEditorRef }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx(EmptyState, { className: "flex-1", description: "Pick a note on the left, or create one.", title: "No note open" }))] }), activeNote && index && (_jsx(NoteRail, { activeNote: activeNote, index: index, notes: contents.notes, onOpenNote: note => openSelection({ kind: 'note', note }), onSelectHeading: handleSelectHeading }))] }));
 }
 function FileGlyph({ kind }) {
     const Icon = kind === 'pdf'
@@ -270,10 +307,14 @@ function TreeLevel({ collapsed, depth, node, onSelect, onToggle, selection }) {
             }), node.notes
                 .slice()
                 .sort((a, b) => a.title.localeCompare(b.title))
-                .map(note => (_jsxs("button", { className: cn('relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]', selection?.kind === 'note' && selection.note.path === note.path && 'font-semibold text-foreground before:bg-(--theme-primary)'), onClick: () => onSelect({ kind: 'note', note }), type: "button", children: [_jsx(IconFileText, { className: "shrink-0 opacity-55", size: 14 }), _jsx("span", { className: "truncate", children: note.title })] }, note.path))), node.files
+                .map(note => (_jsxs("button", { className: cn('relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]', selection?.kind === 'note' &&
+                    selection.note.path === note.path &&
+                    'font-semibold text-foreground before:bg-(--theme-primary)'), onClick: () => onSelect({ kind: 'note', note }), type: "button", children: [_jsx(IconFileText, { className: "shrink-0 opacity-55", size: 14 }), _jsx("span", { className: "truncate", children: note.title })] }, note.path))), node.files
                 .slice()
                 .sort((a, b) => a.name.localeCompare(b.name))
-                .map(file => (_jsxs("button", { className: cn('relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-tertiary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]', selection?.kind === 'file' && selection.file.path === file.path && 'font-semibold text-foreground before:bg-(--theme-primary)'), onClick: () => onSelect({ file, kind: 'file' }), type: "button", children: [_jsx(FileGlyph, { kind: file.kind }), _jsx("span", { className: "truncate", children: file.name })] }, file.path)))] }));
+                .map(file => (_jsxs("button", { className: cn('relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-tertiary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]', selection?.kind === 'file' &&
+                    selection.file.path === file.path &&
+                    'font-semibold text-foreground before:bg-(--theme-primary)'), onClick: () => onSelect({ file, kind: 'file' }), type: "button", children: [_jsx(FileGlyph, { kind: file.kind }), _jsx("span", { className: "truncate", children: file.name })] }, file.path)))] }));
 }
 function fileUrl(path) {
     return `file://${encodeURI(path).replace(/#/g, '%23')}`;
