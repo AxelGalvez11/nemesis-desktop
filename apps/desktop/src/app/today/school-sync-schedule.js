@@ -4,16 +4,18 @@
 // cloud-agent add-on), and portal login walls with 2FA are always the student's
 // to clear, so a scheduled slot NUDGES via a native notification rather than
 // silently spending tokens on a turn the student can't see.
+import { loadSchoolPortals } from '@/lib/school-portals';
 export const SYNC_CADENCE_KEY = 'nemesis.school.autosync.cadence.v1';
 const LAST_NUDGE_KEY = 'nemesis.school.autosync.lastNudge.v1';
 // The two slots a twice-daily cadence fires at (local hours): morning brief and
 // early-evening catch-up — when new lecture posts and assignments actually land.
 export const SYNC_HOURS_TWICE = [8, 18];
 export const SYNC_HOURS_DAILY = [8];
-export const SCHOOL_PORTALS = [
-    { id: 'blackboard', name: 'Blackboard', origin: 'https://blackboard.uthsc.edu' },
-    { id: 'outlook', name: 'Outlook', origin: 'https://outlook.cloud.microsoft' }
-];
+// The student's configured portals (LMS + school email) — per-student, editable
+// in Settings → Connections, defaulting to the owner's school on first run.
+export function schoolPortals() {
+    return loadSchoolPortals();
+}
 export function loadCadence() {
     const raw = (() => {
         try {
@@ -77,13 +79,13 @@ export function writeLastNudge(slot) {
     }
 }
 /** Are the school portals signed in? Cookie presence per origin (best-effort). */
-export async function portalSignInStatus() {
+export async function portalSignInStatus(portals = schoolPortals()) {
     const check = window.hermesDesktop?.schoolView?.connectionStatus;
     if (!check) {
         return {};
     }
     try {
-        return await check(SCHOOL_PORTALS.map(portal => portal.origin));
+        return await check(portals.map(portal => portal.origin));
     }
     catch {
         return {};

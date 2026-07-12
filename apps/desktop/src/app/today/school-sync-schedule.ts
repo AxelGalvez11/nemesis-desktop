@@ -5,6 +5,8 @@
 // to clear, so a scheduled slot NUDGES via a native notification rather than
 // silently spending tokens on a turn the student can't see.
 
+import { loadSchoolPortals, type SchoolPortal } from '@/lib/school-portals'
+
 export type SyncCadence = 'off' | 'daily' | 'twice'
 
 export const SYNC_CADENCE_KEY = 'nemesis.school.autosync.cadence.v1'
@@ -15,10 +17,11 @@ const LAST_NUDGE_KEY = 'nemesis.school.autosync.lastNudge.v1'
 export const SYNC_HOURS_TWICE = [8, 18] as const
 export const SYNC_HOURS_DAILY = [8] as const
 
-export const SCHOOL_PORTALS: { id: string; name: string; origin: string }[] = [
-  { id: 'blackboard', name: 'Blackboard', origin: 'https://blackboard.uthsc.edu' },
-  { id: 'outlook', name: 'Outlook', origin: 'https://outlook.cloud.microsoft' }
-]
+// The student's configured portals (LMS + school email) — per-student, editable
+// in Settings → Connections, defaulting to the owner's school on first run.
+export function schoolPortals(): SchoolPortal[] {
+  return loadSchoolPortals()
+}
 
 export function loadCadence(): SyncCadence {
   const raw = (() => {
@@ -92,7 +95,7 @@ export function writeLastNudge(slot: string): void {
 }
 
 /** Are the school portals signed in? Cookie presence per origin (best-effort). */
-export async function portalSignInStatus(): Promise<Record<string, boolean>> {
+export async function portalSignInStatus(portals: SchoolPortal[] = schoolPortals()): Promise<Record<string, boolean>> {
   const check = window.hermesDesktop?.schoolView?.connectionStatus
 
   if (!check) {
@@ -100,7 +103,7 @@ export async function portalSignInStatus(): Promise<Record<string, boolean>> {
   }
 
   try {
-    return await check(SCHOOL_PORTALS.map(portal => portal.origin))
+    return await check(portals.map(portal => portal.origin))
   } catch {
     return {}
   }

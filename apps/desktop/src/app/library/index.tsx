@@ -3,6 +3,8 @@
 // CSS), and a collapsible Outline/Links rail (right). Non-markdown files (PDF/images inline;
 // slides/docs open externally) preview in place. Autosaves 800ms after typing.
 import {
+  IconArrowLeft,
+  IconArrowRight,
   IconChevronRight,
   IconFilePlus,
   IconFileText,
@@ -10,6 +12,8 @@ import {
   IconFolder,
   IconFolderOpen,
   IconFolderPlus,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
   IconPaperclip,
   IconPhoto,
   IconPresentation,
@@ -55,6 +59,27 @@ function tabLabel(tab: TabItem): string {
 
 function countWords(value: string): number {
   return value.trim().match(/\S+/g)?.length ?? 0
+}
+
+const SIDEBAR_KEY = 'nemesis.library.sidebar.v1'
+
+/** Browser-style visit history over opened notes/files. Pure: visit/step in,
+ *  new state out — unit-testable without React. */
+export interface NavHistory {
+  stack: TabItem[]
+  pos: number
+}
+
+export function recordNavVisit(current: NavHistory, next: TabItem): NavHistory {
+  const atCursor = current.pos >= 0 ? current.stack[current.pos] : undefined
+
+  if (atCursor && tabKey(atCursor) === tabKey(next)) {
+    return current
+  }
+
+  const stack = [...current.stack.slice(0, current.pos + 1), next].slice(-60)
+
+  return { pos: stack.length - 1, stack }
 }
 
 interface TreeNode {
@@ -124,6 +149,47 @@ export function LibraryView() {
   const [searchParams] = useSearchParams()
   const saveTimer = useRef<null | ReturnType<typeof setTimeout>>(null)
   const noteEditorRef = useRef<NoteEditorHandle>(null)
+  // Folder-tree sidebar visibility (persisted) + browser-style visit history.
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(SIDEBAR_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
+  const [nav, setNavState] = useState<NavHistory>({ pos: -1, stack: [] })
+  const navRef = useRef(nav)
+  navRef.current = nav
+  // Set while a back/forward jump re-opens an entry, so the jump itself
+  // doesn't get recorded as a fresh visit.
+  const navigatingRef = useRef(false)
+
+  const setSidebar = useCallback((open: boolean) => {
+    setSidebarOpen(open)
+
+    try {
+      window.localStorage.setItem(SIDEBAR_KEY, open ? '1' : '0')
+    } catch {
+      // persistence is best-effort
+    }
+  }, [])
+
+  const startCreating = useCallback(
+    (mode: 'folder' | 'note') => {
+      setSidebar(true)
+      setCreating(mode)
+      setDraft('')
+    },
+    [setSidebar]
+  )
+
+  const recordVisit = useCallback((next: TabItem) => {
+    if (navigatingRef.current) {
+      return
+    }
+
+    setNavState(current => recordNavVisit(current, next))
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -172,22 +238,72 @@ export function LibraryView() {
     }
   }, [])
 
-  const openSelection = useCallback((next: TabItem) => {
-    const key = tabKey(next)
-    setTabs(current => {
-      const existing = current.findIndex(tab => tabKey(tab) === key)
+  const openSelection = useCallback(
+    (next: TabItem) => {
+      const key = tabKey(next)
+      setTabs(current => {
+        const existing = current.findIndex(tab => tabKey(tab) === key)
 
-      if (existing >= 0) {
-        setActiveTab(existing)
+        if (existing >= 0) {
+          setActiveTab(existing)
 
-        return current
+          return current
+        }
+
+        setActiveTab(current.length)
+
+        return [...current, next]
+      })
+      recordVisit(next)
+    },
+    [recordVisit]
+  )
+
+  // Back/forward over the visit history — re-opens the entry (restoring its
+  // tab if it was closed) without recording the jump as a new visit.
+  const goHistory = useCallback(
+    (delta: -1 | 1) => {
+      const { pos, stack } = navRef.current
+      const target = stack[pos + delta]
+
+      if (!target) {
+        return
       }
 
-      setActiveTab(current.length)
+      navigatingRef.current = true
+      openSelection(target)
+      navigatingRef.current = false
+      setNavState({ pos: pos + delta, stack })
+    },
+    [openSelection]
+  )
 
-      return [...current, next]
-    })
-  }, [])
+  // Cmd+N = new note, Cmd+[ / Cmd+] = back / forward (skipped while typing in
+  // the editor, where CodeMirror owns bracket shortcuts for indentation).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) {
+        return
+      }
+
+      const inEditor = event.target instanceof HTMLElement && Boolean(event.target.closest('.cm-editor'))
+
+      if (event.key === 'n') {
+        event.preventDefault()
+        startCreating('note')
+      } else if (event.key === '[' && !inEditor) {
+        event.preventDefault()
+        goHistory(-1)
+      } else if (event.key === ']' && !inEditor) {
+        event.preventDefault()
+        goHistory(1)
+      }
+    }
+
+    window.addEventListener('keydown', onKey)
+
+    return () => window.removeEventListener('keydown', onKey)
+  }, [goHistory, startCreating])
 
   const closeTab = useCallback(
     (index: number) => {
@@ -255,10 +371,9 @@ export function LibraryView() {
     }
 
     if (searchParams.get('create') === 'note') {
-      setCreating('note')
-      setDraft('')
+      startCreating('note')
     }
-  }, [contents, openSelection, searchParams])
+  }, [contents, openSelection, searchParams, startCreating])
 
   // Tabs hold snapshots; always render the freshest note object from `contents`
   // so switching back to a tab shows the edits made since it was opened.
@@ -391,6 +506,7 @@ export function LibraryView() {
   return (
     <div className="flex h-full min-h-0 bg-(--ui-editor-surface-background)">
       {/* Folder tree */}
+      {sidebarOpen && (
       <aside className="flex w-64 shrink-0 flex-col border-r border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)">
         <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-5">
           <div className="min-w-0">
@@ -400,14 +516,11 @@ export function LibraryView() {
             </p>
           </div>
           <div className="flex gap-0.5">
-            <Tip label="New note">
+            <Tip label="New note (⌘N)">
               <Button
                 aria-label="New note"
                 className="transition-transform duration-200 ease-out active:scale-[0.98]"
-                onClick={() => {
-                  setCreating('note')
-                  setDraft('')
-                }}
+                onClick={() => startCreating('note')}
                 size="icon-xs"
                 variant="ghost"
               >
@@ -418,14 +531,22 @@ export function LibraryView() {
               <Button
                 aria-label="New folder"
                 className="transition-transform duration-200 ease-out active:scale-[0.98]"
-                onClick={() => {
-                  setCreating('folder')
-                  setDraft('')
-                }}
+                onClick={() => startCreating('folder')}
                 size="icon-xs"
                 variant="ghost"
               >
                 <IconFolderPlus />
+              </Button>
+            </Tip>
+            <Tip label="Hide file list">
+              <Button
+                aria-label="Hide file list"
+                className="transition-transform duration-200 ease-out active:scale-[0.98]"
+                onClick={() => setSidebar(false)}
+                size="icon-xs"
+                variant="ghost"
+              >
+                <IconLayoutSidebarLeftCollapse />
               </Button>
             </Tip>
           </div>
@@ -507,14 +628,48 @@ export function LibraryView() {
           />
         </nav>
       </aside>
+      )}
 
       {/* Editor / preview */}
       <main className="flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)">
-        {tabs.length > 0 && (
-          <div
-            className="flex h-(--titlebar-height) shrink-0 overflow-x-auto overflow-y-hidden border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            role="tablist"
-          >
+        {(tabs.length > 0 || !sidebarOpen) && (
+          <div className="flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)">
+            {/* Navigation cluster: sidebar re-open + browser-style back/forward */}
+            <div className="flex shrink-0 items-center gap-0.5 border-r border-(--ui-stroke-quaternary) px-1.5">
+              {!sidebarOpen && (
+                <Tip label="Show file list">
+                  <Button aria-label="Show file list" onClick={() => setSidebar(true)} size="icon-xs" variant="ghost">
+                    <IconLayoutSidebarLeftExpand />
+                  </Button>
+                </Tip>
+              )}
+              <Tip label="Back (⌘[)">
+                <Button
+                  aria-label="Back"
+                  disabled={nav.pos <= 0}
+                  onClick={() => goHistory(-1)}
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <IconArrowLeft />
+                </Button>
+              </Tip>
+              <Tip label="Forward (⌘])">
+                <Button
+                  aria-label="Forward"
+                  disabled={nav.pos >= nav.stack.length - 1}
+                  onClick={() => goHistory(1)}
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <IconArrowRight />
+                </Button>
+              </Tip>
+            </div>
+            <div
+              className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              role="tablist"
+            >
             {tabs.map((tab, i) => (
               <div
                 className={cn(
@@ -524,7 +679,10 @@ export function LibraryView() {
                     : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
                 )}
                 key={tabKey(tab)}
-                onClick={() => setActiveTab(i)}
+                onClick={() => {
+                  setActiveTab(i)
+                  recordVisit(tab)
+                }}
                 role="tab"
               >
                 {i === activeTab && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-(--theme-primary)" />}
@@ -549,6 +707,7 @@ export function LibraryView() {
                 </button>
               </div>
             ))}
+            </div>
           </div>
         )}
         {selection?.kind === 'note' ? (
@@ -591,7 +750,18 @@ export function LibraryView() {
         ) : selection?.kind === 'file' ? (
           <FilePreview file={selection.file} />
         ) : (
-          <EmptyState className="flex-1" description="Pick a note on the left, or create one." title="No note open" />
+          <div className="grid flex-1 place-items-center text-center">
+            <div className="flex flex-col items-center gap-3">
+              <div>
+                <div className="text-sm font-medium">No note open</div>
+                <div className="mt-1 text-xs text-muted-foreground">Pick a note on the left, or start a fresh one.</div>
+              </div>
+              <Button onClick={() => startCreating('note')} size="sm" variant="secondary">
+                <IconFilePlus size={15} />
+                New note
+              </Button>
+            </div>
+          </div>
         )}
       </main>
 

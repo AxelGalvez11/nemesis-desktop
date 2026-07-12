@@ -1854,14 +1854,24 @@ text-* variant utilities. */ .btn-arc {
   outline: none !important;
 }
 
-/* Nemesis student build: once a turn settles, its activity trail (thinking
-   disclosures + tool rows) folds behind the ActivityStrip's "Worked through
-   N steps" toggle. While running (data-nemesis-activity='live') nothing hides,
-   so live previews and tool-approval buttons stay fully interactive. */
+/* Nemesis student build: the activity trail (thinking disclosures + tool rows)
+   folds behind the ActivityStrip. Settled turns collapse behind the "Worked
+   for Xs" toggle. While running ('live') the trail ALSO hides — the strip
+   narrates instead, ChatGPT-style, with the model's intent line + a live
+   status phrase — EXCEPT any tool block waiting on an approval decision,
+   which must stay visible and clickable or the turn deadlocks. */
 [data-nemesis-activity='collapsed'] [data-slot='aui_thinking-disclosure'],
 [data-nemesis-activity='collapsed'] [data-slot='tool-block'],
-[data-nemesis-activity='collapsed'] [data-tool-group] {
+[data-nemesis-activity='collapsed'] [data-tool-group],
+[data-nemesis-activity='live'] [data-slot='aui_thinking-disclosure'],
+[data-nemesis-activity='live'] [data-slot='tool-block']:not(:has([data-slot^='tool-approval'])),
+[data-nemesis-activity='live'] [data-tool-group]:not(:has([data-slot^='tool-approval'])) {
   display: none;
+}
+
+/* The intent line fades in once the model's opening thought is readable. */
+.nemesis-intent-line {
+  animation: nemesis-phrase-in 0.4s ease-out;
 }
 
 /* Nemesis student build: live activity phrase in the ActivityStrip. The phrase

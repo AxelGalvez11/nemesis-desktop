@@ -4,11 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Codicon } from '@/components/ui/codicon';
 import { courseTitle, dueSoon, emptyGraph, eventsOnDay, loadAcademicGraph, recentChanges, scoreNextAction } from '@/lib/academic-graph';
+import { ensurePortalsMirrored, PORTALS_CHANGED_EVENT } from '@/lib/school-portals';
 import { cn } from '@/lib/utils';
 import { setComposerDraft } from '@/store/composer';
 import { dateKey, loadCalendarState, parseDateKey } from '../calendar/model';
 import { CALENDAR_ROUTE, LEDGER_ROUTE, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../routes';
-import { dueSlot, loadCadence, portalSignInStatus, readLastNudge, saveCadence, SCHOOL_PORTALS, writeLastNudge } from './school-sync-schedule';
+import { dueSlot, loadCadence, portalSignInStatus, readLastNudge, saveCadence, schoolPortals, writeLastNudge } from './school-sync-schedule';
 const SYNC_CADENCE_LABEL = {
     daily: 'Once a day',
     off: 'Manual only',
@@ -253,17 +254,29 @@ export function TodayView() {
         navigate(NEW_CHAT_ROUTE);
     };
     const [cadence, setCadence] = useState(() => loadCadence());
+    const [portals, setPortals] = useState(() => schoolPortals());
     const [portalStatus, setPortalStatus] = useState({});
     // Refresh the signed-in status when Today mounts/refocuses — the student may
-    // have logged into a portal in the browser panel since last time.
+    // have logged into a portal in the browser panel since last time — and re-read
+    // the portal list when it's edited in Settings → Connections. Mount also
+    // re-mirrors the list to .nemesis/portals.json so the agent always finds it.
     useEffect(() => {
         let alive = true;
+        ensurePortalsMirrored();
         const refresh = () => void portalSignInStatus().then(status => alive && setPortalStatus(status));
+        const onPortalsChanged = () => {
+            if (alive) {
+                setPortals(schoolPortals());
+            }
+            refresh();
+        };
         refresh();
         window.addEventListener('focus', refresh);
+        window.addEventListener(PORTALS_CHANGED_EVENT, onPortalsChanged);
         return () => {
             alive = false;
             window.removeEventListener('focus', refresh);
+            window.removeEventListener(PORTALS_CHANGED_EVENT, onPortalsChanged);
         };
     }, []);
     // The scheduler: while the app is open, check each minute whether a scheduled
@@ -300,7 +313,7 @@ export function TodayView() {
     }
     const greeting = now.getHours() < 12 ? 'morning' : now.getHours() < 18 ? 'afternoon' : 'evening';
     const dateLabel = now.toLocaleDateString(undefined, { day: 'numeric', month: 'short', weekday: 'long' });
-    return (_jsx("main", { className: "h-full min-h-0 overflow-y-auto bg-(--ui-editor-surface-background)", children: _jsxs("div", { className: "mx-auto flex w-full max-w-[1180px] flex-col px-5 pb-7 pt-6 sm:px-7", children: [_jsxs("header", { children: [_jsxs("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)", children: ["Today \u00B7 ", dateLabel] }), _jsxs("h1", { className: "mt-2 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl", children: ["Good ", greeting, ", ", graph.student?.name?.trim() || 'there'] }), _jsxs("p", { className: "mt-2 text-sm text-(--ui-text-secondary)", children: [formatDuration(free), " free today \u00B7 ", needsYou, " item", needsYou === 1 ? '' : 's', " need you \u00B7 ", overdue.length, ' ', "overdue"] })] }), _jsxs("section", { className: "mt-6 rounded-xl border-2 border-(--theme-primary) bg-[color-mix(in_srgb,var(--theme-primary)_7%,var(--ui-bg-elevated))] p-5 shadow-[0_0_28px_color-mix(in_srgb,var(--theme-primary)_9%,transparent)]", children: [_jsxs("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-center", children: [_jsx("span", { className: "grid size-11 shrink-0 place-items-center rounded-xl bg-(--theme-primary)/15 text-(--theme-primary)", children: _jsx(Codicon, { name: "target", size: "1.2rem" }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.11em] text-(--theme-primary)", children: "Start here" }), _jsx("h2", { className: "mt-1 text-lg font-semibold tracking-[-0.015em]", children: nextAction?.object.title ?? 'You are clear for the moment' }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: nextAction?.reason ?? 'No urgent deadline is competing for your attention.' })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 self-start sm:self-auto", children: [_jsxs(Button, { onClick: startSchoolSync, size: "lg", variant: "outline", children: [_jsx(Codicon, { name: "sync" }), "Sync school"] }), nextAction && (_jsxs(Button, { onClick: startNextAction, size: "lg", children: [_jsx(Codicon, { name: "play" }), "Start"] }))] })] }), _jsxs("div", { className: "mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-(--theme-primary)/20 pt-3.5 text-xs", children: [_jsx("span", { className: "flex flex-wrap items-center gap-2.5", children: SCHOOL_PORTALS.map(portal => {
+    return (_jsx("main", { className: "h-full min-h-0 overflow-y-auto bg-(--ui-editor-surface-background)", children: _jsxs("div", { className: "mx-auto flex w-full max-w-[1180px] flex-col px-5 pb-7 pt-6 sm:px-7", children: [_jsxs("header", { children: [_jsxs("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)", children: ["Today \u00B7 ", dateLabel] }), _jsxs("h1", { className: "mt-2 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl", children: ["Good ", greeting, ", ", graph.student?.name?.trim() || 'there'] }), _jsxs("p", { className: "mt-2 text-sm text-(--ui-text-secondary)", children: [formatDuration(free), " free today \u00B7 ", needsYou, " item", needsYou === 1 ? '' : 's', " need you \u00B7 ", overdue.length, ' ', "overdue"] })] }), _jsxs("section", { className: "mt-6 rounded-xl border-2 border-(--theme-primary) bg-[color-mix(in_srgb,var(--theme-primary)_7%,var(--ui-bg-elevated))] p-5 shadow-[0_0_28px_color-mix(in_srgb,var(--theme-primary)_9%,transparent)]", children: [_jsxs("div", { className: "flex flex-col gap-5 sm:flex-row sm:items-center", children: [_jsx("span", { className: "grid size-11 shrink-0 place-items-center rounded-xl bg-(--theme-primary)/15 text-(--theme-primary)", children: _jsx(Codicon, { name: "target", size: "1.2rem" }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.11em] text-(--theme-primary)", children: "Start here" }), _jsx("h2", { className: "mt-1 text-lg font-semibold tracking-[-0.015em]", children: nextAction?.object.title ?? 'You are clear for the moment' }), _jsx("p", { className: "mt-1 text-xs text-(--ui-text-secondary)", children: nextAction?.reason ?? 'No urgent deadline is competing for your attention.' })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 self-start sm:self-auto", children: [_jsxs(Button, { onClick: startSchoolSync, size: "lg", variant: "outline", children: [_jsx(Codicon, { name: "sync" }), "Sync school"] }), nextAction && (_jsxs(Button, { onClick: startNextAction, size: "lg", children: [_jsx(Codicon, { name: "play" }), "Start"] }))] })] }), _jsxs("div", { className: "mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-(--theme-primary)/20 pt-3.5 text-xs", children: [_jsx("span", { className: "flex flex-wrap items-center gap-2.5", children: portals.map(portal => {
                                         const signedIn = portalStatus[portal.origin] === true;
                                         const known = portal.origin in portalStatus;
                                         return (_jsxs("span", { className: "flex items-center gap-1.5 text-(--ui-text-secondary)", children: [_jsx("span", { className: cn('size-1.5 rounded-full', signedIn ? 'bg-emerald-500' : known ? 'bg-amber-500' : 'bg-(--ui-text-quaternary)') }), portal.name, _jsx("span", { className: "text-(--ui-text-tertiary)", children: signedIn ? 'signed in' : known ? 'needs login' : '—' })] }, portal.id));

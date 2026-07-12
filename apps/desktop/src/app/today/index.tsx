@@ -15,6 +15,7 @@ import {
   recentChanges,
   scoreNextAction
 } from '@/lib/academic-graph'
+import { ensurePortalsMirrored, PORTALS_CHANGED_EVENT } from '@/lib/school-portals'
 import { cn } from '@/lib/utils'
 import { setComposerDraft } from '@/store/composer'
 
@@ -26,7 +27,7 @@ import {
   portalSignInStatus,
   readLastNudge,
   saveCadence,
-  SCHOOL_PORTALS,
+  schoolPortals,
   type SyncCadence,
   writeLastNudge
 } from './school-sync-schedule'
@@ -391,19 +392,33 @@ export function TodayView() {
   }
 
   const [cadence, setCadence] = useState<SyncCadence>(() => loadCadence())
+  const [portals, setPortals] = useState(() => schoolPortals())
   const [portalStatus, setPortalStatus] = useState<Record<string, boolean>>({})
 
   // Refresh the signed-in status when Today mounts/refocuses — the student may
-  // have logged into a portal in the browser panel since last time.
+  // have logged into a portal in the browser panel since last time — and re-read
+  // the portal list when it's edited in Settings → Connections. Mount also
+  // re-mirrors the list to .nemesis/portals.json so the agent always finds it.
   useEffect(() => {
     let alive = true
+    ensurePortalsMirrored()
     const refresh = () => void portalSignInStatus().then(status => alive && setPortalStatus(status))
+    const onPortalsChanged = () => {
+      if (alive) {
+        setPortals(schoolPortals())
+      }
+
+      refresh()
+    }
+
     refresh()
     window.addEventListener('focus', refresh)
+    window.addEventListener(PORTALS_CHANGED_EVENT, onPortalsChanged)
 
     return () => {
       alive = false
       window.removeEventListener('focus', refresh)
+      window.removeEventListener(PORTALS_CHANGED_EVENT, onPortalsChanged)
     }
   }, [])
 
@@ -537,7 +552,7 @@ export function TodayView() {
               the sweep on a schedule. */}
           <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-(--theme-primary)/20 pt-3.5 text-xs">
             <span className="flex flex-wrap items-center gap-2.5">
-              {SCHOOL_PORTALS.map(portal => {
+              {portals.map(portal => {
                 const signedIn = portalStatus[portal.origin] === true
                 const known = portal.origin in portalStatus
 

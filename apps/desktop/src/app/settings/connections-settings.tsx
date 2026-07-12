@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Input } from '@/components/ui/input'
+import { loadSchoolPortals, normalizePortalUrl, setSchoolLms } from '@/lib/school-portals'
 import { openBrowserRail } from '@/store/browser-rail'
 
 interface Portal {
@@ -18,16 +19,11 @@ interface Portal {
   origin: string
 }
 
-// Curated first-run set. UTHSC is the owner's school; the rest are the common
-// student accounts. "Custom" (below) covers any other portal by URL.
+// Curated first-run set of COMMON student accounts. The student's own LMS is
+// not in this list — every school's address is different, so it lives in the
+// editable "Your school" card above (see school-portals.ts). "Custom" (below)
+// covers any other portal by URL.
 const PORTALS: Portal[] = [
-  {
-    hint: 'Courses, announcements, assignments',
-    id: 'blackboard',
-    name: 'Blackboard (UTHSC)',
-    origin: 'https://blackboard.uthsc.edu',
-    url: 'https://blackboard.uthsc.edu/'
-  },
   {
     hint: 'School email',
     id: 'outlook',
@@ -97,6 +93,11 @@ function originOf(url: string): string {
 export function ConnectionsSettings({ onClose }: { onClose?: () => void }) {
   const [status, setStatus] = useState<Record<string, boolean>>({})
   const [customUrl, setCustomUrl] = useState('')
+  // The student's own LMS (Blackboard/Canvas/Brightspace/…) — editable, persisted,
+  // and mirrored to the agent so "sync my school" goes to THEIR school.
+  const [lms, setLms] = useState(() => loadSchoolPortals().find(portal => portal.kind === 'lms') ?? null)
+  const [editingLms, setEditingLms] = useState(false)
+  const [lmsDraft, setLmsDraft] = useState('')
   const api = window.hermesDesktop?.schoolView
 
   const refresh = () => {
@@ -104,7 +105,23 @@ export function ConnectionsSettings({ onClose }: { onClose?: () => void }) {
       return
     }
 
-    void api.connectionStatus(PORTALS.map(p => p.origin)).then(setStatus)
+    // Read the LMS from the store (not the `lms` state) so a just-saved URL is
+    // checked immediately instead of waiting for the next window refocus.
+    const savedLms = loadSchoolPortals().find(portal => portal.kind === 'lms')
+    const origins = [...(savedLms ? [savedLms.origin] : []), ...PORTALS.map(p => p.origin)]
+
+    void api.connectionStatus(origins).then(setStatus)
+  }
+
+  const saveLms = () => {
+    if (!normalizePortalUrl(lmsDraft)) {
+      return
+    }
+
+    const next = setSchoolLms(lmsDraft).find(portal => portal.kind === 'lms') ?? null
+    setLms(next)
+    setEditingLms(false)
+    refresh()
   }
 
   useEffect(() => {
@@ -154,6 +171,72 @@ export function ConnectionsSettings({ onClose }: { onClose?: () => void }) {
             school. Then the agent works inside that signed-in session for you. Your passwords are never shown to or
             stored by the agent.
           </p>
+        </div>
+
+        {/* The student's own school LMS — the one connection whose address is
+            different at every school, so it's editable rather than curated. */}
+        <div className="flex flex-col gap-2 rounded-xl border border-(--theme-primary)/25 bg-(--ui-bg-card) px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-foreground">
+                  {lms ? `${lms.name} — your school` : 'Your school portal'}
+                </span>
+                {lms && status[lms.origin] && (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-(--theme-primary)/15 px-1.5 py-0.5 text-[0.6rem] font-semibold text-(--theme-primary)">
+                    <Codicon name="check" size="0.6rem" />
+                    Connected
+                  </span>
+                )}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {lms ? lms.origin.replace(/^https?:\/\//, '') : 'Courses, announcements, assignments'}
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                setLmsDraft(lms?.url ?? '')
+                setEditingLms(current => !current)
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {editingLms ? 'Cancel' : 'Change school'}
+            </Button>
+            {lms &&
+              (status[lms.origin] ? (
+                <Button onClick={() => disconnect(lms.origin)} size="sm" variant="ghost">
+                  Sign out
+                </Button>
+              ) : (
+                <Button onClick={() => connect(lms.url)} size="sm" variant="secondary">
+                  Connect
+                </Button>
+              ))}
+          </div>
+          {editingLms && (
+            <div className="flex items-center gap-2 border-t border-(--ui-stroke-quaternary) pt-2">
+              <Input
+                autoFocus
+                className="flex-1"
+                onChange={event => setLmsDraft(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    saveLms()
+                  }
+
+                  if (event.key === 'Escape') {
+                    setEditingLms(false)
+                  }
+                }}
+                placeholder="your school's course site, e.g. blackboard.myschool.edu or canvas.myschool.edu"
+                value={lmsDraft}
+              />
+              <Button disabled={!normalizePortalUrl(lmsDraft)} onClick={saveLms} size="sm" variant="secondary">
+                Save
+              </Button>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-2">
