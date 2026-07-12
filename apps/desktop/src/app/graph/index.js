@@ -106,12 +106,25 @@ function readGraphPalette(mode) {
         node: resolveCssColor('var(--ui-text-secondary)', dark ? '#c8c8c8' : '#3f3f43')
     };
 }
-function graphNodeColor(node, palette) {
+// Node color as a CONNECTIVITY HEATMAP: an unconnected note is a quiet gray that recedes;
+// the more a note links to others, the brighter it glows in the theme accent, so hubs pop
+// and orphans fade. `maxDegree` scales the ramp to this graph's busiest node. (Combined with
+// the size ramp on nodeVal = 1 + degree, well-connected notes read as big and hot.)
+function graphNodeColor(node, palette, maxDegree) {
     const graphNode = node;
     if (graphNode.ghost) {
         return palette.ghost;
     }
-    return graphNode.degree >= 2 ? palette.accent : palette.node;
+    const degree = graphNode.degree ?? 0;
+    if (degree <= 0) {
+        // Unconnected → soft gray, nudged toward the background so it clearly recedes.
+        return mixRgb(palette.node, palette.background, 0.35);
+    }
+    // Connected: one link → a soft, dim accent (blended toward the background so it glows
+    // faintly rather than reading as black); the busiest hub → the full vivid accent.
+    const t = maxDegree > 1 ? Math.min(1, (degree - 1) / (maxDegree - 1)) : 1;
+    const faint = mixRgb(palette.accent, palette.background, 0.5);
+    return mixRgb(faint, palette.accent, t);
 }
 function parseRgbTriplet(color) {
     const match = color.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
@@ -134,11 +147,22 @@ function dimColor(color, background, ratio) {
     const [r, g, b] = fg.map((channel, index) => Math.round(channel * (1 - ratio) + bg[index] * ratio));
     return `rgb(${r}, ${g}, ${b})`;
 }
+// Linear blend between two normalized rgb(...) colors (ratio 0 → a, 1 → b). Same
+// runtime-color-parsing caveat as dimColor: falls back to `a` if either side isn't rgb().
+function mixRgb(a, b, ratio) {
+    const fa = parseRgbTriplet(a);
+    const fb = parseRgbTriplet(b);
+    if (!fa || !fb) {
+        return a;
+    }
+    const [r, g, bl] = fa.map((channel, index) => Math.round(channel * (1 - ratio) + fb[index] * ratio));
+    return `rgb(${r}, ${g}, ${bl})`;
+}
 // Layers the hover/select glow on top of the node's normal color: the active node and its
 // direct neighbors brighten to the theme accent, everything else fades toward the
 // background once a highlight is active. With no active node this is just graphNodeColor.
-function resolveNodeColor(node, palette, highlightNodes, active) {
-    const normal = graphNodeColor(node, palette);
+function resolveNodeColor(node, palette, highlightNodes, active, maxDegree) {
+    const normal = graphNodeColor(node, palette, maxDegree);
     if (!active) {
         return normal;
     }
@@ -205,6 +229,8 @@ export function GraphView() {
     const hoverNodeRef = useRef(null);
     const selectedNodeRef = useRef(null);
     const highlightNodesRef = useRef(new Set());
+    // Busiest node's degree for this graph load — scales the connectivity color ramp.
+    const maxDegreeRef = useRef(1);
     const highlightLinksRef = useRef(new Set());
     // Direct-neighbor adjacency, rebuilt once per graph load (see the main effect below).
     const neighborsByNodeRef = useRef(new Map());
@@ -310,6 +336,8 @@ export function GraphView() {
                 for (const display of ghostByLower.values()) {
                     nodes.push({ degree: 1, ghost: true, id: display });
                 }
+                // The busiest node scales the color ramp: its degree maps to the brightest accent.
+                maxDegreeRef.current = Math.max(1, ...nodes.map(graphNode => graphNode.degree));
                 // Direct-neighbor adjacency, built once for this graph load (not re-derived on
                 // every hover/select) — mirrors 3d-force-graph's own "highlight on hover"
                 // reference pattern, but keeps it in side-table Maps instead of mutating the
@@ -343,7 +371,7 @@ export function GraphView() {
                         : `<div style="font: 12px sans-serif; color:${paletteRef.current?.label ?? palette.label}">${graphNode.id}</div>`;
                 })
                     .nodeRelSize(controlsRef.current.nodeSize)
-                    .nodeColor((node) => resolveNodeColor(node, paletteRef.current ?? palette, highlightNodesRef.current, controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null))
+                    .nodeColor((node) => resolveNodeColor(node, paletteRef.current ?? palette, highlightNodesRef.current, controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null, maxDegreeRef.current))
                     .nodeVal((node) => 1 + node.degree)
                     .nodeOpacity(0.9)
                     .nodeThreeObject((node) => {

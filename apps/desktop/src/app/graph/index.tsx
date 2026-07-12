@@ -220,14 +220,30 @@ function readGraphPalette(mode: 'dark' | 'light'): GraphPalette {
   }
 }
 
-function graphNodeColor(node: object, palette: GraphPalette): string {
+// Node color as a CONNECTIVITY HEATMAP: an unconnected note is a quiet gray that recedes;
+// the more a note links to others, the brighter it glows in the theme accent, so hubs pop
+// and orphans fade. `maxDegree` scales the ramp to this graph's busiest node. (Combined with
+// the size ramp on nodeVal = 1 + degree, well-connected notes read as big and hot.)
+function graphNodeColor(node: object, palette: GraphPalette, maxDegree: number): string {
   const graphNode = node as GraphNode
 
   if (graphNode.ghost) {
     return palette.ghost
   }
 
-  return graphNode.degree >= 2 ? palette.accent : palette.node
+  const degree = graphNode.degree ?? 0
+
+  if (degree <= 0) {
+    // Unconnected → soft gray, nudged toward the background so it clearly recedes.
+    return mixRgb(palette.node, palette.background, 0.35)
+  }
+
+  // Connected: one link → a soft, dim accent (blended toward the background so it glows
+  // faintly rather than reading as black); the busiest hub → the full vivid accent.
+  const t = maxDegree > 1 ? Math.min(1, (degree - 1) / (maxDegree - 1)) : 1
+  const faint = mixRgb(palette.accent, palette.background, 0.5)
+
+  return mixRgb(faint, palette.accent, t)
 }
 
 function parseRgbTriplet(color: string): [number, number, number] | null {
@@ -258,11 +274,32 @@ function dimColor(color: string, background: string, ratio: number): string {
   return `rgb(${r}, ${g}, ${b})`
 }
 
+// Linear blend between two normalized rgb(...) colors (ratio 0 → a, 1 → b). Same
+// runtime-color-parsing caveat as dimColor: falls back to `a` if either side isn't rgb().
+function mixRgb(a: string, b: string, ratio: number): string {
+  const fa = parseRgbTriplet(a)
+  const fb = parseRgbTriplet(b)
+
+  if (!fa || !fb) {
+    return a
+  }
+
+  const [r, g, bl] = fa.map((channel, index) => Math.round(channel * (1 - ratio) + fb[index] * ratio))
+
+  return `rgb(${r}, ${g}, ${bl})`
+}
+
 // Layers the hover/select glow on top of the node's normal color: the active node and its
 // direct neighbors brighten to the theme accent, everything else fades toward the
 // background once a highlight is active. With no active node this is just graphNodeColor.
-function resolveNodeColor(node: GraphNode, palette: GraphPalette, highlightNodes: Set<GraphNode>, active: GraphNode | null): string {
-  const normal = graphNodeColor(node, palette)
+function resolveNodeColor(
+  node: GraphNode,
+  palette: GraphPalette,
+  highlightNodes: Set<GraphNode>,
+  active: GraphNode | null,
+  maxDegree: number
+): string {
+  const normal = graphNodeColor(node, palette, maxDegree)
 
   if (!active) {
     return normal
@@ -377,6 +414,8 @@ export function GraphView() {
   const hoverNodeRef = useRef<GraphNode | null>(null)
   const selectedNodeRef = useRef<GraphNode | null>(null)
   const highlightNodesRef = useRef<Set<GraphNode>>(new Set())
+  // Busiest node's degree for this graph load — scales the connectivity color ramp.
+  const maxDegreeRef = useRef(1)
   const highlightLinksRef = useRef<Set<GraphLink>>(new Set())
   // Direct-neighbor adjacency, rebuilt once per graph load (see the main effect below).
   const neighborsByNodeRef = useRef<Map<GraphNode, GraphNode[]>>(new Map())
@@ -506,6 +545,9 @@ export function GraphView() {
           nodes.push({ degree: 1, ghost: true, id: display })
         }
 
+        // The busiest node scales the color ramp: its degree maps to the brightest accent.
+        maxDegreeRef.current = Math.max(1, ...nodes.map(graphNode => graphNode.degree))
+
         // Direct-neighbor adjacency, built once for this graph load (not re-derived on
         // every hover/select) — mirrors 3d-force-graph's own "highlight on hover"
         // reference pattern, but keeps it in side-table Maps instead of mutating the
@@ -552,7 +594,8 @@ export function GraphView() {
               node as GraphNode,
               paletteRef.current ?? palette,
               highlightNodesRef.current,
-              controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null
+              controlsRef.current.neighborGlow ? hoverNodeRef.current ?? selectedNodeRef.current : null,
+              maxDegreeRef.current
             )
           )
           .nodeVal((node: object) => 1 + (node as GraphNode).degree)
