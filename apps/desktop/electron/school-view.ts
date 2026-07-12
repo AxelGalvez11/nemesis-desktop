@@ -36,6 +36,10 @@ interface TabState {
   view: WebContentsView
   url: string
   title: string
+  // Chat session this tab belongs to. Tabs are per-conversation: switching
+  // chats switches the visible tab set. 'global' = created before any chat
+  // claimed the browser (startup home tab); adopted by the first session.
+  sessionKey: string
 }
 
 interface PanelRect {
@@ -84,6 +88,14 @@ if (SCHOOL_VIEW_MODE === 'native') {
 const tabs = new Map<number, TabState>()
 const tabOrder: number[] = []
 let activeTabId: null | number = null
+let activeSessionKey = 'global'
+// Remembered active tab per session, so switching back to a chat restores the
+// tab that chat was looking at.
+const activeTabBySession = new Map<string, number>()
+
+function sessionTabIds(sessionKey = activeSessionKey): number[] {
+  return tabOrder.filter(id => tabs.get(id)?.sessionKey === sessionKey)
+}
 let hostWindow: BrowserWindow | null = null
 let panelRect: PanelRect | null = null
 let panelVisible = false
@@ -151,7 +163,8 @@ function serializeState() {
   return {
     activeId: activeTabId,
     mode: SCHOOL_VIEW_MODE,
-    tabs: tabOrder
+    sessionKey: activeSessionKey,
+    tabs: sessionTabIds()
       .map(id => tabs.get(id))
       .filter((tab): tab is TabState => Boolean(tab))
       .map(tab => ({ id: tab.id, title: tab.title, url: tab.url })),
@@ -169,7 +182,7 @@ function applyLayout() {
   }
 
   for (const tab of tabs.values()) {
-    const isActive = tab.id === activeTabId
+    const isActive = tab.id === activeTabId && tab.sessionKey === activeSessionKey
     const show = panelVisible && isActive && Boolean(panelRect)
     tab.view.setVisible(show)
 
@@ -211,7 +224,7 @@ function normalizeUrl(raw: string): null | string {
   return null
 }
 
-function createTab(rawUrl?: string): null | TabState {
+function createTab(rawUrl?: string, sessionKey = activeSessionKey): null | TabState {
   if (!hostWindow || hostWindow.isDestroyed()) {
     return null
   }
@@ -228,21 +241,27 @@ function createTab(rawUrl?: string): null | TabState {
   })
 
   const id = view.webContents.id
-  const tab: TabState = { id, title: '', url: '', view }
+  const tab: TabState = { id, sessionKey, title: '', url: '', view }
   tabs.set(id, tab)
   tabOrder.push(id)
 
   // window.open from any school page becomes a sibling tab. This doubles as
   // the agent's only tab-creation path (Target.createTarget is unsupported
-  // in Electron), so it must stay allow-by-default for http(s).
+  // in Electron), so it must stay allow-by-default for http(s). The child
+  // inherits the opener's session so a background chat's agent can't push
+  // tabs into whichever conversation the student happens to be viewing.
   view.webContents.setWindowOpenHandler(details => {
     const target = normalizeUrl(details.url) ?? 'about:blank'
-    const created = createTab(target)
+    const created = createTab(target, tab.sessionKey)
 
     if (created) {
-      activeTabId = created.id
-      applyLayout()
-      pushState()
+      activeTabBySession.set(created.sessionKey, created.id)
+
+      if (created.sessionKey === activeSessionKey) {
+        activeTabId = created.id
+        applyLayout()
+        pushState()
+      }
     }
 
     return { action: 'deny' }
@@ -302,16 +321,32 @@ function closeTab(id: number) {
     // Already gone.
   }
 
-  if (activeTabId === id) {
-    activeTabId = tabOrder[Math.min(orderIndex, tabOrder.length - 1)] ?? null
+  const remaining = sessionTabIds(tab.sessionKey)
+
+  if (activeTabBySession.get(tab.sessionKey) === id) {
+    const fallback = remaining[Math.min(orderIndex, remaining.length - 1)] ?? remaining.at(-1)
+
+    if (fallback != null) {
+      activeTabBySession.set(tab.sessionKey, fallback)
+    } else {
+      activeTabBySession.delete(tab.sessionKey)
+    }
   }
 
-  // Min-one-tab invariant: the panel always has something to show and the
-  // agent always has a school tab to window.open() from — never the app
-  // shell's file:// target.
-  if (tabOrder.length === 0) {
-    const fresh = createTab(START_URL)
+  if (activeTabId === id) {
+    activeTabId = activeTabBySession.get(tab.sessionKey) ?? null
+  }
+
+  // Min-one-tab invariant, per session: the CURRENT session's panel always has
+  // something to show and the agent always has a school tab to window.open()
+  // from — never the app shell's file:// target. Other sessions may go empty.
+  if (tab.sessionKey === activeSessionKey && remaining.length === 0) {
+    const fresh = createTab(START_URL, tab.sessionKey)
     activeTabId = fresh?.id ?? null
+
+    if (fresh) {
+      activeTabBySession.set(tab.sessionKey, fresh.id)
+    }
   }
 
   applyLayout()
@@ -349,6 +384,11 @@ export function installSchoolView(win: BrowserWindow) {
     if (tabOrder.length === 0 && hostWindow && !hostWindow.isDestroyed()) {
       const tab = createTab(START_URL)
       activeTabId = tab?.id ?? null
+
+      if (tab) {
+        activeTabBySession.set(tab.sessionKey, tab.id)
+      }
+
       pushState()
     }
   }
@@ -460,9 +500,50 @@ export function registerSchoolViewIpc() {
 
     if (tab) {
       activeTabId = tab.id
+      activeTabBySession.set(tab.sessionKey, tab.id)
       applyLayout()
       pushState()
     }
+
+    return serializeState()
+  })
+
+  // Chat switch: the renderer tells us which conversation owns the browser
+  // rail now. Tabs created before any chat claimed the browser ('global',
+  // e.g. the startup home tab) are adopted by the first real session.
+  ipcMain.handle('hermes:schoolView:setSession', (_event, rawKey) => {
+    const key = typeof rawKey === 'string' && rawKey.trim() ? rawKey.trim() : 'global'
+
+    if (key !== 'global') {
+      for (const tab of tabs.values()) {
+        if (tab.sessionKey === 'global') {
+          tab.sessionKey = key
+        }
+      }
+
+      const adoptedActive = activeTabBySession.get('global')
+
+      if (adoptedActive != null) {
+        activeTabBySession.delete('global')
+        activeTabBySession.set(key, adoptedActive)
+      }
+    }
+
+    activeSessionKey = key
+    activeTabId = activeTabBySession.get(key) ?? sessionTabIds(key)[0] ?? null
+
+    // The session the student is looking at keeps the min-one-tab invariant.
+    if (activeTabId == null && panelVisible) {
+      const fresh = createTab(START_URL, key)
+      activeTabId = fresh?.id ?? null
+
+      if (fresh) {
+        activeTabBySession.set(key, fresh.id)
+      }
+    }
+
+    applyLayout()
+    pushState()
 
     return serializeState()
   })
@@ -474,8 +555,11 @@ export function registerSchoolViewIpc() {
   })
 
   ipcMain.handle('hermes:schoolView:activate', (_event, id) => {
-    if (tabs.has(Number(id))) {
-      activeTabId = Number(id)
+    const tab = tabs.get(Number(id))
+
+    if (tab && tab.sessionKey === activeSessionKey) {
+      activeTabId = tab.id
+      activeTabBySession.set(tab.sessionKey, tab.id)
       applyLayout()
       pushState()
     }
@@ -550,6 +634,18 @@ export function registerSchoolViewIpc() {
     }
 
     panelVisible = Boolean(visible)
+
+    // Becoming visible in a session with no tabs (a chat that never browsed):
+    // apply the min-one-tab invariant lazily, right when the rail opens.
+    if (panelVisible && sessionTabIds().length === 0) {
+      const fresh = createTab(START_URL)
+      activeTabId = fresh?.id ?? null
+
+      if (fresh) {
+        activeTabBySession.set(fresh.sessionKey, fresh.id)
+      }
+    }
+
     applyLayout()
     pushState()
 

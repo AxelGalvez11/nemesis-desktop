@@ -123,6 +123,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     connectionStatus: origins => ipcRenderer.invoke('hermes:schoolView:connectionStatus', origins),
     disconnect: origin => ipcRenderer.invoke('hermes:schoolView:disconnect', origin),
     newTab: url => ipcRenderer.invoke('hermes:schoolView:newTab', url),
+    setSession: key => ipcRenderer.invoke('hermes:schoolView:setSession', key),
     closeTab: id => ipcRenderer.invoke('hermes:schoolView:closeTab', id),
     activate: id => ipcRenderer.invoke('hermes:schoolView:activate', id),
     navigate: url => ipcRenderer.invoke('hermes:schoolView:navigate', url),

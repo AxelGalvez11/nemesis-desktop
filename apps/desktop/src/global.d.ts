@@ -129,6 +129,7 @@ declare global {
           visible: boolean
         }>
         newTab: (url?: string) => Promise<HermesSchoolViewState>
+        setSession: (key: string) => Promise<HermesSchoolViewState>
         closeTab: (id: number) => Promise<HermesSchoolViewState>
         activate: (id: number) => Promise<HermesSchoolViewState>
         navigate: (url: string) => Promise<HermesSchoolViewState>

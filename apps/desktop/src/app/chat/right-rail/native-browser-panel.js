@@ -20,6 +20,7 @@ import { Codicon } from '@/components/ui/codicon';
 import { cn } from '@/lib/utils';
 import { $rightRailActiveTabId, PREVIEW_PANE_ID, RIGHT_RAIL_BROWSER_TAB_ID } from '@/store/layout';
 import { $paneOpen } from '@/store/panes';
+import { $activeSessionId } from '@/store/session';
 import { $zoomPercent } from '@/store/zoom';
 import { BrowserMirror } from './browser-mirror';
 // ResizeObserver only fires on SIZE changes; pure position shifts (another
@@ -101,6 +102,16 @@ function NativeBrowserPanel({ railVisible }) {
     const [state, setState] = useState(null);
     const [urlDraft, setUrlDraft] = useState(null);
     const zoomPercent = useStore($zoomPercent);
+    const activeSessionId = useStore($activeSessionId);
+    // Tabs are per-conversation: tell the main process which chat owns the
+    // browser whenever the student switches sessions, so the rail swaps to that
+    // chat's tabs (and a chat that never browsed starts clean).
+    useEffect(() => {
+        void api()
+            ?.setSession?.(activeSessionId ?? 'global')
+            .then(next => setState(next))
+            .catch(() => undefined);
+    }, [activeSessionId]);
     const placeholderRef = useRef(null);
     // Last rect actually SENT — drift is measured against it, so slow 1px-a-beat
     // creep still converges on a send instead of being skipped forever.
