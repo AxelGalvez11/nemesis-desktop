@@ -18,6 +18,37 @@ export const BILLING_URL = `${NEMESIS_ACCOUNT_SITE}/account/billing`;
 export const SIGNUP_URL = `${NEMESIS_ACCOUNT_SITE}/sign-up`;
 const SESSION_KEY = 'nemesis.account.v1';
 const BYPASS_KEY = 'nemesis.account.bypass';
+/** Owner escape hatch for local development only. Production beta builds always require an account. */
+export const ACCOUNT_BYPASS_ENABLED = import.meta.env.DEV;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const TRIAL_REMINDER_WINDOW_MS = 3 * DAY_MS;
+/** Trial timing derived from the subscription payload. It only controls copy;
+ *  fetchPlan remains the authorization boundary for desktop access. */
+export function getTrialTiming(account, now = Date.now()) {
+    const end = account.trialEnd || (account.planStatus === 'trialing' ? account.periodEnd : undefined);
+    const endTimestamp = end ? Date.parse(end) : Number.NaN;
+    if (!end || !Number.isFinite(endTimestamp)) {
+        return null;
+    }
+    const millisecondsRemaining = endTimestamp - now;
+    const active = account.plan !== 'free' && account.planStatus === 'trialing' && millisecondsRemaining > 0;
+    const periodEndTimestamp = account.periodEnd ? Date.parse(account.periodEnd) : Number.NaN;
+    const endedAtTrialBoundary = account.plan === 'free' &&
+        millisecondsRemaining <= 0 &&
+        (account.planStatus === 'trialing' || !Number.isFinite(periodEndTimestamp) || periodEndTimestamp <= endTimestamp);
+    if (!active && !endedAtTrialBoundary) {
+        return null;
+    }
+    return {
+        daysRemaining: active ? Math.ceil(millisecondsRemaining / DAY_MS) : 0,
+        end,
+        expired: endedAtTrialBoundary,
+        inFinalThreeDays: active && millisecondsRemaining <= TRIAL_REMINDER_WINDOW_MS
+    };
+}
+export function trialCountdownLabel(daysRemaining) {
+    return `Trial ends in ${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'}`;
+}
 export const $account = atom({ plan: 'free', status: 'loading' });
 export const $accountDialogOpen = atom(false);
 function loadSession() {
@@ -46,6 +77,14 @@ function saveSession(session) {
         // best-effort persistence
     }
 }
+class AuthRequestError extends Error {
+    status;
+    constructor(message, status) {
+        super(message);
+        this.name = 'AuthRequestError';
+        this.status = status;
+    }
+}
 async function tokenRequest(body, grant) {
     const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=${grant}`, {
         body: JSON.stringify(body),
@@ -55,7 +94,7 @@ async function tokenRequest(body, grant) {
     const data = (await response.json().catch(() => ({})));
     if (!response.ok || !data.access_token) {
         const reason = data.error_description || data.msg || data.error || `sign-in failed (${response.status})`;
-        throw new Error(reason);
+        throw new AuthRequestError(reason, response.status);
     }
     return {
         accessToken: data.access_token,
@@ -69,20 +108,34 @@ async function tokenRequest(body, grant) {
 const ACTIVE_STATUSES = new Set(['active', 'trialing', 'past_due']);
 async function fetchPlan(session) {
     try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/subscriptions?select=plan,status,current_period_end&order=updated_at.desc&limit=1`, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` } });
+        const baseQuery = '&stripe_livemode=eq.true&order=updated_at.desc&limit=1';
+        const request = (select) => fetch(`${SUPABASE_URL}/rest/v1/subscriptions?select=${select}${baseQuery}`, {
+            headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` }
+        });
+        let response = await request('plan,status,current_period_end,stripe_livemode,trial_end');
+        // Older deployments do not have trial_end yet. Keep those installs usable
+        // while preferring Stripe's explicit trial boundary whenever it is present.
+        if (response.status === 400) {
+            response = await request('plan,status,current_period_end,stripe_livemode');
+        }
         if (!response.ok) {
             return { plan: 'free' };
         }
         const rows = (await response.json());
         const sub = rows[0];
-        if (sub?.plan && sub.status && ACTIVE_STATUSES.has(sub.status)) {
-            return { periodEnd: sub.current_period_end, plan: sub.plan, planStatus: sub.status };
+        const periodEnd = sub?.current_period_end ? Date.parse(sub.current_period_end) : Number.NaN;
+        const trialEnd = sub?.trial_end || (sub?.status === 'trialing' ? sub.current_period_end : undefined);
+        const accessEnd = sub?.status === 'trialing' && trialEnd ? Date.parse(trialEnd) : periodEnd;
+        const withinPaidPeriod = Number.isFinite(accessEnd) && accessEnd > Date.now();
+        if (sub?.plan && sub.status && ACTIVE_STATUSES.has(sub.status) && withinPaidPeriod) {
+            return { periodEnd: sub.current_period_end, plan: sub.plan, planStatus: sub.status, trialEnd };
         }
-        return { plan: 'free', planStatus: sub?.status };
+        return { periodEnd: sub?.current_period_end, plan: 'free', planStatus: sub?.status, trialEnd };
     }
     catch {
-        // Offline or unreachable: don't lock the student out of a paid tier they had;
-        // default to free-tier behavior for this session.
+        // The beta deliberately fails closed while offline. A future offline mode
+        // must use a server-signed entitlement token; renderer localStorage is not
+        // an authorization boundary.
         return { plan: 'free' };
     }
 }
@@ -92,26 +145,58 @@ async function refreshIfNeeded(session) {
         return session;
     }
     const refreshed = await tokenRequest({ refresh_token: session.refreshToken }, 'refresh_token');
-    const merged = { ...refreshed, email: refreshed.email || session.email, userId: refreshed.userId || session.userId };
+    const merged = {
+        ...refreshed,
+        email: refreshed.email || session.email,
+        trialEnd: session.trialEnd,
+        userId: refreshed.userId || session.userId
+    };
     saveSession(merged);
     return merged;
 }
 async function applySession(session) {
     const entitlement = await fetchPlan(session);
+    const trialEnd = entitlement.planStatus === 'trialing'
+        ? entitlement.trialEnd || entitlement.periodEnd
+        : entitlement.plan === 'free'
+            ? entitlement.trialEnd || session.trialEnd
+            : undefined;
+    if (trialEnd !== session.trialEnd) {
+        saveSession({ ...session, trialEnd });
+    }
     $account.set({
         email: session.email,
         periodEnd: entitlement.periodEnd,
         plan: entitlement.plan,
         planStatus: entitlement.planStatus,
         status: 'signed-in',
+        trialEnd,
+        userId: session.userId
+    });
+}
+function applyUnavailableSession(session, previous) {
+    const trialEnd = previous?.trialEnd || (previous?.planStatus === 'trialing' ? previous.periodEnd : undefined) || session.trialEnd;
+    if (trialEnd !== session.trialEnd) {
+        saveSession({ ...session, trialEnd });
+    }
+    $account.set({
+        email: session.email,
+        periodEnd: previous?.periodEnd,
+        plan: 'free',
+        planStatus: previous?.planStatus,
+        status: 'signed-in',
+        trialEnd,
         userId: session.userId
     });
 }
 export async function initAccount() {
     try {
-        if (window.localStorage.getItem(BYPASS_KEY) === '1') {
+        if (ACCOUNT_BYPASS_ENABLED && window.localStorage.getItem(BYPASS_KEY) === '1') {
             $account.set({ bypass: true, plan: 'free', status: 'signed-in' });
             return;
+        }
+        if (!ACCOUNT_BYPASS_ENABLED) {
+            window.localStorage.removeItem(BYPASS_KEY);
         }
     }
     catch {
@@ -126,8 +211,15 @@ export async function initAccount() {
         const session = await refreshIfNeeded(stored);
         await applySession(session);
     }
-    catch {
-        // Refresh failed (revoked/expired) → ask the student to sign in again.
+    catch (error) {
+        const credentialsRejected = error instanceof AuthRequestError && [400, 401, 403, 422].includes(error.status);
+        // Keep a session available for retry through network failures, timeouts,
+        // rate limits, and temporary 5xx responses. Paid access still fails closed
+        // until the live entitlement can be verified again.
+        if (!credentialsRejected) {
+            applyUnavailableSession(stored);
+            return;
+        }
         saveSession(null);
         $account.set({ plan: 'free', status: 'signed-out' });
     }
@@ -163,6 +255,9 @@ export async function signOut() {
 }
 /** Temporary owner escape hatch: use the app without an account (dev/offline). */
 export function bypassAccount() {
+    if (!ACCOUNT_BYPASS_ENABLED) {
+        return;
+    }
     try {
         window.localStorage.setItem(BYPASS_KEY, '1');
     }
@@ -175,6 +270,15 @@ export async function refreshEntitlement() {
     const stored = loadSession();
     if (!stored) {
         return;
+    }
+    const current = $account.get();
+    const currentEntitlementEnd = current.planStatus === 'trialing' && current.trialEnd ? current.trialEnd : current.periodEnd;
+    const currentPeriodEnd = currentEntitlementEnd ? Date.parse(currentEntitlementEnd) : Number.NaN;
+    // Expiry is enforced synchronously before any network request. If the
+    // device is offline at the boundary, access fails closed instead of leaving
+    // a stale paid renderer state alive indefinitely.
+    if (Number.isFinite(currentPeriodEnd) && currentPeriodEnd <= Date.now()) {
+        applyUnavailableSession(stored, current);
     }
     try {
         const session = await refreshIfNeeded(stored);
@@ -197,6 +301,33 @@ function loadDeviceKey() {
     catch {
         return null;
     }
+}
+/** One-shot completion through the metered proxy (device-key auth, non-streaming).
+ *  'deepseek-chat' resolves server-side to the fast non-thinking tier — right for
+ *  small frequent calls like the recorder's live copilot. Throws on failure. */
+export async function llmComplete(messages, opts = {}) {
+    const key = $deviceKey.get() ?? (await mintDeviceKey());
+    const response = await fetch(`${LLM_PROXY_URL}/v1/chat/completions`, {
+        body: JSON.stringify({
+            max_tokens: opts.maxTokens ?? 320,
+            messages,
+            model: 'deepseek-chat',
+            stream: false,
+            temperature: 0.2
+        }),
+        headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json'
+        },
+        method: 'POST'
+    });
+    const data = (await response.json().catch(() => ({})));
+    if (!response.ok) {
+        const detail = typeof data.error === 'string' ? data.error : data.error?.message;
+        throw new Error(detail || `model call failed (${response.status})`);
+    }
+    return data.choices?.[0]?.message?.content ?? '';
 }
 export async function mintDeviceKey() {
     const stored = loadSession();
@@ -226,6 +357,7 @@ export async function mintDeviceKey() {
     catch {
         // best-effort
     }
+    $deviceKey.set(data.key);
     $deviceKey.set(data.key);
     return data.key;
 }
@@ -265,6 +397,15 @@ export async function fetchUsage() {
 export function planLabel(plan) {
     if (!plan || plan === 'free') {
         return 'Free';
+    }
+    const namedPlans = {
+        plus: 'Student',
+        pro: 'Agent Pro',
+        max: 'Max'
+    };
+    const normalized = plan.toLowerCase();
+    if (namedPlans[normalized]) {
+        return namedPlans[normalized];
     }
     return plan
         .split(/[_-]/)

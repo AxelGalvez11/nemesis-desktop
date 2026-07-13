@@ -4,6 +4,7 @@
 import { atom } from 'nanostores';
 import { createFolder, saveNote } from '../library/vault';
 import { deriveRecordingTitle } from './autoname';
+import { copilotNotesMarkdown } from './live-copilot';
 import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon';
 export const RECORDINGS_DIR = '~/Documents/Nemesis Recordings';
 export const LECTURE_FOLDER = 'Lectures';
@@ -237,7 +238,7 @@ async function persist() {
             ? typedTitle
             : (deriveRecordingTitle(transcript, at) ?? (typedTitle || lectureNoteTitle(at)));
         await createFolder(LECTURE_FOLDER);
-        await saveNote(noteTitle, `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n\n## Transcript\n\n${transcript || '_no speech captured_'}\n`, LECTURE_FOLDER);
+        await saveNote(noteTitle, `# ${noteTitle}\n\n*Recorded ${at.toLocaleString(undefined, { day: 'numeric', hour: 'numeric', minute: '2-digit', month: 'short' })} — my notes + on-device transcript (a draft; review before relying on it).*\n*Audio: ${fileName} (Nemesis Recordings)*\n\n## My notes\n\n${typedNotes || '_none taken_'}\n${copilotNotesMarkdown()}\n## Transcript\n\n${transcript || '_no speech captured_'}\n`, LECTURE_FOLDER);
         $recentLectureNote.set(noteTitle);
         $liveStatus.set('');
     }

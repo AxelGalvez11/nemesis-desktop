@@ -13,7 +13,19 @@ import { setComposerDraft } from '@/store/composer'
 import { NoteEditor } from '../library/note-editor'
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes'
 
+import { $account } from '@/nemesis-account'
+
 import { enhanceLectureNote, RecordingArchive } from './archive'
+import {
+  $copilotAsk,
+  $copilotEnabled,
+  $copilotError,
+  $copilotNotes,
+  $copilotState,
+  copilotAccess,
+  forceCopilotRefresh,
+  setCopilotEnabled
+} from './live-copilot'
 import {
   $elapsedMs,
   $liveCaptionsEnabled,
@@ -112,6 +124,13 @@ export function RecorderView() {
   const elapsedMs = useStore($elapsedMs)
   const liveTranscript = useStore($liveTranscript)
   const liveInsights = useStore($liveInsights)
+  const copilotEnabled = useStore($copilotEnabled)
+  const copilotNotes = useStore($copilotNotes)
+  const copilotAsk = useStore($copilotAsk)
+  const copilotState = useStore($copilotState)
+  const copilotError = useStore($copilotError)
+  const account = useStore($account)
+  const copilotCadence = copilotAccess(account)
   const liveStatus = useStore($liveStatus)
   const title = useStore($recordingTitle)
   const notepadDraft = useStore($notepadDraft)
@@ -247,6 +266,69 @@ export function RecorderView() {
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div className="shrink-0 rounded-2xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
+                  <div className="mb-2.5 flex items-center justify-between gap-3">
+                    <span className="inline-flex items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
+                      <IconSparkles size={12} />
+                      Live copilot
+                    </span>
+                    {copilotCadence && (
+                      <button
+                        className="text-[0.65rem] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                        onClick={() => setCopilotEnabled(!copilotEnabled)}
+                        type="button"
+                      >
+                        {copilotEnabled ? 'Turn off' : 'Turn on'}
+                      </button>
+                    )}
+                  </div>
+                  {!copilotCadence ? (
+                    <p className="text-xs text-muted-foreground">
+                      Live AI notes and question suggestions are part of the Agent Pro and Max plans.
+                    </p>
+                  ) : !copilotEnabled ? (
+                    <p className="text-xs text-muted-foreground">
+                      Off. When on, Nemesis writes running notes from the lecture (fixing mis-heard words from
+                      context) and suggests what to ask next. Uses your plan's daily AI budget.
+                    </p>
+                  ) : (
+                    <>
+                      {copilotNotes.length ? (
+                        <ul className="max-h-44 space-y-1.5 overflow-y-auto pr-1 text-[0.8125rem] leading-5 text-foreground/90">
+                          {copilotNotes.slice(-8).map((note, index) => (
+                            <li className="animate-in fade-in-0 flex gap-2 duration-200" key={`${index}-${note.slice(0, 16)}`}>
+                              <span className="text-(--theme-primary)">•</span>
+                              <span>{note}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Notes appear here as the lecture develops.</p>
+                      )}
+                      {copilotAsk.length > 0 && (
+                        <div className="mt-2.5 border-t border-(--ui-stroke-tertiary) pt-2.5">
+                          <span className="text-[0.6rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
+                            Ask next
+                          </span>
+                          <ul className="mt-1 space-y-1 text-[0.8125rem] leading-5 text-foreground/85">
+                            {copilotAsk.map(question => (
+                              <li key={question.slice(0, 24)}>“{question}”</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <div className="mt-2.5 flex items-center justify-between gap-3">
+                        <span className={cn('min-w-0 truncate text-[0.65rem]', copilotState === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
+                          {copilotState === 'thinking' ? 'Thinking…' : copilotState === 'error' ? (copilotError ?? 'Copilot error') : ''}
+                        </span>
+                        <Button disabled={copilotState === 'thinking'} onClick={forceCopilotRefresh} size="sm" variant="outline">
+                          Suggest now
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {liveInsights.length > 0 && (
