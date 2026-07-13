@@ -1,8 +1,8 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 // Account gate + account dialog (student build). Signed out → a full-screen native
 // sign-in card; account creation happens in the browser. Signed in → nothing rendered
-// here except the Account dialog, opened from the statusbar chip: plan badge, renewal
-// date, browser-based subscription management,
+// here except a once-per-session final-three-days trial reminder and the Account
+// dialog, opened from the statusbar chip: plan badge, renewal/trial date, browser-based subscription management,
 // Refresh plan, Sign out.
 import { useStore } from '@nanostores/react';
 import { useEffect, useState } from 'react';
@@ -12,22 +12,42 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Loader } from '@/components/ui/loader';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
-import { $account, $accountDialogOpen, $deviceKey, BILLING_URL, bypassAccount, initAccount, mintDeviceKey, planLabel, refreshEntitlement, signIn, signOut, SIGNUP_URL } from '@/nemesis-account';
+import { $account, $accountDialogOpen, ACCOUNT_BYPASS_ENABLED, BILLING_URL, bypassAccount, getTrialTiming, initAccount, planLabel, refreshEntitlement, signIn, signOut, SIGNUP_URL, trialCountdownLabel } from '@/nemesis-account';
 export const NemesisAccountGate = () => {
     const account = useStore($account);
     const dialogOpen = useStore($accountDialogOpen);
-    const deviceKey = useStore($deviceKey);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
-    const [keyBusy, setKeyBusy] = useState(false);
-    const [keyError, setKeyError] = useState(null);
+    const [refreshingPlan, setRefreshingPlan] = useState(false);
+    const [dismissedTrialEnd, setDismissedTrialEnd] = useState(null);
+    const trialTiming = getTrialTiming(account);
+    const trialEndDate = trialTiming
+        ? new Date(trialTiming.end).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+        : null;
     useEffect(() => {
-        if (NEMESIS_STUDENT_BUILD) {
-            void initAccount();
+        if (!NEMESIS_STUDENT_BUILD) {
+            return;
         }
+        void initAccount();
+        const revalidate = () => void refreshEntitlement();
+        const interval = window.setInterval(revalidate, 5 * 60 * 1000);
+        window.addEventListener('focus', revalidate);
+        return () => {
+            window.clearInterval(interval);
+            window.removeEventListener('focus', revalidate);
+        };
     }, []);
+    useEffect(() => {
+        const entitlementEnd = account.planStatus === 'trialing' && account.trialEnd ? account.trialEnd : account.periodEnd;
+        if (!NEMESIS_STUDENT_BUILD || account.bypass || account.status !== 'signed-in' || !entitlementEnd) {
+            return;
+        }
+        const millisecondsUntilExpiry = Date.parse(entitlementEnd) - Date.now();
+        const timeout = window.setTimeout(() => void refreshEntitlement(), Math.max(0, Math.min(millisecondsUntilExpiry + 250, 2_147_483_647)));
+        return () => window.clearTimeout(timeout);
+    }, [account.bypass, account.periodEnd, account.planStatus, account.status, account.trialEnd]);
     if (!NEMESIS_STUDENT_BUILD) {
         return null;
     }
@@ -56,23 +76,34 @@ export const NemesisAccountGate = () => {
                                     if (event.key === 'Enter') {
                                         void submit();
                                     }
-                                }, placeholder: "Password", type: "password", value: password }), error && _jsx("p", { className: "text-xs text-destructive", children: error }), _jsxs(Button, { className: "mt-1 w-full", disabled: busy || !email.trim() || !password, onClick: () => void submit(), children: [busy ? _jsx(Loader, { className: "size-4", type: "fourier-flow" }) : null, busy ? 'Signing in…' : 'Sign in'] })] }), _jsxs("div", { className: "flex items-center justify-between pt-4 text-xs", children: [_jsx("button", { className: "text-muted-foreground underline-offset-2 hover:text-foreground hover:underline", onClick: () => void window.hermesDesktop?.openExternal?.(SIGNUP_URL), type: "button", children: "Create an account" }), _jsx("button", { className: "text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline", onClick: bypassAccount, title: "Temporary: use the app without an account (owner/dev escape hatch)", type: "button", children: "Skip for now" })] })] }) }));
+                                }, placeholder: "Password", type: "password", value: password }), error && _jsx("p", { className: "text-xs text-destructive", children: error }), _jsxs(Button, { className: "mt-1 w-full", disabled: busy || !email.trim() || !password, onClick: () => void submit(), children: [busy ? _jsx(Loader, { className: "size-4", type: "fourier-flow" }) : null, busy ? 'Signing in…' : 'Sign in'] })] }), _jsxs("div", { className: "flex items-center justify-between pt-4 text-xs", children: [_jsx("button", { className: "text-muted-foreground underline-offset-2 hover:text-foreground hover:underline", onClick: () => void window.hermesDesktop?.openExternal?.(SIGNUP_URL), type: "button", children: "Create an account" }), ACCOUNT_BYPASS_ENABLED && (_jsx("button", { className: "text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline", onClick: bypassAccount, title: "Local development only", type: "button", children: "Skip for local development" }))] })] }) }));
     }
-    // Signed in → only the account dialog (opened from the statusbar chip).
-    return (_jsx(Dialog, { onOpenChange: open => $accountDialogOpen.set(open), open: dialogOpen, children: _jsxs(DialogContent, { className: "sm:max-w-sm", children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: "Account" }), _jsx(DialogDescription, { children: account.bypass ? 'Offline mode — not signed in.' : account.email })] }), !account.bypass && (_jsxs("div", { className: "flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2.5", children: [_jsxs("div", { children: [_jsxs("div", { className: "text-sm font-medium", children: [planLabel(account.plan), " plan"] }), _jsx("div", { className: "text-xs text-muted-foreground", children: account.plan === 'free'
-                                        ? 'Upgrade for the full study engine.'
-                                        : account.periodEnd
-                                            ? `Renews ${new Date(account.periodEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
-                                            : account.planStatus || 'Active' })] }), _jsx("span", { className: "rounded-full bg-(--theme-primary)/15 px-2.5 py-1 text-[11px] font-semibold text-(--theme-primary)", children: planLabel(account.plan) })] })), !account.bypass && (_jsx("p", { className: "text-xs text-muted-foreground", children: "Subscription changes open securely in your browser." })), !account.bypass && (_jsxs("div", { className: "rounded-lg border border-border bg-muted/30 px-3 py-2.5", children: [_jsxs("div", { className: "flex items-center justify-between gap-2", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: "Metered model key" }), _jsx("div", { className: "text-xs text-muted-foreground", children: deviceKey
-                                                ? `Active · ends …${deviceKey.slice(-4)} — usage counts against your plan`
-                                                : 'Bills model usage to your plan instead of a local key.' })] }), _jsxs("div", { className: "flex shrink-0 gap-1.5", children: [deviceKey && (_jsx(Button, { onClick: () => void navigator.clipboard?.writeText(deviceKey).catch(() => { }), size: "sm", variant: "ghost", children: "Copy" })), _jsx(Button, { disabled: keyBusy, onClick: () => {
-                                                setKeyBusy(true);
-                                                setKeyError(null);
-                                                void mintDeviceKey()
-                                                    .catch(err => setKeyError(err instanceof Error ? err.message : 'failed'))
-                                                    .finally(() => setKeyBusy(false));
-                                            }, size: "sm", variant: "outline", children: keyBusy ? 'Minting…' : deviceKey ? 'New key' : 'Mint key' })] })] }), keyError && _jsx("p", { className: "pt-1.5 text-xs text-destructive", children: keyError })] })), _jsxs(DialogFooter, { className: "flex-wrap gap-2 sm:justify-between", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: () => void window.hermesDesktop?.openExternal?.(BILLING_URL), size: "sm", variant: "secondary", children: account.plan === 'free' ? 'Choose a plan' : 'Manage subscription' }), !account.bypass && (_jsx(Button, { onClick: () => void refreshEntitlement(), size: "sm", variant: "outline", children: "Refresh plan" }))] }), _jsx(Button, { onClick: () => {
-                                $accountDialogOpen.set(false);
-                                void signOut();
-                            }, size: "sm", variant: "ghost", children: "Sign out" })] })] }) }));
+    if (!account.bypass && account.plan === 'free') {
+        const trialExpired = trialTiming?.expired === true;
+        return (_jsx("div", { className: "fixed inset-0 z-[1300] flex items-center justify-center bg-background/95 p-4 backdrop-blur-md", children: _jsxs("div", { className: "w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg", children: [_jsxs("div", { className: "flex flex-col items-center gap-3 text-center", children: [_jsx(BrandMark, { className: "size-12" }), _jsxs("div", { children: [_jsx("h2", { className: "text-lg font-semibold tracking-tight", children: trialExpired ? 'Your Nemesis trial has ended' : 'Choose a Nemesis plan' }), _jsx("p", { className: "pt-1 text-xs leading-relaxed text-muted-foreground", children: trialExpired
+                                            ? `Trial access ended${trialEndDate ? ` on ${trialEndDate}` : ''}. Choose a plan to restore the desktop study engine.`
+                                            : 'Your account is ready. A paid beta plan unlocks the desktop study engine.' })] })] }), _jsxs("div", { className: "mt-5 flex flex-col gap-2.5", children: [_jsx(Button, { onClick: () => void window.hermesDesktop?.openExternal?.(BILLING_URL), children: trialExpired ? 'Upgrade Nemesis' : 'View beta plans' }), _jsx(Button, { disabled: refreshingPlan, onClick: () => {
+                                    setRefreshingPlan(true);
+                                    void refreshEntitlement().finally(() => setRefreshingPlan(false));
+                                }, variant: "secondary", children: refreshingPlan ? 'Checking plan…' : 'I already subscribed — refresh' }), _jsx(Button, { onClick: () => void signOut(), variant: "ghost", children: "Sign out" })] })] }) }));
+    }
+    // Signed in → a single dismissible reminder in the final three days, plus
+    // the account dialog opened from the statusbar chip. Revalidation does not
+    // recreate the reminder because dismissal is scoped to this mounted session.
+    return (_jsxs(_Fragment, { children: [trialTiming?.inFinalThreeDays && dismissedTrialEnd !== trialTiming.end && !dialogOpen && (_jsxs("div", { "aria-live": "polite", className: "fixed top-4 right-4 z-[1200] w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-(--theme-primary)/40 bg-card p-4 shadow-lg", role: "status", children: [_jsx("div", { className: "text-sm font-semibold", children: "Nemesis trial ending soon" }), _jsxs("p", { className: "pt-1 text-xs leading-relaxed text-muted-foreground", children: [trialCountdownLabel(trialTiming.daysRemaining), " \u00B7 ", trialEndDate, ". Manage your subscription to keep Nemesis available without interruption."] }), _jsxs("div", { className: "mt-3 flex items-center gap-2", children: [_jsx(Button, { onClick: () => void window.hermesDesktop?.openExternal?.(BILLING_URL), size: "sm", children: "Manage trial" }), _jsx(Button, { onClick: () => setDismissedTrialEnd(trialTiming.end), size: "sm", variant: "ghost", children: "Dismiss" })] })] })), _jsx(Dialog, { onOpenChange: open => $accountDialogOpen.set(open), open: dialogOpen, children: _jsxs(DialogContent, { className: "sm:max-w-sm", children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: "Account" }), _jsx(DialogDescription, { children: account.bypass ? 'Offline mode — not signed in.' : account.email })] }), !account.bypass && (_jsxs("div", { className: "flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2.5", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: trialTiming && !trialTiming.expired
+                                                ? `${planLabel(account.plan)} trial`
+                                                : `${planLabel(account.plan)} plan` }), _jsx("div", { className: "text-xs text-muted-foreground", children: trialTiming && !trialTiming.expired
+                                                ? `${trialCountdownLabel(trialTiming.daysRemaining)} · ${trialEndDate}`
+                                                : account.plan === 'free'
+                                                    ? 'Upgrade for the full study engine.'
+                                                    : account.periodEnd
+                                                        ? `Renews ${new Date(account.periodEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+                                                        : account.planStatus || 'Active' })] }), _jsx("span", { className: "rounded-full bg-(--theme-primary)/15 px-2.5 py-1 text-[11px] font-semibold text-(--theme-primary)", children: planLabel(account.plan) })] })), !account.bypass && (_jsx("p", { className: "text-xs text-muted-foreground", children: "Subscription changes open securely in your browser." })), !account.bypass && (_jsxs("div", { className: "rounded-lg border border-border bg-muted/30 px-3 py-2.5", children: [_jsx("div", { className: "text-sm font-medium", children: "What your plan includes" }), _jsx("p", { className: "pt-1 text-xs leading-relaxed text-muted-foreground", children: "Nemesis intelligence is built in \u2014 AI answers, web research, and study tools are covered by your plan. No separate AI account, key, or bill." })] })), _jsxs(DialogFooter, { className: "flex-wrap gap-2 sm:justify-between", children: [_jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { onClick: () => void window.hermesDesktop?.openExternal?.(BILLING_URL), size: "sm", variant: "secondary", children: account.plan === 'free' ? 'Choose a plan' : 'Manage subscription' }), !account.bypass && (_jsx(Button, { onClick: () => void refreshEntitlement(), size: "sm", variant: "outline", children: "Refresh plan" })), _jsx(Button, { onClick: () => {
+                                                const subject = encodeURIComponent('Nemesis bug report');
+                                                const body = encodeURIComponent('What happened:\n\n\nWhat I expected:\n\n\nWhat I was doing right before:\n\n\n(Nemesis beta on macOS)');
+                                                void window.hermesDesktop?.openExternal?.(`mailto:support@enternemesis.com?subject=${subject}&body=${body}`);
+                                            }, size: "sm", variant: "outline", children: "Report a bug" })] }), _jsx(Button, { onClick: () => {
+                                        $accountDialogOpen.set(false);
+                                        void signOut();
+                                    }, size: "sm", variant: "ghost", children: "Sign out" })] })] }) })] }));
 };

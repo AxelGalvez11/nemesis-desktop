@@ -7,6 +7,7 @@ import { BootFailureOverlay } from '@/components/boot-failure-overlay'
 import { DesktopInstallOverlay } from '@/components/desktop-install-overlay'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NemesisAccountGate } from '@/components/nemesis-account-gate'
+import { NemesisConsentGate } from '@/components/nemesis-consent-gate'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { Pane, PaneMain } from '@/components/pane-shell'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
@@ -1091,6 +1092,7 @@ export function DesktopController() {
       <RemoteDisplayBanner />
       {!isSecondaryWindow() && <DesktopInstallOverlay />}
       {!isSecondaryWindow() && <NemesisAccountGate />}
+      {!isSecondaryWindow() && <NemesisConsentGate />}
       {!isSecondaryWindow() && (
         <DesktopOnboardingOverlay
           enabled={gatewayState === 'open'}

@@ -10,10 +10,11 @@ export const STUDENT_HIDDEN_NAV: ReadonlySet<string> = new Set(['skills', 'messa
 /** ⌘K palette entries hidden for students. */
 export const STUDENT_HIDDEN_PALETTE: ReadonlySet<string> = new Set(['nav-terminal', 'nav-skills', 'nav-messaging'])
 
-/** Settings sections students see. Everything else (model/providers/keys/gateway/workspace/
- *  voice/memory/advanced) is provisioned by Nemesis — students pay, we run the model. */
+/** Settings sections students see. During the beta, students connect their own model
+ *  provider, so model/provider controls stay visible and hosted-usage claims stay hidden. */
+// 2026-07-13: 'providers' and 'config:model' removed — student plans include Nemesis
+// intelligence via the metered proxy, so provider/key/model settings are not student-facing.
 export const STUDENT_SETTINGS_KEEP: ReadonlySet<string> = new Set([
-  'usage',
   'connections',
   'config:appearance',
   'config:chat',
