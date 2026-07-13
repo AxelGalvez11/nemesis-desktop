@@ -50,6 +50,25 @@ interface TimeRange {
   start: number
 }
 
+type AttentionBucket = 'later' | 'overdue' | 'today' | 'tomorrow' | 'undated'
+
+interface AttentionItem {
+  bucket: AttentionBucket
+  object: AcademicObject
+}
+
+type TimelineEntry =
+  | {
+      item: PlanItem
+      kind: 'item'
+      sortMinutes: number
+    }
+  | {
+      kind: 'window'
+      range: TimeRange
+      sortMinutes: number
+    }
+
 interface PlanItem {
   durationMinutes?: number
   id: string
@@ -211,7 +230,7 @@ function todayPlan(graph: AcademicGraph, calendarEvents: CalendarEvent[], todayK
   )
 }
 
-function freeMinutes(plan: PlanItem[]): number {
+function occupiedRanges(plan: PlanItem[]): TimeRange[] {
   const ranges = plan
     .filter(item => Number.isFinite(item.sortMinutes) && item.durationMinutes)
     .map(item => ({
@@ -233,9 +252,45 @@ function freeMinutes(plan: PlanItem[]): number {
     }
   }
 
-  const busy = merged.reduce((total, range) => total + range.end - range.start, 0)
+  return merged
+}
+
+function freeWindows(ranges: TimeRange[], minimumMinutes = 30): TimeRange[] {
+  const windows: TimeRange[] = []
+  let cursor = DAY_START_MINUTES
+
+  for (const range of ranges) {
+    if (range.start - cursor >= minimumMinutes) {
+      windows.push({ end: range.start, start: cursor })
+    }
+
+    cursor = Math.max(cursor, range.end)
+  }
+
+  if (DAY_END_MINUTES - cursor >= minimumMinutes) {
+    windows.push({ end: DAY_END_MINUTES, start: cursor })
+  }
+
+  return windows
+}
+
+function freeMinutes(plan: PlanItem[]): number {
+  const busy = occupiedRanges(plan).reduce((total, range) => total + range.end - range.start, 0)
 
   return Math.max(0, DAY_END_MINUTES - DAY_START_MINUTES - busy)
+}
+
+function formatMinuteOfDay(minutes: number): string {
+  return new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
+function runwayPercent(minutes: number): number {
+  const clamped = Math.min(DAY_END_MINUTES, Math.max(DAY_START_MINUTES, minutes))
+
+  return ((clamped - DAY_START_MINUTES) / (DAY_END_MINUTES - DAY_START_MINUTES)) * 100
 }
 
 function formatDuration(minutes: number): string {
@@ -297,16 +352,113 @@ function overdueObjects(graph: AcademicGraph, todayKey: string): AcademicObject[
   )
 }
 
-function Card({ children, icon, title }: { children: React.ReactNode; icon: string; title: string }) {
-  return (
-    <section className="min-w-0 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-4 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-      <div className="mb-3 flex items-center gap-2">
-        <Codicon className="text-(--ui-text-tertiary)" name={icon} size="0.9rem" />
-        <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ui-text-secondary)">{title}</h2>
-      </div>
-      {children}
-    </section>
-  )
+function attentionBucket(object: AcademicObject, todayKey: string): AttentionBucket {
+  const key = object.date?.slice(0, 10)
+
+  if (!key) {
+    return 'undated'
+  }
+
+  if (key < todayKey) {
+    return 'overdue'
+  }
+
+  if (key === todayKey) {
+    return 'today'
+  }
+
+  const today = parseDateKey(todayKey)
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+
+  if (key === dateKey(tomorrow)) {
+    return 'tomorrow'
+  }
+
+  return 'later'
+}
+
+function needsAttention(
+  overdue: AcademicObject[],
+  upcoming: AcademicObject[],
+  inbox: AcademicObject[],
+  todayKey: string
+): AttentionItem[] {
+  const objects = new Map<string, AcademicObject>()
+
+  for (const object of [...overdue, ...upcoming, ...inbox]) {
+    if (!objects.has(object.id)) {
+      objects.set(object.id, object)
+    }
+  }
+
+  const bucketRank: Record<AttentionBucket, number> = {
+    overdue: 0,
+    today: 1,
+    tomorrow: 2,
+    later: 3,
+    undated: 4
+  }
+
+  return [...objects.values()]
+    .map(object => ({ bucket: attentionBucket(object, todayKey), object }))
+    .sort(
+      (a, b) =>
+        bucketRank[a.bucket] - bucketRank[b.bucket] ||
+        (a.object.date ?? '').localeCompare(b.object.date ?? '') ||
+        a.object.title.localeCompare(b.object.title)
+    )
+}
+
+function latestAcademicTimestamp(graph: AcademicGraph): null | number {
+  const timestamps = [
+    ...graph.changes.map(change => change.ts),
+    ...graph.objects.flatMap(object => [object.updatedAt, object.source?.ts, object.createdAt])
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map(value => Date.parse(value))
+    .filter(value => Number.isFinite(value))
+
+  return timestamps.length ? Math.max(...timestamps) : null
+}
+
+function formatFreshness(timestamp: null | number, now: number): string {
+  if (timestamp == null) {
+    return 'Sync time unavailable'
+  }
+
+  const elapsedMinutes = Math.max(0, Math.floor((now - timestamp) / 60_000))
+
+  if (elapsedMinutes < 1) {
+    return 'Synced just now'
+  }
+
+  if (elapsedMinutes < 60) {
+    return `Synced ${elapsedMinutes}m ago`
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60)
+
+  if (elapsedHours < 24) {
+    return `Synced ${elapsedHours}h ago`
+  }
+
+  return `Synced ${Math.floor(elapsedHours / 24)}d ago`
+}
+
+function nextActionLabel(object: AcademicObject): string {
+  if (object.type === 'exam') {
+    return 'Start exam review'
+  }
+
+  if (object.type === 'assignment') {
+    return 'Start assignment review'
+  }
+
+  if (object.type === 'application') {
+    return 'Prepare with Nemesis'
+  }
+
+  return 'Start review'
 }
 
 function EmptyCopy({ children }: { children: React.ReactNode }) {
@@ -362,11 +514,36 @@ export function TodayView() {
   const overdue = useMemo(() => overdueObjects(graph, todayKey), [graph, todayKey])
   const nextAction = useMemo(() => scoreNextAction(graph), [graph])
   const free = useMemo(() => freeMinutes(plan), [plan])
-
-  const needsYou = useMemo(
-    () => new Set([...upcoming, ...overdue, ...inbox].map(object => object.id)).size,
-    [inbox, overdue, upcoming]
+  const attentionItems = useMemo(
+    () => needsAttention(overdue, upcoming, inbox, todayKey),
+    [inbox, overdue, todayKey, upcoming]
   )
+  const timedPlan = useMemo(() => plan.filter(item => Number.isFinite(item.sortMinutes)), [plan])
+  const flexiblePlan = useMemo(() => plan.filter(item => !Number.isFinite(item.sortMinutes)), [plan])
+  const busyRanges = useMemo(() => occupiedRanges(plan), [plan])
+  const openWindows = useMemo(() => freeWindows(busyRanges), [busyRanges])
+  const timeline = useMemo<TimelineEntry[]>(
+    () =>
+      [
+        ...timedPlan.map(item => ({ item, kind: 'item' as const, sortMinutes: item.sortMinutes })),
+        ...openWindows.map(range => ({ kind: 'window' as const, range, sortMinutes: range.start }))
+      ].sort((a, b) => a.sortMinutes - b.sortMinutes),
+    [openWindows, timedPlan]
+  )
+  const orderedChanges = useMemo(
+    () =>
+      [...changes].sort(
+        (a, b) =>
+          Number(changeIsTrusted(b)) - Number(changeIsTrusted(a)) ||
+          (Date.parse(b.ts) || 0) - (Date.parse(a.ts) || 0)
+      ),
+    [changes]
+  )
+  const latestSyncAt = useMemo(() => latestAcademicTimestamp(graph), [graph])
+  const freshness = formatFreshness(latestSyncAt, now.getTime())
+  const needsYou = attentionItems.length
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+  const currentTimeIsOnRunway = currentMinutes >= DAY_START_MINUTES && currentMinutes <= DAY_END_MINUTES
 
   const startNextAction = () => {
     if (!nextAction) {
@@ -470,7 +647,7 @@ export function TodayView() {
     return (
       <main className="grid h-full min-h-0 place-items-center overflow-y-auto bg-(--ui-editor-surface-background) px-6">
         <div className="max-w-md text-center">
-          <span className="mx-auto grid size-12 place-items-center rounded-xl border border-(--theme-primary)/35 bg-(--theme-primary)/10 text-(--theme-primary)">
+          <span className="mx-auto grid size-12 place-items-center rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) text-(--ui-text-secondary)">
             <Codicon name="dashboard" size="1.35rem" />
           </span>
           <h1 className="mt-4 text-xl font-semibold tracking-[-0.02em]">Your semester will live here</h1>
@@ -503,202 +680,384 @@ export function TodayView() {
 
   return (
     <main className="h-full min-h-0 overflow-y-auto bg-(--ui-editor-surface-background)">
-      <div className="mx-auto flex w-full max-w-[1180px] flex-col px-5 pb-7 pt-6 sm:px-7">
-        <header>
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-(--theme-primary)">
-            Today · {dateLabel}
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[-0.035em] sm:text-4xl">
-            Good {greeting}, {graph.student?.name?.trim() || 'there'}
-          </h1>
-          <p className="mt-2 text-sm text-(--ui-text-secondary)">
-            {formatDuration(free)} free today · {needsYou} item{needsYou === 1 ? '' : 's'} need you · {overdue.length}{' '}
-            overdue
-          </p>
+      <div className="mx-auto flex w-full max-w-[1180px] flex-col px-5 pb-7 pt-5 sm:px-7">
+        <header className="flex flex-col gap-4 border-b border-(--ui-stroke-quaternary) pb-5 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-(--ui-text-tertiary)">
+              Today · {dateLabel}
+            </p>
+            <h1 className="mt-1.5 text-2xl font-semibold tracking-[-0.03em] sm:text-3xl">
+              Good {greeting}, {graph.student?.name?.trim() || 'there'}
+            </h1>
+            <p className="mt-1.5 text-xs text-(--ui-text-secondary)">
+              {formatDuration(free)} free · {needsYou} item{needsYou === 1 ? '' : 's'} need you · {overdue.length}{' '}
+              overdue
+            </p>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)">{freshness}</span>
+            <Button onClick={startSchoolSync} size="sm" variant="outline">
+              <Codicon name="sync" />
+              Sync school
+            </Button>
+          </div>
         </header>
 
-        <section className="mt-6 rounded-xl border-2 border-(--theme-primary) bg-[color-mix(in_srgb,var(--theme-primary)_7%,var(--ui-bg-elevated))] p-5 shadow-[0_0_28px_color-mix(in_srgb,var(--theme-primary)_9%,transparent)]">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-(--theme-primary)/15 text-(--theme-primary)">
-              <Codicon name="target" size="1.2rem" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.11em] text-(--theme-primary)">
-                Start here
-              </p>
-              <h2 className="mt-1 text-lg font-semibold tracking-[-0.015em]">
-                {nextAction?.object.title ?? 'You are clear for the moment'}
-              </h2>
-              <p className="mt-1 text-xs text-(--ui-text-secondary)">
-                {nextAction?.reason ?? 'No urgent deadline is competing for your attention.'}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
-              <Button onClick={startSchoolSync} size="lg" variant="outline">
-                <Codicon name="sync" />
-                Sync school
-              </Button>
-              {nextAction && (
-                <Button onClick={startNextAction} size="lg">
-                  <Codicon name="play" />
-                  Start
+        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.9fr)] lg:items-start">
+          <div className="min-w-0 space-y-4">
+            <section className="min-w-0 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) text-(--ui-text-secondary)">
+                  <Codicon name="target" size="1.05rem" />
+                </span>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
+                    Next action
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold tracking-[-0.015em]">
+                    {nextAction?.object.title ?? 'You are clear for the moment'}
+                  </h2>
+                  <p className="mt-1 text-xs leading-relaxed text-(--ui-text-secondary)">
+                    {nextAction?.reason ?? 'No urgent deadline is competing for your attention.'}
+                  </p>
+                </div>
+
+                {nextAction && (
+                  <Button className="shrink-0 self-start sm:self-auto" onClick={startNextAction} size="lg">
+                    <Codicon name="play" />
+                    {nextActionLabel(nextAction.object)}
+                  </Button>
+                )}
+              </div>
+            </section>
+
+            <section className="min-w-0 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated)">
+              <div className="flex items-center justify-between gap-4 border-b border-(--ui-stroke-quaternary) px-5 py-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Codicon className="text-(--ui-text-tertiary)" name="calendar" size="0.9rem" />
+                    <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ui-text-secondary)">
+                      Today
+                    </h2>
+                  </div>
+                  <p className="mt-1 text-[0.6875rem] text-(--ui-text-tertiary)">
+                    {timedPlan.length} timed · {flexiblePlan.length} flexible
+                  </p>
+                </div>
+
+                <Button onClick={() => navigate(CALENDAR_ROUTE)} size="sm" variant="ghost">
+                  Open calendar
+                  <Codicon name="arrow-right" />
                 </Button>
-              )}
-            </div>
-          </div>
-
-          {/* Sign-in status + auto-sync cadence — the student knows whether a
-              sync will work (portals signed in) before running it, and can put
-              the sweep on a schedule. */}
-          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-(--theme-primary)/20 pt-3.5 text-xs">
-            <span className="flex flex-wrap items-center gap-2.5">
-              {portals.map(portal => {
-                const signedIn = portalStatus[portal.origin] === true
-                const known = portal.origin in portalStatus
-
-                return (
-                  <span className="flex items-center gap-1.5 text-(--ui-text-secondary)" key={portal.id}>
-                    <span
-                      className={cn(
-                        'size-1.5 rounded-full',
-                        signedIn ? 'bg-emerald-500' : known ? 'bg-amber-500' : 'bg-(--ui-text-quaternary)'
-                      )}
-                    />
-                    {portal.name}
-                    <span className="text-(--ui-text-tertiary)">
-                      {signedIn ? 'signed in' : known ? 'needs login' : '—'}
-                    </span>
-                  </span>
-                )
-              })}
-            </span>
-            <label className="ml-auto flex items-center gap-2 text-(--ui-text-tertiary)">
-              Auto-sync
-              <select
-                className="rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2 py-1 text-xs text-(--ui-text-primary) outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/40"
-                onChange={event => changeCadence(event.target.value as SyncCadence)}
-                value={cadence}
-              >
-                {(['off', 'daily', 'twice'] as const).map(option => (
-                  <option key={option} value={option}>
-                    {SYNC_CADENCE_LABEL[option]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </section>
-
-        <div className="mt-5 grid [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))] gap-4">
-          <Card icon="history" title="Changed since yesterday">
-            {changes.length === 0 ? (
-              <EmptyCopy>Nothing new.</EmptyCopy>
-            ) : (
-              <div className="divide-y divide-(--ui-stroke-tertiary)">
-                {changes.slice(0, 4).map(change => (
-                  <div className="flex gap-2.5 py-2.5 first:pt-0 last:pb-0" key={`${change.objectId}:${change.ts}`}>
-                    <span
-                      className={
-                        changeIsTrusted(change)
-                          ? 'mt-1.5 size-1.5 shrink-0 rounded-full bg-(--theme-primary)'
-                          : 'mt-1.5 size-1.5 shrink-0 rounded-full bg-(--ui-text-quaternary)'
-                      }
-                    />
-                    <div className="min-w-0">
-                      <p className="text-xs leading-relaxed text-(--ui-text-primary)">{change.summary}</p>
-                      {changeIsTrusted(change) && (
-                        <p className="mt-1 text-[0.625rem] font-medium uppercase tracking-[0.07em] text-(--theme-primary)">
-                          {change.kind === 'date-changed' ? 'Date changed' : 'Instructor stated'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
               </div>
-            )}
-          </Card>
 
-          <Card icon="calendar" title="Due soon">
-            {upcoming.length === 0 ? (
-              <EmptyCopy>Nothing due — you're clear.</EmptyCopy>
-            ) : (
-              <div className="divide-y divide-(--ui-stroke-tertiary)">
-                {upcoming.slice(0, 5).map(object => (
-                  <button
-                    className="group flex w-full items-start justify-between gap-3 py-2.5 text-left first:pt-0 last:pb-0"
-                    key={object.id}
-                    onClick={() => navigate(CALENDAR_ROUTE)}
-                    type="button"
+              <div className="px-5 py-4">
+                <div>
+                  <div className="flex items-center justify-between text-[0.625rem] font-medium tabular-nums text-(--ui-text-quaternary)">
+                    <span>8 AM</span>
+                    <span>Day runway</span>
+                    <span>10 PM</span>
+                  </div>
+
+                  <div
+                    aria-label="Day runway from 8 AM to 10 PM"
+                    className="relative mt-2 h-2.5 overflow-hidden rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary)"
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-medium group-hover:text-(--theme-primary)">
-                        {object.title}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[0.6875rem] text-(--ui-text-tertiary)">
-                        {courseTitle(graph, object.course) || object.type}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-[0.6875rem] font-medium tabular-nums text-(--ui-text-secondary)">
-                      {relativeDate(object.date, now)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </Card>
+                    {openWindows.map(range => (
+                      <span
+                        className="absolute inset-y-0 bg-(--ui-bg-elevated)"
+                        key={`runway-open:${range.start}:${range.end}`}
+                        style={{
+                          left: `${runwayPercent(range.start)}%`,
+                          width: `${runwayPercent(range.end) - runwayPercent(range.start)}%`
+                        }}
+                        title={`Open ${formatMinuteOfDay(range.start)}–${formatMinuteOfDay(range.end)}`}
+                      />
+                    ))}
 
-          <Card icon="checklist" title="Today's plan">
-            {plan.length === 0 ? (
-              <EmptyCopy>Your day is open. Add a study block when you know what deserves the time.</EmptyCopy>
-            ) : (
-              <div className="divide-y divide-(--ui-stroke-tertiary)">
-                {plan.slice(0, 5).map(item => (
-                  <div className="flex gap-3 py-2.5 first:pt-0 last:pb-0" key={item.id}>
-                    <span className="w-16 shrink-0 text-[0.6875rem] font-medium tabular-nums text-(--theme-primary)">
-                      {item.time ? formatTime(item.time) : 'Any time'}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-medium">{item.title}</p>
-                      <p className="mt-0.5 truncate text-[0.6875rem] capitalize text-(--ui-text-tertiary)">
-                        {[item.kind, item.subtitle].filter(Boolean).join(' · ')}
-                      </p>
+                    {busyRanges.map(range => (
+                      <span
+                        className="absolute inset-y-0 bg-(--ui-text-quaternary)"
+                        key={`runway-busy:${range.start}:${range.end}`}
+                        style={{
+                          left: `${runwayPercent(range.start)}%`,
+                          width: `${runwayPercent(range.end) - runwayPercent(range.start)}%`
+                        }}
+                        title={`Occupied ${formatMinuteOfDay(range.start)}–${formatMinuteOfDay(range.end)}`}
+                      />
+                    ))}
+
+                    {currentTimeIsOnRunway && (
+                      <span
+                        aria-label={`Current time ${formatMinuteOfDay(currentMinutes)}`}
+                        className="absolute -inset-y-px z-10 w-px bg-(--theme-primary)"
+                        style={{ left: `${runwayPercent(currentMinutes)}%` }}
+                        title={`Now · ${formatMinuteOfDay(currentMinutes)}`}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {timeline.length === 0 ? (
+                  <EmptyCopy>Your day is open. Add a study block when you know what deserves the time.</EmptyCopy>
+                ) : (
+                  <div className="relative ml-1 mt-5 border-l border-(--ui-stroke-tertiary)">
+                    {timeline.map(entry =>
+                      entry.kind === 'window' ? (
+                        <div
+                          className="relative grid grid-cols-[5rem_minmax(0,1fr)] gap-3 py-2.5 pl-4"
+                          key={`window:${entry.range.start}:${entry.range.end}`}
+                        >
+                          <span className="absolute -left-1 top-[1.05rem] size-2 rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated)" />
+                          <span className="text-[0.6875rem] font-medium tabular-nums text-(--ui-text-quaternary)">
+                            {formatMinuteOfDay(entry.range.start)}
+                          </span>
+                          <div className="min-w-0 rounded-lg border border-dashed border-(--ui-stroke-tertiary) px-3 py-2">
+                            <p className="text-xs font-medium text-(--ui-text-secondary)">
+                              Open for {formatDuration(entry.range.end - entry.range.start)}
+                            </p>
+                            <p className="mt-0.5 text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)">
+                              {formatMinuteOfDay(entry.range.start)}–{formatMinuteOfDay(entry.range.end)}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className="relative grid grid-cols-[5rem_minmax(0,1fr)] gap-3 py-2.5 pl-4"
+                          key={entry.item.id}
+                        >
+                          <span className="absolute -left-1 top-[1.05rem] size-2 rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-text-tertiary)" />
+                          <span className="text-[0.6875rem] font-medium tabular-nums text-(--ui-text-secondary)">
+                            {entry.item.time ? formatTime(entry.item.time) : formatMinuteOfDay(entry.item.sortMinutes)}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium">{entry.item.title}</p>
+                            <p className="mt-0.5 truncate text-[0.6875rem] capitalize text-(--ui-text-tertiary)">
+                              {[
+                                entry.item.kind,
+                                entry.item.subtitle,
+                                entry.item.durationMinutes ? formatDuration(entry.item.durationMinutes) : undefined
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+
+                {flexiblePlan.length > 0 && (
+                  <div className="mt-5 border-t border-(--ui-stroke-quaternary) pt-4">
+                    <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-(--ui-text-tertiary)">
+                      Flexible
+                    </h3>
+                    <div className="mt-2 divide-y divide-(--ui-stroke-quaternary)">
+                      {flexiblePlan.map(item => (
+                        <div className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0" key={item.id}>
+                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-(--ui-text-quaternary)" />
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium">{item.title}</p>
+                            <p className="mt-0.5 truncate text-[0.6875rem] capitalize text-(--ui-text-tertiary)">
+                              {[item.kind, item.subtitle].filter(Boolean).join(' · ')}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                ))}
+                )}
               </div>
-            )}
-          </Card>
+            </section>
+          </div>
 
-          <Card icon="mail" title="Inbox needs you">
-            {inbox.length === 0 ? (
-              <EmptyCopy>Nothing waiting for you.</EmptyCopy>
-            ) : (
-              <div>
+          <aside className="min-w-0 space-y-4">
+            <section className="min-w-0 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Codicon className="text-(--ui-text-tertiary)" name="warning" size="0.9rem" />
+                  <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ui-text-secondary)">
+                    Needs attention
+                  </h2>
+                </div>
+                <span className="text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)">
+                  {attentionItems.length}
+                </span>
+              </div>
+
+              {attentionItems.length === 0 ? (
+                <EmptyCopy>Nothing waiting for you.</EmptyCopy>
+              ) : (
                 <div className="divide-y divide-(--ui-stroke-tertiary)">
-                  {inbox.slice(0, 3).map(object => (
-                    <div className="py-2.5 first:pt-0 last:pb-0" key={object.id}>
-                      <p className="truncate text-xs font-medium">{object.title}</p>
-                      <p className="mt-0.5 truncate text-[0.6875rem] capitalize text-(--ui-text-tertiary)">
-                        {[object.type, courseTitle(graph, object.course)].filter(Boolean).join(' · ')}
-                      </p>
+                  {attentionItems.map(item => {
+                    const opensCalendar = DUE_TYPES.has(item.object.type) && Boolean(item.object.date)
+                    const content = (
+                      <>
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-medium">{item.object.title}</span>
+                          <span className="mt-0.5 block truncate text-[0.6875rem] capitalize text-(--ui-text-tertiary)">
+                            {[item.object.type, courseTitle(graph, item.object.course)].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        <span
+                          className={cn(
+                            'shrink-0 text-[0.6875rem] font-medium tabular-nums',
+                            item.bucket === 'overdue'
+                              ? 'text-(--theme-primary)'
+                              : 'text-(--ui-text-secondary)'
+                          )}
+                        >
+                          {item.bucket === 'undated' ? 'Message' : relativeDate(item.object.date, now)}
+                        </span>
+                      </>
+                    )
+
+                    return opensCalendar ? (
+                      <button
+                        className="group flex w-full items-start justify-between gap-3 py-2.5 text-left first:pt-0 last:pb-0 hover:text-(--ui-text-primary)"
+                        key={item.object.id}
+                        onClick={() => navigate(CALENDAR_ROUTE)}
+                        type="button"
+                      >
+                        {content}
+                      </button>
+                    ) : (
+                      <div
+                        className="flex items-start justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+                        key={item.object.id}
+                      >
+                        {content}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="min-w-0 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Codicon className="text-(--ui-text-tertiary)" name="history" size="0.9rem" />
+                  <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ui-text-secondary)">
+                    Since yesterday
+                  </h2>
+                </div>
+                <Button onClick={() => navigate(LEDGER_ROUTE)} size="sm" variant="ghost">
+                  Full history
+                </Button>
+              </div>
+
+              {orderedChanges.length === 0 ? (
+                <EmptyCopy>Nothing new.</EmptyCopy>
+              ) : (
+                <div className="divide-y divide-(--ui-stroke-tertiary)">
+                  {orderedChanges.slice(0, 3).map(change => (
+                    <div className="flex gap-2.5 py-2.5 first:pt-0 last:pb-0" key={`${change.objectId}:${change.ts}`}>
+                      <span
+                        className={cn(
+                          'mt-1.5 size-1.5 shrink-0 rounded-full',
+                          changeIsTrusted(change) ? 'bg-(--ui-text-secondary)' : 'bg-(--ui-text-quaternary)'
+                        )}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs leading-relaxed text-(--ui-text-primary)">{change.summary}</p>
+                        {changeIsTrusted(change) && (
+                          <p className="mt-1 text-[0.625rem] font-medium uppercase tracking-[0.07em] text-(--ui-text-tertiary)">
+                            {change.kind === 'date-changed' ? 'Date changed' : 'Instructor stated'}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
-                {inbox.length > 3 && (
-                  <p className="mt-3 text-[0.6875rem] text-(--ui-text-quaternary)">{inbox.length - 3} more filed</p>
-                )}
+              )}
+
+              {orderedChanges.length > 3 && (
+                <p className="mt-3 text-[0.6875rem] text-(--ui-text-quaternary)">
+                  {orderedChanges.length - 3} more in history
+                </p>
+              )}
+            </section>
+
+            <section className="min-w-0 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Codicon className="text-(--ui-text-tertiary)" name="plug" size="0.9rem" />
+                  <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-(--ui-text-secondary)">
+                    School connections
+                  </h2>
+                </div>
+                <Button
+                  onClick={() => navigate(`${SETTINGS_ROUTE}?tab=connections`)}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Manage
+                </Button>
               </div>
-            )}
-          </Card>
+
+              {portals.length === 0 ? (
+                <EmptyCopy>No school accounts connected.</EmptyCopy>
+              ) : (
+                <div className="divide-y divide-(--ui-stroke-quaternary)">
+                  {portals.map(portal => {
+                    const signedIn = portalStatus[portal.origin] === true
+                    const known = portal.origin in portalStatus
+
+                    return (
+                      <div className="flex items-center justify-between gap-3 py-2 first:pt-0" key={portal.id}>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={cn(
+                              'size-1.5 shrink-0 rounded-full',
+                              signedIn
+                                ? 'bg-emerald-500'
+                                : known
+                                  ? 'bg-amber-500'
+                                  : 'bg-(--ui-text-quaternary)'
+                            )}
+                          />
+                          <span className="truncate text-xs font-medium">{portal.name}</span>
+                        </span>
+                        <span className="shrink-0 text-[0.6875rem] text-(--ui-text-tertiary)">
+                          {signedIn ? 'Signed in' : known ? 'Needs login' : 'Checking'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <label className="mt-3 flex items-center justify-between gap-3 border-t border-(--ui-stroke-quaternary) pt-3 text-xs text-(--ui-text-secondary)">
+                Sync reminder
+                <select
+                  className="rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) px-2 py-1 text-xs text-(--ui-text-primary) outline-none focus-visible:ring-2 focus-visible:ring-(--ui-text-quaternary)"
+                  onChange={event => changeCadence(event.target.value as SyncCadence)}
+                  value={cadence}
+                >
+                  {(['off', 'daily', 'twice'] as const).map(option => (
+                    <option key={option} value={option}>
+                      {SYNC_CADENCE_LABEL[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </section>
+          </aside>
         </div>
 
         <button
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg border border-(--ui-stroke-tertiary) px-4 py-3 text-center text-[0.6875rem] text-(--ui-text-tertiary) transition-colors hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-secondary)"
+          className="mt-5 flex w-full items-center justify-center gap-2 px-4 py-2 text-center text-[0.6875rem] text-(--ui-text-quaternary) transition-colors hover:text-(--ui-text-secondary)"
           onClick={() => navigate(LEDGER_ROUTE)}
           type="button"
         >
-          <Codicon className="shrink-0 text-(--theme-primary)" name="shield" size="0.85rem" />
-          <span>Read your accounts this morning · sent nothing · submitted nothing.</span>
+          <Codicon className="shrink-0" name="shield" size="0.8rem" />
+          <span>
+            Nemesis read {portals.length} account{portals.length === 1 ? '' : 's'} today · sent nothing
+          </span>
         </button>
       </div>
     </main>
