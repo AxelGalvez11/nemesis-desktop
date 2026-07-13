@@ -18,7 +18,8 @@ export const SYNC_HOURS_TWICE = [8, 18] as const
 export const SYNC_HOURS_DAILY = [8] as const
 
 // The student's configured portals (LMS + school email) — per-student, editable
-// in Settings → Connections, defaulting to the owner's school on first run.
+// in Settings → Connections. Empty until the student connects their own; a fresh
+// install ships with no pre-set school (see DEFAULT_SCHOOL_PORTALS).
 export function schoolPortals(): SchoolPortal[] {
   return loadSchoolPortals()
 }

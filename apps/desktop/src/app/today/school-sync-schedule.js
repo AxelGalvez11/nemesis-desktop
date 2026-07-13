@@ -12,7 +12,8 @@ const LAST_NUDGE_KEY = 'nemesis.school.autosync.lastNudge.v1';
 export const SYNC_HOURS_TWICE = [8, 18];
 export const SYNC_HOURS_DAILY = [8];
 // The student's configured portals (LMS + school email) — per-student, editable
-// in Settings → Connections, defaulting to the owner's school on first run.
+// in Settings → Connections. Empty until the student connects their own; a fresh
+// install ships with no pre-set school (see DEFAULT_SCHOOL_PORTALS).
 export function schoolPortals() {
     return loadSchoolPortals();
 }

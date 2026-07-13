@@ -20,24 +20,14 @@ const PORTALS_FILE = '~/Documents/Nemesis Library/.nemesis/portals.json'
 
 export const PORTALS_CHANGED_EVENT = 'nemesis:school-portals-changed'
 
-// First-run defaults = the owner's own school, so existing installs behave
-// exactly as before until a student sets their own portal.
-export const DEFAULT_SCHOOL_PORTALS: SchoolPortal[] = [
-  {
-    id: 'lms',
-    kind: 'lms',
-    name: 'Blackboard',
-    origin: 'https://blackboard.uthsc.edu',
-    url: 'https://blackboard.uthsc.edu/'
-  },
-  {
-    id: 'email',
-    kind: 'email',
-    name: 'Outlook',
-    origin: 'https://outlook.cloud.microsoft',
-    url: 'https://outlook.cloud.microsoft/mail/'
-  }
-]
+// No pre-set school. Nemesis ships to many campuses, so a fresh install must NOT
+// inherit any one school's portal — otherwise a non-UTHSC student would have the
+// agent drive to the wrong Blackboard on day one. The student connects their own
+// LMS + school email in onboarding (Step 1) / Settings → Connections. Empty is the
+// safe default: every consumer (connections UI, school-sync) is null/empty-safe.
+// Existing installs keep their saved portals in localStorage, so only brand-new
+// installs see the blank slate.
+export const DEFAULT_SCHOOL_PORTALS: SchoolPortal[] = []
 
 /** Best-effort brand detection so the row reads "Canvas", not a bare URL. */
 export function lmsNameFor(url: string): string {
