@@ -8,6 +8,7 @@ import { DesktopInstallOverlay } from '@/components/desktop-install-overlay'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NemesisAccountGate } from '@/components/nemesis-account-gate'
 import { NemesisConsentGate } from '@/components/nemesis-consent-gate'
+import { NemesisUpdateBanner } from '@/components/nemesis-update-banner'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { Pane, PaneMain } from '@/components/pane-shell'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
@@ -1093,6 +1094,7 @@ export function DesktopController() {
       {!isSecondaryWindow() && <DesktopInstallOverlay />}
       {!isSecondaryWindow() && <NemesisAccountGate />}
       {!isSecondaryWindow() && <NemesisConsentGate />}
+      {!isSecondaryWindow() && <NemesisUpdateBanner />}
       {!isSecondaryWindow() && (
         <DesktopOnboardingOverlay
           enabled={gatewayState === 'open'}

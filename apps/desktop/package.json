@@ -2,9 +2,9 @@
   "name": "nemesis",
   "productName": "Nemesis",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.1.0-beta.2",
   "description": "Native desktop shell for the Nemesis school agent.",
-  "author": "Nous Research",
+  "author": "Nemesis",
   "type": "module",
   "main": "dist/electron-main.mjs",
   "engines": {
@@ -37,7 +37,7 @@
     "test:desktop:nsis": "node scripts/test-desktop.mjs nsis",
     "test:desktop:existing": "node scripts/test-desktop.mjs existing",
     "test:desktop:fresh": "node scripts/test-desktop.mjs fresh",
-    "test:desktop:platforms": "node --test electron/bootstrap-platform.test.ts electron/hardening.test.ts electron/backend-env.test.ts electron/backend-probes.test.ts electron/backend-ready.test.ts electron/bootstrap-runner.test.ts electron/connection-config.test.ts electron/dashboard-token.test.ts electron/gateway-ws-probe.test.ts electron/oauth-net-request.test.ts electron/desktop-uninstall.test.ts electron/session-windows.test.ts electron/link-title-window.test.ts electron/workspace-cwd.test.ts electron/fs-read-dir.test.ts electron/git-root.test.ts electron/git-worktree-ops.test.ts electron/windows-child-process.test.ts electron/update-remote.test.ts electron/update-count.test.ts electron/update-rebuild.test.ts electron/update-marker.test.ts electron/update-relaunch.test.ts electron/windows-user-env.test.ts electron/wsl-clipboard-image.test.ts electron/titlebar-overlay-width.test.ts electron/window-state.test.ts electron/zoom.test.ts electron/windows-hermes-resolution.test.ts electron/oauth-session-request.test.ts",
+    "test:desktop:platforms": "tsx --test electron/bootstrap-platform.test.ts electron/hardening.test.ts electron/backend-env.test.ts electron/backend-probes.test.ts electron/backend-ready.test.ts electron/bootstrap-runner.test.ts electron/connection-config.test.ts electron/dashboard-token.test.ts electron/gateway-ws-probe.test.ts electron/oauth-net-request.test.ts electron/desktop-uninstall.test.ts electron/session-windows.test.ts electron/link-title-window.test.ts electron/workspace-cwd.test.ts electron/fs-read-dir.test.ts electron/git-root.test.ts electron/git-worktree-ops.test.ts electron/windows-child-process.test.ts electron/update-remote.test.ts electron/update-count.test.ts electron/update-rebuild.test.ts electron/update-marker.test.ts electron/update-relaunch.test.ts electron/windows-user-env.test.ts electron/wsl-clipboard-image.test.ts electron/titlebar-overlay-width.test.ts electron/window-state.test.ts electron/zoom.test.ts electron/windows-hermes-resolution.test.ts electron/oauth-session-request.test.ts electron/nemesis-identity.test.ts",
     "typecheck": "tsc -p . --noEmit",
     "lint": "eslint src/ electron/",
     "lint:fix": "eslint src/ electron/ --fix",
@@ -161,14 +161,14 @@
   },
   "build": {
     "electronVersion": "40.10.2",
-    "appId": "app.nemesis.desktop",
+    "appId": "com.enternemesis.desktop",
     "productName": "Nemesis",
     "executableName": "Nemesis",
     "protocols": [
       {
         "name": "Nemesis Protocol",
         "schemes": [
-          "hermes"
+          "nemesis"
         ]
       }
     ],
@@ -194,6 +194,10 @@
       {
         "from": "assets/icon.ico",
         "to": "icon.ico"
+      },
+      {
+        "from": "../../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
     "asar": true,
@@ -204,9 +208,10 @@
       "dist/**"
     ],
     "publish": {
-      "provider": "generic",
-      "url": "https://updates.pharmaorb.app/nemesis",
-      "channel": "latest"
+      "provider": "github",
+      "owner": "AxelGalvez11",
+      "repo": "nemesis-desktop",
+      "releaseType": "draft"
     },
     "mac": {
       "category": "public.app-category.education",
@@ -249,7 +254,7 @@
       ]
     },
     "win": {
-      "legalTrademarks": "Hermes",
+      "legalTrademarks": "Nemesis",
       "target": [
         "nsis",
         "msi"
@@ -257,9 +262,9 @@
       "signAndEditExecutable": false
     },
     "linux": {
-      "category": "Development",
-      "maintainer": "Nous Research <support@nousresearch.com>",
-      "synopsis": "Native desktop shell for Hermes Agent.",
+      "category": "Education",
+      "maintainer": "Nemesis <support@enternemesis.com>",
+      "synopsis": "Nemesis desktop study agent.",
       "target": [
         "AppImage",
         "deb",
@@ -270,8 +275,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "shortcutName": "Hermes",
-      "uninstallDisplayName": "Hermes",
+      "shortcutName": "Nemesis",
+      "uninstallDisplayName": "Nemesis",
       "warningsAsErrors": false
     }
   }
