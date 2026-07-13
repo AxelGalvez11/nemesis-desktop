@@ -42,11 +42,18 @@ interface TabState {
   sessionKey: string
 }
 
+// The placeholder rect the renderer measured, in CSS px, plus the CSS viewport
+// (window.innerWidth/Height) it was measured in. Main converts CSS→DIP itself at
+// apply time using getContentBounds()/viewport — the EMPIRICAL device scale — so
+// it never depends on a zoom percent that can disagree with the real device scale
+// (that mismatch is what parked the native view out over the chat).
 interface PanelRect {
   x: number
   y: number
   width: number
   height: number
+  vw: number
+  vh: number
 }
 
 /** Mode is decided before app-ready (the debug port switch must be set then),
@@ -181,21 +188,27 @@ function applyLayout() {
     return
   }
 
+  const win = hostWindow
+
   for (const tab of tabs.values()) {
     const isActive = tab.id === activeTabId && tab.sessionKey === activeSessionKey
     const show = panelVisible && isActive && Boolean(panelRect)
     tab.view.setVisible(show)
 
     if (show && panelRect) {
-      // panelRect is already in DIP — the renderer did the CSS→DIP conversion
-      // with the live zoom factor (see native-browser-panel.tsx). Apply it
-      // verbatim; no scaling here, so main can never fight the renderer over
-      // the factor.
+      // panelRect is CSS px measured in a viewport of (vw × vh). Convert to the
+      // window's DIP space using its OWN current content bounds — the exact
+      // CSS→DIP ratio, whatever the zoom/display scale — so the view lands
+      // precisely over the placeholder instead of spilling onto the chat.
+      const content = win.getContentBounds()
+      const sx = panelRect.vw > 0 ? content.width / panelRect.vw : 1
+      const sy = panelRect.vh > 0 ? content.height / panelRect.vh : 1
+
       tab.view.setBounds({
-        height: Math.max(0, Math.round(panelRect.height)),
-        width: Math.max(0, Math.round(panelRect.width)),
-        x: Math.round(panelRect.x),
-        y: Math.round(panelRect.y)
+        height: Math.max(0, Math.round(panelRect.height * sy)),
+        width: Math.max(0, Math.round(panelRect.width * sx)),
+        x: Math.round(panelRect.x * sx),
+        y: Math.round(panelRect.y * sy)
       })
     }
   }
@@ -616,8 +629,14 @@ export function registerSchoolViewIpc() {
       Number.isFinite(parsed.width) &&
       Number.isFinite(parsed.height)
     ) {
+      // vw/vh absent (older renderer) → fall back to the window's own content
+      // width/height so the scale is 1:1 and the rect is treated as DIP.
+      const fallback = hostWindow.getContentBounds()
+
       panelRect = {
         height: Number(parsed.height),
+        vh: Number.isFinite(parsed.vh) && Number(parsed.vh) > 0 ? Number(parsed.vh) : fallback.height,
+        vw: Number.isFinite(parsed.vw) && Number(parsed.vw) > 0 ? Number(parsed.vw) : fallback.width,
         width: Number(parsed.width),
         x: Number(parsed.x),
         y: Number(parsed.y)

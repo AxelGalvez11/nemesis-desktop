@@ -135,7 +135,7 @@ declare global {
         navigate: (url: string) => Promise<HermesSchoolViewState>
         history: (direction: 'back' | 'forward') => Promise<HermesSchoolViewState>
         reload: () => Promise<HermesSchoolViewState>
-        setBounds: (rect: { height: number; width: number; x: number; y: number }) => Promise<boolean>
+        setBounds: (rect: { height: number; width: number; x: number; y: number; vw: number; vh: number }) => Promise<boolean>
         setVisible: (visible: boolean) => Promise<boolean>
         onState: (callback: (state: HermesSchoolViewState) => void) => () => void
         onDownload: (callback: (payload: HermesSchoolViewDownload) => void) => () => void

@@ -141,13 +141,10 @@ function NativeBrowserPanel({ railVisible }: { railVisible: boolean }) {
 
   const placeholderRef = useRef<HTMLDivElement | null>(null)
   // Last rect actually SENT — drift is measured against it, so slow 1px-a-beat
-  // creep still converges on a send instead of being skipped forever.
-  const lastSentRef = useRef({ height: -1, width: -1, x: -1, y: -1 })
-  // Live web-zoom factor for the CSS→DIP conversion. Kept in a ref so
-  // reportBounds stays a stable callback (it reads the latest zoom without
-  // being re-created every zoom step).
-  const zoomFactorRef = useRef(1)
-  zoomFactorRef.current = (zoomPercent || 100) / 100
+  // creep still converges on a send instead of being skipped forever. Includes
+  // the viewport (vw/vh) so a zoom change — which keeps the panel's px rect but
+  // shrinks/grows innerWidth — still forces a re-send and a fresh device scale.
+  const lastSentRef = useRef({ height: -1, vh: -1, vw: -1, width: -1, x: -1, y: -1 })
 
   // Returns true only when a real (laid-out) rect was pushed — the reveal path
   // waits on that so the view is never shown at stale or zero bounds.
@@ -166,13 +163,18 @@ function NativeBrowserPanel({ railVisible }: { railVisible: boolean }) {
       return false
     }
 
-    const z = zoomFactorRef.current
-
+    // Send the RAW CSS rect + the CSS viewport it was measured in. The MAIN
+    // process converts CSS→DIP with its own getContentBounds()/viewport ratio —
+    // the exact device scale — so the renderer never pre-multiplies by a zoom
+    // percent that can disagree with the real scale and park the view over the
+    // chat (that mismatch was the recurring "browser spills out of the sidebar").
     const rect = {
-      height: Math.round(box.height * z),
-      width: Math.round(box.width * z),
-      x: Math.round(box.x * z),
-      y: Math.round(box.y * z)
+      height: box.height,
+      vh: window.innerHeight,
+      vw: window.innerWidth,
+      width: box.width,
+      x: box.x,
+      y: box.y
     }
 
     const last = lastSentRef.current
@@ -181,7 +183,9 @@ function NativeBrowserPanel({ railVisible }: { railVisible: boolean }) {
       Math.abs(rect.x - last.x) < 2 &&
       Math.abs(rect.y - last.y) < 2 &&
       Math.abs(rect.width - last.width) < 2 &&
-      Math.abs(rect.height - last.height) < 2
+      Math.abs(rect.height - last.height) < 2 &&
+      Math.abs(rect.vw - last.vw) < 2 &&
+      Math.abs(rect.vh - last.vh) < 2
 
     setBoundsReady(true)
 
@@ -231,9 +235,9 @@ function NativeBrowserPanel({ railVisible }: { railVisible: boolean }) {
     }
   }, [reportBounds])
 
-  // Zoom rescales the native view in the MAIN process (it multiplies the CSS
-  // rect by the live zoomFactor), so a zoom change must re-send even when the
-  // rect here reads the same.
+  // A zoom change shifts the CSS→DIP scale (innerWidth moves while the panel's
+  // px rect may not). The window 'resize' event usually covers it; re-send here
+  // too so the native view re-scales promptly even if that event is coalesced.
   useEffect(() => {
     reportBounds(true)
   }, [reportBounds, zoomPercent])
