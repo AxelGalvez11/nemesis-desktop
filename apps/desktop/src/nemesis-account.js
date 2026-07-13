@@ -1,21 +1,21 @@
-// Nemesis accounts + billing structure. Students sign in with their PharmaOrb account
-// (same Supabase auth pool as the web app); the desktop reads their subscription tier
+// Nemesis accounts + billing structure. Students sign in directly inside the desktop
+// app; the desktop reads their subscription tier
 // straight from the `subscriptions` table (RLS `auth.uid() = user_id` makes that safe
-// with just the user's own JWT + the public anon key). Upgrading opens the web app's
-// existing Stripe billing page — one billing system, owned by the web app.
+// with just the user's own JWT + the public anon key). Account creation and subscription
+// changes open the Nemesis account portal in the user's browser.
 //
 // What this deliberately does NOT do yet: meter/bill individual model calls. The agent
 // still talks to its configured provider directly; moving the model key server-side
 // behind a usage-metered proxy is the documented next step (docs/design note in the
 // nemesis kit).
 import { atom } from 'nanostores';
-// Public client credentials — the same values the PharmaOrb web bundle ships to every
+// Public client credentials — the same values the Nemesis account portal ships to every
 // browser. Safe to embed: the anon key only grants what RLS policies allow.
 export const SUPABASE_URL = 'https://qyjmivntajbigjswhahb.supabase.co';
 export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF5am1pdm50YWpiaWdqc3doYWhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0NjcyMDEsImV4cCI6MjA5NjA0MzIwMX0.N305XZXSciym2q6c6UMoNwdmCIUZWPgW_3jMIVnIPHk';
-export const PHARMAORB_SITE = 'https://app.pharmaorb.app';
-export const BILLING_URL = `${PHARMAORB_SITE}/app/billing`;
-export const SIGNUP_URL = `${PHARMAORB_SITE}/signup`;
+export const NEMESIS_ACCOUNT_SITE = 'https://app.enternemesis.com';
+export const BILLING_URL = `${NEMESIS_ACCOUNT_SITE}/account/billing`;
+export const SIGNUP_URL = `${NEMESIS_ACCOUNT_SITE}/sign-up`;
 const SESSION_KEY = 'nemesis.account.v1';
 const BYPASS_KEY = 'nemesis.account.bypass';
 export const $account = atom({ plan: 'free', status: 'loading' });

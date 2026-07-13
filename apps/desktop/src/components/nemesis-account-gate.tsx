@@ -1,7 +1,7 @@
-// Account gate + account dialog (student build). Signed out → a full-screen sign-in
-// card over the app (students use their PharmaOrb account; creating one happens on the
-// web). Signed in → nothing rendered here except the Account dialog, opened from the
-// statusbar chip: plan badge, renewal date, Manage billing (web app's Stripe page),
+// Account gate + account dialog (student build). Signed out → a full-screen native
+// sign-in card; account creation happens in the browser. Signed in → nothing rendered
+// here except the Account dialog, opened from the statusbar chip: plan badge, renewal
+// date, browser-based subscription management,
 // Refresh plan, Sign out.
 import { useStore } from '@nanostores/react'
 import { type FC, useEffect, useState } from 'react'
@@ -29,9 +29,9 @@ import {
   mintDeviceKey,
   planLabel,
   refreshEntitlement,
-  SIGNUP_URL,
   signIn,
-  signOut
+  signOut,
+  SIGNUP_URL
 } from '@/nemesis-account'
 
 export const NemesisAccountGate: FC = () => {
@@ -86,7 +86,7 @@ export const NemesisAccountGate: FC = () => {
             <div>
               <h2 className="text-lg font-semibold tracking-tight">Sign in to Nemesis</h2>
               <p className="pt-1 text-xs text-muted-foreground">
-                Use your PharmaOrb account — your plan and billing live there.
+                Use your Nemesis account. Your plan stays in sync across the desktop and account portal.
               </p>
             </div>
           </div>
@@ -145,9 +145,7 @@ export const NemesisAccountGate: FC = () => {
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Account</DialogTitle>
-          <DialogDescription>
-            {account.bypass ? 'Offline mode — not signed in.' : account.email}
-          </DialogDescription>
+          <DialogDescription>{account.bypass ? 'Offline mode — not signed in.' : account.email}</DialogDescription>
         </DialogHeader>
 
         {!account.bypass && (
@@ -166,6 +164,10 @@ export const NemesisAccountGate: FC = () => {
               {planLabel(account.plan)}
             </span>
           </div>
+        )}
+
+        {!account.bypass && (
+          <p className="text-xs text-muted-foreground">Subscription changes open securely in your browser.</p>
         )}
 
         {!account.bypass && (
@@ -211,8 +213,12 @@ export const NemesisAccountGate: FC = () => {
 
         <DialogFooter className="flex-wrap gap-2 sm:justify-between">
           <div className="flex gap-2">
-            <Button onClick={() => void window.hermesDesktop?.openExternal?.(BILLING_URL)} size="sm" variant="secondary">
-              {account.plan === 'free' ? 'Upgrade' : 'Manage billing'}
+            <Button
+              onClick={() => void window.hermesDesktop?.openExternal?.(BILLING_URL)}
+              size="sm"
+              variant="secondary"
+            >
+              {account.plan === 'free' ? 'Choose a plan' : 'Manage subscription'}
             </Button>
             {!account.bypass && (
               <Button onClick={() => void refreshEntitlement()} size="sm" variant="outline">
