@@ -3,11 +3,12 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 // note). Interaction model deliberately mirrors what health-science students already have
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
-import { IconChevronDown, IconChecklist, IconFolderPlus, IconLayoutGrid, IconList, IconPlayerPause, IconSettings, IconSitemap } from '@tabler/icons-react';
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { IconCards, IconChevronDown, IconChecklist, IconDots, IconFileImport, IconFolderPlus, IconLayoutGrid, IconList, IconPlayerPause, IconPlus, IconSettings, IconSitemap } from '@tabler/icons-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -35,12 +36,25 @@ const ORDER_OPTIONS = [
     { id: 'due', label: 'Due first' },
     { id: 'random', label: 'Random' }
 ];
+function categoryForQueueItem(item, state) {
+    if (item.isNew) {
+        return 'new';
+    }
+    const cardState = state.schedule[item.card.id]?.state;
+    return cardState === 1 || cardState === 3 ? 'learning' : 'review';
+}
+function countQueueCategories(queue, state) {
+    return queue.reduce((counts, item) => {
+        counts[categoryForQueueItem(item, state)]++;
+        return counts;
+    }, { learning: 0, new: 0, review: 0 });
+}
 function loadViewMode() {
     try {
-        return window.localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'cards';
+        return window.localStorage.getItem(VIEW_MODE_KEY) === 'cards' ? 'cards' : 'list';
     }
     catch {
-        return 'cards';
+        return 'list';
     }
 }
 function loadCollapsedSections() {
@@ -80,6 +94,7 @@ export function StudyView() {
     const [reducedMotion] = useState(() => prefersReducedMotion());
     const [matchDeckId, setMatchDeckId] = useState(null);
     const [done, setDone] = useState(0);
+    const [sessionTotal, setSessionTotal] = useState(0);
     const [autoImported, setAutoImported] = useState([]);
     const [mindmaps, setMindmaps] = useState([]);
     const [tests, setTests] = useState([]);
@@ -89,21 +104,11 @@ export function StudyView() {
     const now = useMemo(() => new Date(), [state, reviewing]);
     const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now]);
     const current = queue[0];
-    const remainingCounts = useMemo(() => queue.reduce((counts, item) => {
-        if (item.isNew) {
-            counts.new++;
-        }
-        else {
-            const cardState = state.schedule[item.card.id]?.state;
-            if (cardState === 1 || cardState === 3) {
-                counts.learning++;
-            }
-            else {
-                counts.review++;
-            }
-        }
-        return counts;
-    }, { learning: 0, new: 0, review: 0 }), [queue, state.schedule]);
+    const remainingCounts = useMemo(() => countQueueCategories(queue, state), [queue, state]);
+    const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state]);
+    const todayCounts = useMemo(() => countQueueCategories(todayQueue, state), [state, todayQueue]);
+    const scheduledDue = todayCounts.learning + todayCounts.review;
+    const estimatedReviewMinutes = todayQueue.length > 0 ? Math.max(1, Math.ceil((todayQueue.length * 20) / 60)) : 0;
     const totals = deckStats(state, null, now);
     const sections = useMemo(() => groupDecks(state, now)
         .map(group => group.course)
@@ -192,11 +197,13 @@ export function StudyView() {
         };
     }, []);
     const startReview = useCallback((deckId) => {
+        const sessionQueue = buildQueue(state, deckId, new Date());
         setReviewDeckId(deckId);
+        setSessionTotal(sessionQueue.length);
         setReviewing(true);
         setRevealed(false);
         setDone(0);
-    }, []);
+    }, [state]);
     const exitReview = useCallback(() => {
         setReviewing(false);
         setRevealed(false);
@@ -294,16 +301,18 @@ export function StudyView() {
         setImportOpen(false);
         return true;
     }, [state, update]);
-    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: [_jsxs("header", { className: "flex shrink-0 items-center justify-between gap-3 px-6 pb-3 pt-5", children: [_jsxs("div", { children: [_jsx("h1", { className: "text-lg font-semibold", children: "Study" }), _jsxs("p", { className: "text-xs text-muted-foreground", children: [totals.due, " due \u00B7 ", totals.fresh, " new \u00B7 ", totals.total, " cards"] })] }), _jsx("div", { className: "flex flex-wrap items-center justify-end gap-2", children: reviewing || browseDeckId || matchDeckId || takingTest ? (_jsx(Button, { onClick: () => {
+    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: [_jsxs("header", { className: "flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5", children: [_jsxs("div", { className: "min-w-0", children: [_jsx("h1", { className: "text-lg font-semibold tracking-tight", children: "Study" }), _jsxs("p", { className: "mt-0.5 text-[0.65rem] font-medium tabular-nums text-(--ui-text-tertiary)", children: [totals.due, " due \u00B7 ", totals.fresh, " new \u00B7 ", totals.total, " cards"] })] }), _jsx("div", { className: "flex shrink-0 items-center gap-1", children: reviewing || browseDeckId || matchDeckId || takingTest ? (_jsx(Button, { onClick: () => {
                                 exitReview();
                                 setBrowseDeckId(null);
                                 setMatchDeckId(null);
                                 setTakingTest(null);
-                            }, size: "sm", variant: "outline", children: "Back to decks" })) : (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mr-1 flex items-center overflow-hidden rounded-md border border-border", children: [_jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'cards'
-                                                ? 'bg-accent text-accent-foreground'
-                                                : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('cards'), title: "Card view", type: "button", children: _jsx(IconLayoutGrid, { size: 14 }) }), _jsx("button", { className: cn('px-2 py-1.5 transition-colors', view === 'list' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'), onClick: () => setViewMode('list'), title: "List view", type: "button", children: _jsx(IconList, { size: 14 }) })] }), _jsx("button", { "aria-label": "Study settings", className: "rounded-md border border-border px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground", onClick: () => setSettingsOpen(true), title: "Study settings", type: "button", children: _jsx(IconSettings, { size: 14 }) }), _jsxs(Button, { onClick: () => setNewSectionOpen(true), size: "sm", variant: "outline", children: [_jsx(IconFolderPlus, { size: 14 }), "New section"] }), _jsx(Button, { onClick: () => setNewDeckSection(''), size: "sm", variant: "outline", children: "New deck" }), _jsx(Button, { onClick: () => setImportOpen(true), size: "sm", variant: "outline", children: "Import cards" }), _jsx(Button, { disabled: totals.due === 0, onClick: () => startReview(null), size: "sm", children: "Study all" })] })) })] }), autoImported.length > 0 && !reviewing && !browseDeckId && (_jsxs("div", { className: "mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs", children: [_jsxs("span", { children: ["Nemesis added ", autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`, ":", ' ', autoImported.join(', ')] }), _jsx("button", { className: "text-muted-foreground hover:text-foreground", onClick: () => setAutoImported([]), type: "button", children: "Dismiss" })] })), reviewing ? (current ? (_jsx(ReviewSurface, { flip: flip, intervals: previewIntervals(state, current.card.id, now), item: current, onGrade: grade, onReveal: () => setRevealed(true), remainingCounts: remainingCounts, revealed: revealed, showIntervalHints: settings.showIntervalHints })) : (_jsx(EmptyState, { className: "flex-1", description: done > 0
+                            }, size: "sm", variant: "outline", children: "Back to decks" })) : (_jsxs(_Fragment, { children: [_jsxs(DropdownMenu, { children: [_jsx(DropdownMenuTrigger, { asChild: true, children: _jsx(Button, { "aria-label": "Add study material", size: "icon-xs", title: "Add study material", variant: "ghost", children: _jsx(IconPlus, {}) }) }), _jsxs(DropdownMenuContent, { align: "end", className: "w-44", children: [_jsxs(DropdownMenuItem, { onSelect: () => setNewDeckSection(''), children: [_jsx(IconCards, {}), "New deck"] }), _jsxs(DropdownMenuItem, { onSelect: () => setNewSectionOpen(true), children: [_jsx(IconFolderPlus, {}), "New section"] }), _jsxs(DropdownMenuItem, { onSelect: () => setImportOpen(true), children: [_jsx(IconFileImport, {}), "Import cards"] })] })] }), _jsx(Tip, { label: "Study settings", children: _jsx(Button, { "aria-label": "Study settings", onClick: () => setSettingsOpen(true), size: "icon-xs", variant: "ghost", children: _jsx(IconSettings, {}) }) })] })) })] }), !reviewing && !browseDeckId && !matchDeckId && !takingTest && (_jsx(TodaysReviewBrief, { counts: todayCounts, estimatedMinutes: estimatedReviewMinutes, hasScheduledDue: scheduledDue > 0, onStart: () => startReview(null), total: todayQueue.length })), autoImported.length > 0 && !reviewing && !browseDeckId && (_jsxs("div", { className: "mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs", children: [_jsxs("span", { children: ["Nemesis added ", autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`, ":", ' ', autoImported.join(', ')] }), _jsx("button", { className: "text-muted-foreground hover:text-foreground", onClick: () => setAutoImported([]), type: "button", children: "Dismiss" })] })), reviewing ? (current ? (_jsx(ReviewSurface, { activeCategory: categoryForQueueItem(current, state), flip: flip, intervals: previewIntervals(state, current.card.id, now), item: current, onGrade: grade, onReveal: () => setRevealed(true), position: Math.min(done + 1, sessionTotal), remainingCounts: remainingCounts, revealed: revealed, sessionTotal: sessionTotal, showIntervalHints: settings.showIntervalHints })) : (_jsx(EmptyState, { className: "flex-1", description: done > 0
                     ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.`
-                    : 'Nothing is due right now.', title: "All caught up" }))) : matchDeckId ? (_jsx(MatchGame, { deck: state.decks.find(deck => deck.id === matchDeckId) ?? null, onExit: () => setMatchDeckId(null) })) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), onMatch: () => startMatch(browseDeckId), onMoveDeck: section => moveDeck(browseDeckId, section), sections: sections, state: state })) : takingTest ? (_jsx(TestSurface, { file: takingTest, onComplete: () => setTestAttempts(loadTestAttempts()), onExit: () => setTakingTest(null) })) : (_jsx(DeckBrowser, { collapsedSections: collapsedSections, mindmaps: mindmaps, onBrowse: setBrowseDeckId, onCreateDeck: setNewDeckSection, onMatch: startMatch, onOpenMindmap: setViewingMindmap, onStartTest: setTakingTest, onStudy: startReview, onToggleSection: toggleSection, state: state, testAttempts: testAttempts, tests: tests, view: view })), _jsx(MindmapViewerDialog, { file: viewingMindmap, onOpenChange: open => !open && setViewingMindmap(null) }), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen, sections: sections }), newDeckSection !== null && (_jsx(NewDeckDialog, { initialSection: newDeckSection, onClose: () => setNewDeckSection(null), onCreate: createDeck, sections: sections })), newSectionOpen && (_jsx(NewSectionDialog, { onClose: () => setNewSectionOpen(false), onCreate: createSection, sections: sections })), _jsx(StudySettingsDialog, { onChange: patch => update(setSettings(state, patch)), onOpenChange: setSettingsOpen, open: settingsOpen, settings: settings })] }));
+                    : 'Nothing is due right now.', title: "All caught up" }))) : matchDeckId ? (_jsx(MatchGame, { deck: state.decks.find(deck => deck.id === matchDeckId) ?? null, onExit: () => setMatchDeckId(null) })) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), onMatch: () => startMatch(browseDeckId), onMoveDeck: section => moveDeck(browseDeckId, section), sections: sections, state: state })) : takingTest ? (_jsx(TestSurface, { file: takingTest, onComplete: () => setTestAttempts(loadTestAttempts()), onExit: () => setTakingTest(null) })) : (_jsx(DeckBrowser, { collapsedSections: collapsedSections, mindmaps: mindmaps, onBrowse: setBrowseDeckId, onCreateDeck: setNewDeckSection, onDeleteDeck: removeDeck, onMatch: startMatch, onMoveDeck: moveDeck, onOpenMindmap: setViewingMindmap, onStartTest: setTakingTest, onStudy: startReview, onToggleSection: toggleSection, onViewChange: setViewMode, state: state, testAttempts: testAttempts, tests: tests, view: view })), _jsx(MindmapViewerDialog, { file: viewingMindmap, onOpenChange: open => !open && setViewingMindmap(null) }), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen, sections: sections }), newDeckSection !== null && (_jsx(NewDeckDialog, { initialSection: newDeckSection, onClose: () => setNewDeckSection(null), onCreate: createDeck, sections: sections })), newSectionOpen && (_jsx(NewSectionDialog, { onClose: () => setNewSectionOpen(false), onCreate: createSection, sections: sections })), _jsx(StudySettingsDialog, { onChange: patch => update(setSettings(state, patch)), onOpenChange: setSettingsOpen, open: settingsOpen, settings: settings })] }));
+}
+function TodaysReviewBrief({ counts, estimatedMinutes, hasScheduledDue, onStart, total }) {
+    const hasFreshCards = counts.new > 0;
+    return (_jsxs("section", { className: "mx-6 mb-3 flex items-center justify-between gap-5 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-3", children: [_jsxs("div", { className: "min-w-0", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: "Today\u2019s review" }), hasScheduledDue ? (_jsxs("p", { className: "mt-1 text-base font-semibold tracking-tight", children: [total, " card", total === 1 ? '' : 's', ' ', _jsxs("span", { className: "font-normal text-muted-foreground", children: ["\u00B7 about ", estimatedMinutes, " min"] })] })) : (_jsx("p", { className: "mt-1 text-base font-semibold tracking-tight", children: "You\u2019re caught up" })), _jsxs("div", { className: "mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] tabular-nums text-muted-foreground", children: [_jsxs("span", { children: [_jsx("span", { className: "font-semibold text-foreground", children: counts.new }), " New"] }), _jsxs("span", { children: [_jsx("span", { className: "font-semibold text-foreground", children: counts.learning }), " Learning"] }), _jsxs("span", { children: [_jsx("span", { className: "font-semibold text-foreground", children: counts.review }), " Review"] })] })] }), hasScheduledDue ? (_jsx(Button, { onClick: onStart, size: "sm", children: "Start review \u2192" })) : hasFreshCards ? (_jsx(Button, { onClick: onStart, size: "sm", children: "Practice new cards" })) : null] }));
 }
 const OTHER_SECTION_VALUE = '__other__';
 function SectionSelect({ label, onChange, sections, value }) {
@@ -341,7 +350,8 @@ function parseDailyCap(raw) {
 function StudySettingsDialog({ onChange, onOpenChange, open, settings }) {
     return (_jsx(Dialog, { onOpenChange: onOpenChange, open: open, children: _jsxs(DialogContent, { className: "sm:max-w-md", children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: "Study settings" }), _jsx(DialogDescription, { children: "Limits and behavior for review sessions. Changes apply immediately." })] }), _jsxs("div", { className: "flex flex-col divide-y divide-border", children: [_jsx(SettingRow, { description: "Cards introduced for the first time. 0 = unlimited.", label: "New cards per day", children: _jsx(Input, { className: "w-20 text-right", inputMode: "numeric", min: 0, onChange: event => onChange({ newPerDay: parseDailyCap(event.target.value) }), step: 1, type: "number", value: settings.newPerDay }) }), _jsx(SettingRow, { description: "Cards already in review rotation. 0 = unlimited.", label: "Reviews per day", children: _jsx(Input, { className: "w-20 text-right", inputMode: "numeric", min: 0, onChange: event => onChange({ reviewsPerDay: parseDailyCap(event.target.value) }), step: 1, type: "number", value: settings.reviewsPerDay }) }), _jsx(SettingRow, { label: "Review order", children: _jsx(SegmentedControl, { onChange: order => onChange({ order }), options: ORDER_OPTIONS, value: settings.order }) }), _jsx(SettingRow, { label: "Card flip animation", children: _jsx(Switch, { "aria-label": "Card flip animation", checked: settings.flip, onCheckedChange: flip => onChange({ flip }) }) }), _jsx(SettingRow, { description: "The estimated interval shown on each grade button.", label: "Next-interval hints", children: _jsx(Switch, { "aria-label": "Show next-interval hints", checked: settings.showIntervalHints, onCheckedChange: showIntervalHints => onChange({ showIntervalHints }) }) })] }), _jsxs(DialogFooter, { className: "sm:justify-between", children: [_jsx(Button, { onClick: () => onChange(DEFAULT_STUDY_SETTINGS), size: "sm", variant: "text", children: "Reset to defaults" }), _jsx(Button, { onClick: () => onOpenChange(false), size: "sm", variant: "outline", children: "Done" })] })] }) }));
 }
-function DeckBrowser({ collapsedSections, mindmaps, onBrowse, onCreateDeck, onMatch, onOpenMindmap, onStartTest, onStudy, onToggleSection, state, testAttempts, tests, view }) {
+function DeckBrowser({ collapsedSections, mindmaps, onBrowse, onCreateDeck, onDeleteDeck, onMatch, onMoveDeck, onOpenMindmap, onStartTest, onStudy, onToggleSection, onViewChange, state, testAttempts, tests, view }) {
+    const [deleteDeckTarget, setDeleteDeckTarget] = useState(null);
     const { curvesByDeck, now } = useMemo(() => {
         const calculationTime = new Date();
         const curves = new Map(state.decks.map(deck => [
@@ -366,41 +376,56 @@ function DeckBrowser({ collapsedSections, mindmaps, onBrowse, onCreateDeck, onMa
             extras: extrasByCourse.get(course),
             stats: { due: 0, fresh: 0, total: 0 }
         }))
-    ];
+    ].sort((a, b) => {
+        const aIsOther = a.course.toLocaleLowerCase() === 'other';
+        const bIsOther = b.course.toLocaleLowerCase() === 'other';
+        if (aIsOther !== bIsOther) {
+            return aIsOther ? 1 : -1;
+        }
+        return b.stats.due - a.stats.due || a.course.localeCompare(b.course);
+    });
     if (!groups.length) {
         return (_jsx(EmptyState, { className: "flex-1", description: "Create a deck or import cards to get going.", title: "No decks yet" }));
     }
-    return (_jsxs("div", { className: "pb-10", children: [_jsx(Heatmap, { state: state }), groups.map(group => {
+    return (_jsxs("div", { className: "pb-10", children: [_jsx("div", { className: "flex justify-end px-8 pt-1", children: _jsxs("div", { className: "flex items-center rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-0.5", children: [_jsx(Tip, { label: "List view", children: _jsx(Button, { "aria-label": "List view", "aria-pressed": view === 'list', className: cn(view === 'list' && 'bg-(--ui-control-active-background) text-foreground'), onClick: () => onViewChange('list'), size: "icon-xs", variant: "ghost", children: _jsx(IconList, {}) }) }), _jsx(Tip, { label: "Card view", children: _jsx(Button, { "aria-label": "Card view", "aria-pressed": view === 'cards', className: cn(view === 'cards' && 'bg-(--ui-control-active-background) text-foreground'), onClick: () => onViewChange('cards'), size: "icon-xs", variant: "ghost", children: _jsx(IconLayoutGrid, {}) }) })] }) }), groups.map(group => {
                 const groupMindmaps = group.extras?.mindmaps ?? [];
                 const groupTests = group.extras?.tests ?? [];
                 const hasExtras = groupMindmaps.length > 0 || groupTests.length > 0;
+                const hasResources = group.decks.length > 0 || hasExtras;
                 const isCollapsed = collapsedSections.has(group.course);
-                return (_jsxs("section", { className: "px-8 pt-7", children: [_jsxs("div", { className: "mb-3 flex items-baseline justify-between", children: [_jsx("h2", { className: "text-[15px] font-semibold tracking-tight", children: _jsxs("button", { "aria-expanded": !isCollapsed, className: "flex items-center gap-1.5 rounded-sm text-left hover:text-(--theme-primary) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45", onClick: () => onToggleSection(group.course), type: "button", children: [_jsx(IconChevronDown, { "aria-hidden": "true", className: cn('transition-transform', isCollapsed && '-rotate-90'), size: 15 }), _jsx("span", { children: group.course })] }) }), _jsxs("span", { className: "text-xs text-muted-foreground", children: [group.stats.due, " due \u00B7 ", group.decks.length, " deck", group.decks.length === 1 ? '' : 's', " \u00B7", ' ', group.stats.total, " cards", groupMindmaps.length > 0 &&
-                                            ` · ${groupMindmaps.length} mind map${groupMindmaps.length === 1 ? '' : 's'}`, groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`] })] }), !isCollapsed && (_jsxs(_Fragment, { children: [group.decks.length === 0 ? (hasExtras ? null : (_jsxs("div", { className: "rounded-xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-5", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)", children: "Empty section" }), _jsxs("div", { className: "mt-1 flex items-center gap-1 text-xs text-muted-foreground", children: [_jsx("span", { children: "No decks yet \u2014" }), _jsx(Button, { onClick: () => onCreateDeck(group.course), size: "inline", variant: "textStrong", children: "add one" })] })] }))) : view === 'list' ? (_jsx("div", { className: "flex flex-col gap-2", children: group.decks.map(deck => (_jsx(DeckRow, { deck: deck, now: now, onBrowse: onBrowse, onMatch: onMatch, onStudy: onStudy, state: state }, deck.id))) })) : (_jsx("div", { className: "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3", children: group.decks.map(deck => (_jsx(DeckCard, { curve: curvesByDeck.get(deck.id) ?? [], deck: deck, now: now, onBrowse: onBrowse, onMatch: onMatch, onStudy: onStudy, state: state }, deck.id))) })), hasExtras && (_jsxs("div", { className: "mt-2 flex flex-col gap-2", children: [groupMindmaps.map(mindmap => (_jsx(MindmapRow, { mindmap: mindmap, onOpen: () => onOpenMindmap(mindmap) }, mindmap.fileName))), groupTests.map(test => (_jsx(TestRow, { attempts: testAttempts[test.fileName]?.attempts ?? [], onStart: () => onStartTest(test), test: test }, test.fileName)))] }))] }))] }, group.course));
-            })] }));
+                return (_jsxs("section", { className: "px-8 pt-5", children: [_jsxs("div", { className: "mb-2 flex items-baseline justify-between gap-4", children: [_jsx("h2", { className: "min-w-0 text-sm font-semibold tracking-tight", children: _jsxs("button", { "aria-expanded": !isCollapsed, className: "flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50", onClick: () => onToggleSection(group.course), type: "button", children: [_jsx(IconChevronDown, { "aria-hidden": "true", className: cn('shrink-0 transition-transform', isCollapsed && '-rotate-90'), size: 14 }), _jsx("span", { className: "truncate", children: group.course })] }) }), _jsxs("span", { className: "shrink-0 text-[0.6875rem] tabular-nums text-muted-foreground", children: [group.stats.due, " due \u00B7 ", group.decks.length, " deck", group.decks.length === 1 ? '' : 's', " \u00B7", ' ', group.stats.total, " cards", groupMindmaps.length > 0 &&
+                                            ` · ${groupMindmaps.length} mind map${groupMindmaps.length === 1 ? '' : 's'}`, groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`] })] }), !isCollapsed &&
+                            (hasResources ? (view === 'list' ? (_jsxs("div", { className: "divide-y divide-(--ui-stroke-tertiary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)", children: [group.decks.map(deck => (_jsx(DeckRow, { curve: curvesByDeck.get(deck.id) ?? [], deck: deck, now: now, onBrowse: onBrowse, onDelete: () => setDeleteDeckTarget(deck), onMatch: onMatch, onMove: section => onMoveDeck(deck.id, section), onStudy: onStudy, sections: state.sections, state: state }, deck.id))), groupMindmaps.map(mindmap => (_jsx(MindmapRow, { mindmap: mindmap, onOpen: () => onOpenMindmap(mindmap) }, mindmap.fileName))), groupTests.map(test => (_jsx(TestRow, { attempts: testAttempts[test.fileName]?.attempts ?? [], onStart: () => onStartTest(test), test: test }, test.fileName)))] })) : (_jsxs(_Fragment, { children: [group.decks.length > 0 && (_jsx("div", { className: "grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3", children: group.decks.map(deck => (_jsx(DeckCard, { curve: curvesByDeck.get(deck.id) ?? [], deck: deck, now: now, onBrowse: onBrowse, onDelete: () => setDeleteDeckTarget(deck), onMatch: onMatch, onMove: section => onMoveDeck(deck.id, section), onStudy: onStudy, sections: state.sections, state: state }, deck.id))) })), hasExtras && (_jsxs("div", { className: cn('divide-y divide-(--ui-stroke-tertiary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)', group.decks.length > 0 && 'mt-3'), children: [groupMindmaps.map(mindmap => (_jsx(MindmapRow, { mindmap: mindmap, onOpen: () => onOpenMindmap(mindmap) }, mindmap.fileName))), groupTests.map(test => (_jsx(TestRow, { attempts: testAttempts[test.fileName]?.attempts ?? [], onStart: () => onStartTest(test), test: test }, test.fileName)))] }))] }))) : (_jsxs("div", { className: "rounded-md border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-4", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)", children: "Empty section" }), _jsxs("div", { className: "mt-1 flex items-center gap-1 text-xs text-muted-foreground", children: [_jsx("span", { children: "No decks yet \u2014" }), _jsx(Button, { onClick: () => onCreateDeck(group.course), size: "inline", variant: "textStrong", children: "add one" })] })] })))] }, group.course));
+            }), _jsx(Heatmap, { state: state }), _jsx(DeleteDeckDialog, { deck: deleteDeckTarget, onClose: () => setDeleteDeckTarget(null), onConfirm: () => {
+                    if (!deleteDeckTarget) {
+                        return;
+                    }
+                    onDeleteDeck(deleteDeckTarget.id);
+                    setDeleteDeckTarget(null);
+                } })] }));
+}
+function ResourceIcon({ children }) {
+    return (_jsx("span", { className: "grid size-7 shrink-0 place-items-center rounded-md bg-(--ui-bg-quaternary) text-(--ui-text-tertiary)", children: children }));
 }
 function MindmapRow({ mindmap, onOpen }) {
-    return (_jsxs("button", { className: "group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 text-left transition-colors hover:border-(--theme-primary)/40", onClick: onOpen, type: "button", children: [_jsx(IconSitemap, { className: "shrink-0 text-muted-foreground", size: 16 }), _jsx("span", { className: "min-w-0 flex-1 truncate text-sm font-medium", children: mindmap.title }), _jsx(Badge, { variant: "outline", children: "Mind map" })] }));
+    return (_jsxs("div", { className: "flex w-full items-center gap-3 px-3 py-2.5", children: [_jsx(ResourceIcon, { children: _jsx(IconSitemap, { size: 15 }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("div", { className: "truncate text-sm font-medium", children: mindmap.title }), _jsx("div", { className: "mt-0.5 truncate text-[0.6875rem] text-muted-foreground", children: "Mind map \u00B7 visual outline" })] }), _jsx("span", { className: "hidden w-40 shrink-0 text-right text-xs text-muted-foreground sm:block", children: "Visual outline" }), _jsx(Button, { onClick: onOpen, size: "sm", variant: "outline", children: "Open" })] }));
 }
 function TestRow({ attempts, onStart, test }) {
     const best = bestAttempt(attempts);
     const last = lastAttempt(attempts);
     const count = test.questions.length;
-    const onKeyDown = (event) => {
-        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
-            return;
-        }
-        event.preventDefault();
-        onStart();
-    };
-    return (_jsxs("div", { className: "group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 outline-none transition-[box-shadow,border-color] hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45", onClick: onStart, onKeyDown: onKeyDown, role: "button", tabIndex: 0, children: [_jsx(IconChecklist, { className: "shrink-0 text-muted-foreground", size: 16 }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("div", { className: "truncate text-sm font-medium", children: test.title }), _jsxs("div", { className: "mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground", children: [_jsxs("span", { children: [count, " question", count === 1 ? '' : 's'] }), best && (_jsxs("span", { children: ["\u00B7 best ", best.score, "/", best.total] })), last && last !== best && (_jsxs("span", { children: ["\u00B7 last ", last.score, "/", last.total] }))] })] })] }));
+    return (_jsxs("div", { className: "flex w-full items-center gap-3 px-3 py-2.5", children: [_jsx(ResourceIcon, { children: _jsx(IconChecklist, { size: 15 }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("div", { className: "truncate text-sm font-medium", children: test.title }), _jsxs("div", { className: "mt-0.5 truncate text-[0.6875rem] text-muted-foreground", children: [count, " question", count === 1 ? '' : 's', best ? ` · best ${best.score}/${best.total}` : ''] })] }), _jsx("span", { className: "hidden w-40 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block", children: last ? `Test ${last.score}/${last.total}` : 'Not taken yet' }), _jsx(Button, { onClick: onStart, size: "sm", variant: "outline", children: last ? 'Retake' : 'Start' })] }));
 }
 function DuePill({ due }) {
     return (_jsxs("span", { className: "shrink-0 rounded-full bg-(--theme-primary)/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-(--theme-primary)", children: [due, " due"] }));
 }
-function RetentionSparkline({ curve }) {
-    // SVG defs need document-unique ids — this component renders once per deck card.
-    const gradientId = useId();
+const RETENTION_DAY_MS = 24 * 60 * 60 * 1000;
+function RetentionSparkline({ curve, now }) {
+    const [activeIndex, setActiveIndex] = useState(0);
+    const [inspecting, setInspecting] = useState(false);
+    if (!curve.length) {
+        return (_jsxs("div", { children: [_jsx("svg", { "aria-hidden": "true", className: "h-9 w-full", preserveAspectRatio: "none", viewBox: "0 0 100 40", children: _jsx("line", { stroke: "var(--ui-stroke-secondary)", strokeDasharray: "3 4", strokeLinecap: "round", strokeWidth: "1", vectorEffect: "non-scaling-stroke", x1: "2", x2: "98", y1: "12", y2: "28" }) }), _jsxs("p", { className: "mt-0.5 text-[0.6875rem] text-muted-foreground", children: [_jsx("span", { className: "font-medium text-foreground", children: "No recall estimate yet" }), _jsx("span", { children: " \u00B7 Review a card to begin" })] })] }));
+    }
     const finalDay = curve.at(-1)?.day ?? 1;
     const coordinates = curve.map(point => {
         const x = 2 + (point.day / Math.max(1, finalDay)) * 96;
@@ -408,67 +433,85 @@ function RetentionSparkline({ curve }) {
         return [x, y];
     });
     const points = coordinates.map(([x, y]) => `${x},${y}`).join(' ');
-    const area = `M ${coordinates.map(([x, y]) => `${x} ${y}`).join(' L ')} L 98 38 L 2 38 Z`;
     const first = curve[0];
     const last = curve.at(-1) ?? first;
-    return (_jsxs("div", { children: [_jsxs("svg", { "aria-hidden": "true", className: "h-10 w-full", preserveAspectRatio: "none", viewBox: "0 0 100 40", children: [_jsxs("defs", { children: [_jsxs("linearGradient", { id: `${gradientId}-fade`, x1: "0", x2: "0", y1: "0", y2: "1", children: [_jsx("stop", { offset: "0%", stopColor: "var(--theme-primary)", stopOpacity: "0.38" }), _jsx("stop", { offset: "70%", stopColor: "var(--theme-primary)", stopOpacity: "0.08" }), _jsx("stop", { offset: "100%", stopColor: "var(--theme-primary)", stopOpacity: "0" })] }), _jsx("filter", { height: "300%", id: `${gradientId}-glow`, width: "120%", x: "-10%", y: "-100%", children: _jsx("feGaussianBlur", { in: "SourceGraphic", stdDeviation: "1.6" }) })] }), _jsx("path", { d: area, fill: `url(#${gradientId}-fade)` }), _jsx("polyline", { fill: "none", filter: `url(#${gradientId}-glow)`, opacity: "0.75", points: points, stroke: "var(--theme-primary)", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2.6" }), _jsx("polyline", { fill: "none", points: points, stroke: "var(--theme-primary)", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1.4", vectorEffect: "non-scaling-stroke" }), _jsx("circle", { cx: coordinates[0][0], cy: coordinates[0][1], fill: "var(--theme-primary)", filter: `url(#${gradientId}-glow)`, opacity: "0.9", r: "2.6" }), _jsx("circle", { cx: coordinates[0][0], cy: coordinates[0][1], fill: "var(--theme-primary)", r: "1.6" })] }), _jsxs("p", { className: "mt-0.5 text-[11px] text-muted-foreground tabular-nums", children: ["Recall ", Math.round(first.retention * 100), "% \u2192 ", Math.round(last.retention * 100), "% in ", finalDay, "d"] })] }));
+    const safeIndex = Math.min(activeIndex, curve.length - 1);
+    const activePoint = curve[safeIndex];
+    const [activeX, activeY] = coordinates[safeIndex];
+    const activeDate = new Date(now.getTime() + activePoint.day * RETENTION_DAY_MS).toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short'
+    });
+    const activeLabel = `${activeDate} · estimated recall ${Math.round(activePoint.retention * 100)}%`;
+    const tooltipTransform = activeX < 22
+        ? 'translate(0, calc(-100% - 8px))'
+        : activeX > 78
+            ? 'translate(-100%, calc(-100% - 8px))'
+            : 'translate(-50%, calc(-100% - 8px))';
+    return (_jsxs("div", { "aria-label": `${Math.round(first.retention * 100)}% recall now. Projected ${Math.round(last.retention * 100)}% in ${finalDay} days. Use the arrow keys to inspect the curve.`, className: "relative outline-none focus-visible:ring-2 focus-visible:ring-ring/50", onBlur: () => setInspecting(false), onFocus: () => setInspecting(true), onKeyDown: event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+                return;
+            }
+            event.preventDefault();
+            setInspecting(true);
+            setActiveIndex(index => event.key === 'ArrowLeft'
+                ? Math.max(0, index - 1)
+                : Math.min(curve.length - 1, index + 1));
+        }, onPointerLeave: event => {
+            if (document.activeElement !== event.currentTarget) {
+                setInspecting(false);
+            }
+        }, onPointerMove: event => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)));
+            setActiveIndex(Math.round(ratio * (curve.length - 1)));
+            setInspecting(true);
+        }, role: "img", tabIndex: 0, children: [_jsxs("svg", { "aria-hidden": "true", className: "h-9 w-full", preserveAspectRatio: "none", viewBox: "0 0 100 40", children: [_jsx("polyline", { fill: "none", points: points, stroke: "var(--ui-stroke-secondary)", strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "1", vectorEffect: "non-scaling-stroke" }), inspecting && (_jsxs(_Fragment, { children: [_jsx("line", { stroke: "var(--ui-text-secondary)", strokeWidth: "1", vectorEffect: "non-scaling-stroke", x1: activeX - 3, x2: activeX + 3, y1: activeY, y2: activeY }), _jsx("line", { stroke: "var(--ui-text-secondary)", strokeWidth: "1", vectorEffect: "non-scaling-stroke", x1: activeX, x2: activeX, y1: activeY - 3, y2: activeY + 3 })] })), _jsx("circle", { cx: coordinates[coordinates.length - 1][0], cy: coordinates[coordinates.length - 1][1], fill: "var(--theme-primary)", r: "1.7" })] }), inspecting && (_jsx("span", { className: "pointer-events-none absolute z-20 whitespace-nowrap bg-foreground px-1.5 py-1 text-[11px] font-bold leading-none text-background", style: {
+                    left: `${activeX}%`,
+                    top: `${(activeY / 40) * 100}%`,
+                    transform: tooltipTransform
+                }, children: activeLabel })), _jsx(Tip, { label: "FSRS estimate based on cards you\u2019ve reviewed in this deck.", side: "bottom", children: _jsxs("p", { className: "mt-0.5 cursor-help text-[0.6875rem] tabular-nums", children: [_jsxs("span", { className: "font-semibold text-foreground", children: [Math.round(first.retention * 100), "% recall now"] }), _jsxs("span", { className: "text-muted-foreground", children: [' ', "\u00B7 Projected ", Math.round(last.retention * 100), "% in ", finalDay, " days"] })] }) })] }));
 }
-function DeckRow({ deck, now, onBrowse, onMatch, onStudy, state }) {
-    const stats = deckStats(state, deck.id, now);
-    const openDeck = () => onStudy(deck.id);
-    const onKeyDown = (event) => {
-        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
-            return;
-        }
-        event.preventDefault();
-        openDeck();
-    };
-    return (_jsxs("div", { className: "group flex cursor-pointer items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 outline-none transition-[box-shadow,border-color] hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45", onClick: openDeck, onKeyDown: onKeyDown, role: "button", tabIndex: 0, children: [_jsxs("div", { className: "min-w-0 flex-1", children: [_jsxs("div", { className: "flex items-center gap-2", children: [_jsx("span", { className: "truncate text-sm font-medium", children: deck.name }), stats.due > 0 && _jsx(DuePill, { due: stats.due })] }), _jsxs("p", { className: "mt-1.5 text-[11px] text-muted-foreground tabular-nums", children: [stats.total, " cards \u00B7 ", stats.fresh, " new"] })] }), _jsxs("div", { className: "flex shrink-0 gap-1.5 opacity-80 transition-opacity group-hover:opacity-100", children: [_jsx(Button, { disabled: stats.total < 2, onClick: event => {
-                            event.stopPropagation();
-                            onMatch(deck.id);
-                        }, size: "sm", variant: "ghost", children: "Match" }), _jsx(Button, { onClick: event => {
-                            event.stopPropagation();
-                            onBrowse(deck.id);
-                        }, size: "sm", variant: "ghost", children: "Cards" })] })] }));
+function DeckActionsMenu({ deck, onBrowse, onDelete, onMatch, onMove, sections, total }) {
+    const currentSection = !deck.course?.trim() || deck.course.trim().toLocaleLowerCase() === 'other' ? 'Other' : deck.course.trim();
+    return (_jsxs(DropdownMenu, { children: [_jsx(DropdownMenuTrigger, { asChild: true, children: _jsx(Button, { "aria-label": `More actions for ${deck.name}`, size: "icon-xs", variant: "ghost", children: _jsx(IconDots, {}) }) }), _jsxs(DropdownMenuContent, { align: "end", className: "w-44", children: [_jsx(DropdownMenuItem, { onSelect: onBrowse, children: "Cards" }), _jsx(DropdownMenuItem, { disabled: total < 2, onSelect: onMatch, children: "Match" }), _jsxs(DropdownMenuSub, { children: [_jsx(DropdownMenuSubTrigger, { children: "Move to section" }), _jsxs(DropdownMenuSubContent, { className: "w-44", children: [sections.map(section => (_jsxs(DropdownMenuItem, { disabled: section.toLocaleLowerCase() === currentSection.toLocaleLowerCase(), onSelect: () => onMove(section), children: [_jsx("span", { className: "min-w-0 flex-1 truncate", children: section }), section.toLocaleLowerCase() === currentSection.toLocaleLowerCase() && (_jsx("span", { className: "text-muted-foreground", children: "\u2713" }))] }, section))), _jsxs(DropdownMenuItem, { disabled: currentSection === 'Other', onSelect: () => onMove(''), children: [_jsx("span", { className: "min-w-0 flex-1", children: "Other" }), currentSection === 'Other' && _jsx("span", { className: "text-muted-foreground", children: "\u2713" })] })] })] }), _jsx(DropdownMenuItem, { onSelect: onDelete, variant: "destructive", children: "Delete deck" })] })] }));
 }
-function DeckCard({ curve, deck, now, onBrowse, onMatch, onStudy, state }) {
+function DeckRow({ curve, deck, now, onBrowse, onDelete, onMatch, onMove, onStudy, sections, state }) {
     const stats = deckStats(state, deck.id, now);
-    const openDeck = () => onStudy(deck.id);
-    const onKeyDown = (event) => {
-        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
-            return;
-        }
-        event.preventDefault();
-        openDeck();
-    };
-    return (_jsxs("div", { className: "group flex cursor-pointer flex-col gap-4 rounded-2xl border border-border bg-card p-5 outline-none transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 hover:shadow-lg hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45", onClick: openDeck, onKeyDown: onKeyDown, role: "button", tabIndex: 0, children: [_jsxs("div", { className: "flex items-start justify-between gap-2", children: [_jsx("h3", { className: "text-[15px] font-semibold leading-snug tracking-tight", children: deck.name }), stats.due > 0 && _jsx(DuePill, { due: stats.due })] }), curve.length > 0 ? (_jsx(RetentionSparkline, { curve: curve })) : (_jsxs("div", { children: [_jsx("svg", { "aria-hidden": "true", className: "h-10 w-full", preserveAspectRatio: "none", viewBox: "0 0 100 40", children: _jsx("line", { stroke: "var(--ui-stroke-secondary)", strokeDasharray: "3 4", strokeLinecap: "round", strokeWidth: "1.2", x1: "2", x2: "98", y1: "10", y2: "30" }) }), _jsx("p", { className: "mt-0.5 text-[11px] text-muted-foreground/70", children: "Study one card to light up this deck\u2019s forgetting curve." })] })), _jsxs("p", { className: "mt-auto text-[11px] tabular-nums text-muted-foreground", children: [stats.total, " card", stats.total === 1 ? '' : 's', " \u00B7 ", stats.fresh, " new"] }), _jsxs("div", { className: "flex gap-2", children: [_jsx(Button, { disabled: stats.total < 2, onClick: event => {
-                            event.stopPropagation();
-                            onMatch(deck.id);
-                        }, size: "sm", variant: "outline", children: "Match" }), _jsx(Button, { onClick: event => {
-                            event.stopPropagation();
-                            onBrowse(deck.id);
-                        }, size: "sm", variant: "ghost", children: "Cards" })] })] }));
+    return (_jsxs("div", { className: "flex w-full items-center gap-3 px-3 py-2.5", children: [_jsx(ResourceIcon, { children: _jsx(IconCards, { size: 15 }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-2", children: [_jsx("span", { className: "truncate text-sm font-medium", children: deck.name }), stats.due > 0 && _jsx(DuePill, { due: stats.due })] }), _jsxs("p", { className: "mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground", children: [stats.total, " card", stats.total === 1 ? '' : 's', " \u00B7 ", stats.fresh, " new"] })] }), _jsx("div", { className: "hidden w-52 shrink-0 lg:block", children: _jsx(RetentionSparkline, { curve: curve, now: now }) }), _jsx(Button, { onClick: () => onStudy(deck.id), size: "sm", variant: "outline", children: "Study" }), _jsx(DeckActionsMenu, { deck: deck, onBrowse: () => onBrowse(deck.id), onDelete: onDelete, onMatch: () => onMatch(deck.id), onMove: onMove, sections: sections, total: stats.total })] }));
+}
+function DeckCard({ curve, deck, now, onBrowse, onDelete, onMatch, onMove, onStudy, sections, state }) {
+    const stats = deckStats(state, deck.id, now);
+    return (_jsxs("div", { className: "flex flex-col gap-3 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4", children: [_jsxs("div", { className: "flex items-start gap-2.5", children: [_jsx(ResourceIcon, { children: _jsx(IconCards, { size: 15 }) }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("h3", { className: "truncate text-sm font-semibold", children: deck.name }), _jsxs("p", { className: "mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground", children: [stats.total, " card", stats.total === 1 ? '' : 's', " \u00B7 ", stats.fresh, " new"] })] }), stats.due > 0 && _jsx(DuePill, { due: stats.due })] }), _jsx(RetentionSparkline, { curve: curve, now: now }), _jsxs("div", { className: "mt-auto flex items-center justify-end gap-1", children: [_jsx(Button, { onClick: () => onStudy(deck.id), size: "sm", variant: "outline", children: "Study" }), _jsx(DeckActionsMenu, { deck: deck, onBrowse: () => onBrowse(deck.id), onDelete: onDelete, onMatch: () => onMatch(deck.id), onMove: onMove, sections: sections, total: stats.total })] })] }));
+}
+function DeleteDeckDialog({ deck, onClose, onConfirm }) {
+    return (_jsx(Dialog, { onOpenChange: open => !open && onClose(), open: Boolean(deck), children: _jsxs(DialogContent, { className: "sm:max-w-md", children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: "Delete deck?" }), _jsx(DialogDescription, { children: deck ? `“${deck.name}” and its local review schedule will be removed.` : 'This deck will be removed.' })] }), _jsxs(DialogFooter, { children: [_jsx(Button, { onClick: onClose, variant: "outline", children: "Cancel" }), _jsx(Button, { onClick: onConfirm, variant: "destructive", children: "Delete deck" })] })] }) }));
 }
 // Contribution grid of review activity with streak stats, month labels, hover tooltips,
-// legend, and a today marker — the "dynamic" upgrade.
-const HEAT_MIX = ['', '30%', '52%', '76%', '100%'];
+// legend, and a today marker.
+const HEAT_MIX = ['', '14%', '24%', '38%', '54%'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function heatColor(level) {
     return level === 0
-        ? 'color-mix(in srgb, var(--ui-text-primary) 10%, transparent)'
-        : `color-mix(in srgb, var(--theme-primary) ${HEAT_MIX[level]}, transparent)`;
+        ? 'color-mix(in srgb, var(--ui-text-primary) 8%, transparent)'
+        : `color-mix(in srgb, var(--ui-text-primary) ${HEAT_MIX[level]}, transparent)`;
 }
 function Stat({ label, value }) {
     return (_jsxs("span", { className: "flex items-baseline gap-1", children: [_jsx("span", { className: "text-sm font-semibold text-foreground", children: value }), _jsx("span", { className: "text-muted-foreground", children: label })] }));
 }
 function Heatmap({ state }) {
+    const [expanded, setExpanded] = useState(false);
     const todayIso = new Date().toISOString();
     const { cells, total } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso]);
     const stats = useMemo(() => studyMotivation(state, todayIso), [state, todayIso]);
     const todayKey = todayIso.slice(0, 10);
     const firstDayOffset = cells[0] ? new Date(`${cells[0].date}T00:00:00.000Z`).getUTCDay() : 0;
     const weeks = Math.ceil((firstDayOffset + cells.length) / 7);
+    const daysIntoWeek = new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 1;
+    const reviewsThisWeek = cells
+        .slice(-daysIntoWeek)
+        .reduce((sum, cell) => sum + cell.count, 0);
     const monthLabels = [];
     if (cells[0]) {
         monthLabels.push({ col: 0, label: MONTHS[Number(cells[0].date.slice(5, 7)) - 1] });
@@ -482,7 +525,7 @@ function Heatmap({ state }) {
             }
         }
     }
-    return (_jsx("div", { className: "px-8 pt-2", children: _jsxs("div", { className: "rounded-2xl border border-border bg-card p-5", children: [_jsxs("div", { className: "mb-4", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)", children: "Review activity" }), _jsxs("div", { className: "mt-1.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs", children: [_jsx(Stat, { label: "day streak", value: stats.currentStreak }), _jsx(Stat, { label: "longest", value: stats.longestStreak }), _jsx(Stat, { label: "days active", value: `${stats.daysLearnedPct}%` }), stats.retentionPct !== null && _jsx(Stat, { label: "retention (30d)", value: `${stats.retentionPct}%` }), _jsxs("span", { className: "text-muted-foreground", children: [total, " reviews \u00B7 past 12 months"] })] }), total === 0 && _jsx("p", { className: "mt-1 text-xs text-muted-foreground", children: "Your year fills in as you grade cards." })] }), _jsx("div", { className: "overflow-x-auto pb-1", children: _jsxs("div", { className: "min-w-max", children: [_jsxs("div", { className: "grid grid-cols-[2rem_auto] gap-x-2 gap-y-1", children: [_jsx("div", {}), _jsx("div", { className: "relative h-3 text-[9px] text-muted-foreground", style: { width: `${weeks * 14}px` }, children: monthLabels.map(month => (_jsx("span", { className: "absolute", style: { left: `${month.col * 14}px` }, children: month.label }, `${month.label}-${month.col}`))) }), _jsx("div", { className: "grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground", style: { gridTemplateRows: 'repeat(7, 11px)' }, children: WEEKDAYS.map(day => (_jsx("span", { children: day }, day))) }), _jsxs("div", { className: "grid grid-flow-col grid-rows-7 gap-[3px]", style: { gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }, children: [Array.from({ length: firstDayOffset }, (_, index) => (_jsx("span", { "aria-hidden": "true" }, `leading-${index}`))), cells.map(cell => (_jsx(Tip, { label: `${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`, side: "top", children: _jsx("div", { className: cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60'), style: { backgroundColor: heatColor(cell.level) } }) }, cell.date)))] })] }), _jsxs("div", { className: "mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground", children: [_jsx("span", { children: "Less" }), [0, 1, 2, 3, 4].map(level => (_jsx("span", { className: "size-2.5 rounded-[2px]", style: { backgroundColor: heatColor(level) } }, level))), _jsx("span", { children: "More" })] })] }) })] }) }));
+    return (_jsx("section", { className: "px-8 pb-2 pt-8", children: _jsxs("div", { className: "rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)", children: [_jsxs("button", { "aria-expanded": expanded, className: "flex w-full items-center justify-between gap-4 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50", onClick: () => setExpanded(value => !value), type: "button", children: [_jsxs("div", { className: "min-w-0", children: [_jsx("h2", { className: "text-sm font-semibold", children: "Review history" }), _jsxs("p", { className: "mt-1 flex flex-wrap items-center gap-x-2 text-[0.6875rem] tabular-nums text-muted-foreground", children: [_jsxs("span", { children: [stats.currentStreak, " day streak"] }), _jsx("span", { "aria-hidden": "true", children: "\u00B7" }), _jsxs("span", { children: [stats.retentionPct === null ? '—' : `${stats.retentionPct}%`, " 30-day retention"] }), _jsx("span", { "aria-hidden": "true", children: "\u00B7" }), _jsxs("span", { children: [reviewsThisWeek, " reviews this week"] })] })] }), _jsx(IconChevronDown, { "aria-hidden": "true", className: cn('shrink-0 text-muted-foreground transition-transform', !expanded && '-rotate-90'), size: 15 })] }), expanded && (_jsxs("div", { className: "border-t border-(--ui-stroke-tertiary) px-4 pb-4 pt-3", children: [_jsxs("div", { className: "mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs", children: [_jsx(Stat, { label: "longest streak", value: stats.longestStreak }), _jsx(Stat, { label: "days active", value: `${stats.daysLearnedPct}%` }), _jsxs("span", { className: "text-muted-foreground", children: [total, " reviews \u00B7 past 12 months"] })] }), total === 0 && (_jsx("p", { className: "mb-3 text-xs text-muted-foreground", children: "Your history fills in as you grade cards." })), _jsx("div", { className: "overflow-x-auto pb-1", children: _jsxs("div", { className: "min-w-max", children: [_jsxs("div", { className: "grid grid-cols-[2rem_auto] gap-x-2 gap-y-1", children: [_jsx("div", {}), _jsx("div", { className: "relative h-3 text-[9px] text-muted-foreground", style: { width: `${weeks * 14}px` }, children: monthLabels.map(month => (_jsx("span", { className: "absolute", style: { left: `${month.col * 14}px` }, children: month.label }, `${month.label}-${month.col}`))) }), _jsx("div", { className: "grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground", style: { gridTemplateRows: 'repeat(7, 11px)' }, children: WEEKDAYS.map(day => (_jsx("span", { children: day }, day))) }), _jsxs("div", { className: "grid grid-flow-col grid-rows-7 gap-[3px]", style: { gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }, children: [Array.from({ length: firstDayOffset }, (_, index) => (_jsx("span", { "aria-hidden": "true" }, `leading-${index}`))), cells.map(cell => (_jsx(Tip, { label: `${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`, side: "top", children: _jsx("div", { className: cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60'), style: { backgroundColor: heatColor(cell.level) } }) }, cell.date)))] })] }), _jsxs("div", { className: "mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground", children: [_jsx("span", { children: "Less" }), [0, 1, 2, 3, 4].map(level => (_jsx("span", { className: "size-2.5 rounded-[2px]", style: { backgroundColor: heatColor(level) } }, level))), _jsx("span", { children: "More" })] })] }) })] }))] }) }));
 }
 function CardBrowser({ deck, onChange, onDeleteDeck, onMatch, onMoveDeck, sections, state }) {
     const [editing, setEditing] = useState(null);
@@ -622,8 +665,13 @@ function MatchGame({ deck, onExit }) {
                     return (_jsx("button", { className: cn('flex items-center justify-center rounded-lg border p-3 text-center text-sm leading-snug transition-[transform,opacity,border-color,background-color] duration-200 ease-out active:scale-[0.98]', isMatched && 'pointer-events-none scale-95 border-transparent bg-transparent opacity-0', isSelected && 'border-(--theme-primary) bg-(--theme-primary)/10', isWrong && 'nemesis-shake border-destructive text-destructive', !isMatched && !isSelected && !isWrong && 'border-border bg-card hover:border-(--theme-primary)/50'), onClick: () => pick(tile), type: "button", children: tile.text }, tile.id));
                 }) }))] }));
 }
-function ReviewSurface({ flip, intervals, item, onGrade, onReveal, remainingCounts, revealed, showIntervalHints }) {
-    return (_jsx("div", { className: "flex flex-1 flex-col items-center px-6 pb-8", children: _jsxs("div", { className: "flex w-full max-w-2xl flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between pb-2 text-xs text-muted-foreground", children: [_jsxs("span", { className: "truncate", children: [item.deckName, item.isNew && (_jsx(Badge, { className: "ml-2", variant: "outline", children: "new" }))] }), _jsxs("span", { "aria-label": "Cards remaining", className: "flex shrink-0 items-center gap-3 font-mono text-[0.6875rem] tabular-nums", children: [_jsxs("span", { className: "text-(--ui-blue)", title: "New cards remaining", children: [remainingCounts.new, " ", _jsx("span", { className: "font-sans text-muted-foreground", children: "New" })] }), _jsxs("span", { className: "text-(--ui-red)", title: "Learning cards remaining", children: [remainingCounts.learning, " ", _jsx("span", { className: "font-sans text-muted-foreground", children: "Learning" })] }), _jsxs("span", { className: "text-(--ui-green)", title: "Review cards remaining", children: [remainingCounts.review, " ", _jsx("span", { className: "font-sans text-muted-foreground", children: "Review" })] })] })] }), flip ? (_jsx("button", { "aria-label": revealed ? item.card.back : 'Show answer', className: "nemesis-flip flex-1 [perspective:1600px]", "data-flipped": revealed ? 'true' : undefined, onClick: () => !revealed && onReveal(), type: "button", children: _jsxs("div", { className: "nemesis-flip-inner relative h-full min-h-64 w-full", children: [_jsx(FlipFace, { label: "Question", children: item.card.front }), _jsx(FlipFace, { back: true, label: "Answer", muted: true, children: item.card.back })] }) })) : (_jsxs("div", { className: "flex min-h-64 flex-1 flex-col justify-center gap-5 rounded-xl border border-border bg-card p-8", children: [_jsxs("div", { children: [_jsx("div", { className: "pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground", children: "Question" }), _jsx("div", { className: "text-lg leading-relaxed", children: item.card.front })] }), revealed && (_jsxs(_Fragment, { children: [_jsx("div", { className: "border-t border-border" }), _jsxs("div", { children: [_jsx("div", { className: "pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground", children: "Answer" }), _jsx("div", { className: "text-lg leading-relaxed text-foreground/80", children: item.card.back })] })] }))] })), item.card.tags.length > 0 && (_jsx("div", { className: "flex flex-wrap gap-1 pt-2.5", children: item.card.tags.map(tag => (_jsx(Badge, { variant: "outline", children: tag }, tag))) })), _jsx("div", { className: "pt-4", children: revealed ? (_jsx("div", { className: "grid grid-cols-4 gap-2", children: GRADES.map(option => (_jsxs(Button, { className: cn('flex-col gap-0.5 py-5', option.rating === 'again' && 'text-destructive'), onClick: () => onGrade(option.rating), variant: "secondary", children: [_jsx("span", { children: option.label }), showIntervalHints && (_jsxs("span", { className: "text-[10px] opacity-60", children: [intervals[option.rating], " \u00B7 ", option.key] }))] }, option.rating))) })) : (_jsxs(Button, { className: "w-full py-5", onClick: onReveal, variant: "secondary", children: ["Show answer ", _jsx("span", { className: "ml-2 text-[10px] opacity-60", children: "Space" })] })) })] }) }));
+function ReviewSurface({ activeCategory, flip, intervals, item, onGrade, onReveal, position, remainingCounts, revealed, sessionTotal, showIntervalHints }) {
+    const countItems = [
+        { category: 'new', label: 'New', value: remainingCounts.new },
+        { category: 'learning', label: 'Learning', value: remainingCounts.learning },
+        { category: 'review', label: 'Review', value: remainingCounts.review }
+    ];
+    return (_jsx("div", { className: "flex flex-1 flex-col items-center px-6 pb-8", children: _jsxs("div", { className: "flex w-full max-w-2xl flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between gap-4 pb-2 text-xs text-muted-foreground", children: [_jsxs("span", { className: "min-w-0 truncate", children: [item.deckName, item.isNew && (_jsx(Badge, { className: "ml-2", variant: "outline", children: "new" }))] }), _jsxs("div", { className: "flex shrink-0 items-center gap-4", children: [_jsxs("span", { className: "tabular-nums", children: [position, " of ", sessionTotal] }), _jsx("span", { "aria-label": "Cards remaining", className: "flex items-center gap-3 text-[0.6875rem] tabular-nums", children: countItems.map(count => (_jsxs("span", { className: "flex items-center gap-1.5", children: [_jsx("span", { "aria-hidden": "true", className: cn('size-1 rounded-full bg-(--ui-stroke-secondary)', activeCategory === count.category && 'bg-(--theme-primary)') }), _jsxs("span", { children: [_jsx("span", { className: "font-medium text-foreground", children: count.value }), " ", count.label] })] }, count.category))) })] })] }), flip ? (_jsx("button", { "aria-label": revealed ? item.card.back : 'Show answer', className: "nemesis-flip flex-1 [perspective:1600px]", "data-flipped": revealed ? 'true' : undefined, onClick: () => !revealed && onReveal(), type: "button", children: _jsxs("div", { className: "nemesis-flip-inner relative h-full min-h-64 w-full", children: [_jsx(FlipFace, { label: "Question", children: item.card.front }), _jsx(FlipFace, { back: true, label: "Answer", muted: true, children: item.card.back })] }) })) : (_jsxs("div", { className: "flex min-h-64 flex-1 flex-col justify-center gap-5 rounded-xl border border-border bg-card p-8", children: [_jsxs("div", { children: [_jsx("div", { className: "pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground", children: "Question" }), _jsx("div", { className: "text-lg leading-relaxed", children: item.card.front })] }), revealed && (_jsxs(_Fragment, { children: [_jsx("div", { className: "border-t border-border" }), _jsxs("div", { children: [_jsx("div", { className: "pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground", children: "Answer" }), _jsx("div", { className: "text-lg leading-relaxed text-foreground/80", children: item.card.back })] })] }))] })), item.card.tags.length > 0 && (_jsx("div", { className: "flex flex-wrap gap-1 pt-2.5", children: item.card.tags.map(tag => (_jsx(Badge, { variant: "outline", children: tag }, tag))) })), _jsx("div", { className: "pt-4", children: revealed ? (_jsx("div", { className: "grid grid-cols-4 gap-2", children: GRADES.map(option => (_jsxs(Button, { className: cn('flex-col gap-0.5 py-5', option.rating === 'again' && 'text-(--theme-primary)'), onClick: () => onGrade(option.rating), variant: "secondary", children: [_jsx("span", { children: option.label }), showIntervalHints && (_jsxs("span", { className: "text-[10px] opacity-60", children: [intervals[option.rating], " \u00B7 ", option.key] }))] }, option.rating))) })) : (_jsxs(Button, { className: "w-full py-5", onClick: onReveal, variant: "secondary", children: ["Show answer ", _jsx("span", { className: "ml-2 text-[10px] opacity-60", children: "Space" })] })) })] }) }));
 }
 function ImportDialog({ onImport, onOpenChange, open, sections }) {
     const [name, setName] = useState('');

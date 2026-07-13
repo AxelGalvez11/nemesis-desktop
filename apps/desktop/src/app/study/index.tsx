@@ -3,16 +3,20 @@
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
 import {
+  IconCards,
   IconChevronDown,
   IconChecklist,
+  IconDots,
+  IconFileImport,
   IconFolderPlus,
   IconLayoutGrid,
   IconList,
   IconPlayerPause,
+  IconPlus,
   IconSettings,
   IconSitemap
 } from '@tabler/icons-react'
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,6 +28,15 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { SegmentedControl, type SegmentedControlOption } from '@/components/ui/segmented-control'
@@ -100,11 +113,40 @@ const ORDER_OPTIONS: SegmentedControlOption<ReviewOrder>[] = [
   { id: 'random', label: 'Random' }
 ]
 
+type ReviewCategory = 'learning' | 'new' | 'review'
+
+interface ReviewCategoryCounts {
+  learning: number
+  new: number
+  review: number
+}
+
+function categoryForQueueItem(item: QueueItem, state: StudyState): ReviewCategory {
+  if (item.isNew) {
+    return 'new'
+  }
+
+  const cardState = state.schedule[item.card.id]?.state
+
+  return cardState === 1 || cardState === 3 ? 'learning' : 'review'
+}
+
+function countQueueCategories(queue: QueueItem[], state: StudyState): ReviewCategoryCounts {
+  return queue.reduce<ReviewCategoryCounts>(
+    (counts, item) => {
+      counts[categoryForQueueItem(item, state)]++
+
+      return counts
+    },
+    { learning: 0, new: 0, review: 0 }
+  )
+}
+
 function loadViewMode(): DeckViewMode {
   try {
-    return window.localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'cards'
+    return window.localStorage.getItem(VIEW_MODE_KEY) === 'cards' ? 'cards' : 'list'
   } catch {
-    return 'cards'
+    return 'list'
   }
 }
 
@@ -146,6 +188,7 @@ export function StudyView() {
   const [reducedMotion] = useState(() => prefersReducedMotion())
   const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
   const [done, setDone] = useState(0)
+  const [sessionTotal, setSessionTotal] = useState(0)
   const [autoImported, setAutoImported] = useState<string[]>([])
   const [mindmaps, setMindmaps] = useState<MindmapFile[]>([])
   const [tests, setTests] = useState<TestFile[]>([])
@@ -161,27 +204,18 @@ export function StudyView() {
   const current: QueueItem | undefined = queue[0]
 
   const remainingCounts = useMemo(
-    () =>
-      queue.reduce(
-        (counts, item) => {
-          if (item.isNew) {
-            counts.new++
-          } else {
-            const cardState = state.schedule[item.card.id]?.state
-
-            if (cardState === 1 || cardState === 3) {
-              counts.learning++
-            } else {
-              counts.review++
-            }
-          }
-
-          return counts
-        },
-        { learning: 0, new: 0, review: 0 }
-      ),
-    [queue, state.schedule]
+    () => countQueueCategories(queue, state),
+    [queue, state]
   )
+
+  const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state])
+  const todayCounts = useMemo(
+    () => countQueueCategories(todayQueue, state),
+    [state, todayQueue]
+  )
+  const scheduledDue = todayCounts.learning + todayCounts.review
+  const estimatedReviewMinutes =
+    todayQueue.length > 0 ? Math.max(1, Math.ceil((todayQueue.length * 20) / 60)) : 0
 
   const totals = deckStats(state, null, now)
 
@@ -298,12 +332,18 @@ export function StudyView() {
     }
   }, [])
 
-  const startReview = useCallback((deckId: null | string) => {
-    setReviewDeckId(deckId)
-    setReviewing(true)
-    setRevealed(false)
-    setDone(0)
-  }, [])
+  const startReview = useCallback(
+    (deckId: null | string) => {
+      const sessionQueue = buildQueue(state, deckId, new Date())
+
+      setReviewDeckId(deckId)
+      setSessionTotal(sessionQueue.length)
+      setReviewing(true)
+      setRevealed(false)
+      setDone(0)
+    },
+    [state]
+  )
 
   const exitReview = useCallback(() => {
     setReviewing(false)
@@ -452,14 +492,15 @@ export function StudyView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
-      <header className="flex shrink-0 items-center justify-between gap-3 px-6 pb-3 pt-5">
-        <div>
-          <h1 className="text-lg font-semibold">Study</h1>
-          <p className="text-xs text-muted-foreground">
+      <header className="flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight">Study</h1>
+          <p className="mt-0.5 text-[0.65rem] font-medium tabular-nums text-(--ui-text-tertiary)">
             {totals.due} due · {totals.fresh} new · {totals.total} cards
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+
+        <div className="flex shrink-0 items-center gap-1">
           {reviewing || browseDeckId || matchDeckId || takingTest ? (
             <Button
               onClick={() => {
@@ -475,58 +516,52 @@ export function StudyView() {
             </Button>
           ) : (
             <>
-              <div className="mr-1 flex items-center overflow-hidden rounded-md border border-border">
-                <button
-                  className={cn(
-                    'px-2 py-1.5 transition-colors',
-                    view === 'cards'
-                      ? 'bg-accent text-accent-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                  onClick={() => setViewMode('cards')}
-                  title="Card view"
-                  type="button"
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button aria-label="Add study material" size="icon-xs" title="Add study material" variant="ghost">
+                    <IconPlus />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuItem onSelect={() => setNewDeckSection('')}>
+                    <IconCards />
+                    New deck
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setNewSectionOpen(true)}>
+                    <IconFolderPlus />
+                    New section
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setImportOpen(true)}>
+                    <IconFileImport />
+                    Import cards
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Tip label="Study settings">
+                <Button
+                  aria-label="Study settings"
+                  onClick={() => setSettingsOpen(true)}
+                  size="icon-xs"
+                  variant="ghost"
                 >
-                  <IconLayoutGrid size={14} />
-                </button>
-                <button
-                  className={cn(
-                    'px-2 py-1.5 transition-colors',
-                    view === 'list' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
-                  )}
-                  onClick={() => setViewMode('list')}
-                  title="List view"
-                  type="button"
-                >
-                  <IconList size={14} />
-                </button>
-              </div>
-              <button
-                aria-label="Study settings"
-                className="rounded-md border border-border px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                onClick={() => setSettingsOpen(true)}
-                title="Study settings"
-                type="button"
-              >
-                <IconSettings size={14} />
-              </button>
-              <Button onClick={() => setNewSectionOpen(true)} size="sm" variant="outline">
-                <IconFolderPlus size={14} />
-                New section
-              </Button>
-              <Button onClick={() => setNewDeckSection('')} size="sm" variant="outline">
-                New deck
-              </Button>
-              <Button onClick={() => setImportOpen(true)} size="sm" variant="outline">
-                Import cards
-              </Button>
-              <Button disabled={totals.due === 0} onClick={() => startReview(null)} size="sm">
-                Study all
-              </Button>
+                  <IconSettings />
+                </Button>
+              </Tip>
             </>
           )}
         </div>
       </header>
+
+      {!reviewing && !browseDeckId && !matchDeckId && !takingTest && (
+        <TodaysReviewBrief
+          counts={todayCounts}
+          estimatedMinutes={estimatedReviewMinutes}
+          hasScheduledDue={scheduledDue > 0}
+          onStart={() => startReview(null)}
+          total={todayQueue.length}
+        />
+      )}
 
       {autoImported.length > 0 && !reviewing && !browseDeckId && (
         <div className="mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs">
@@ -547,13 +582,16 @@ export function StudyView() {
       {reviewing ? (
         current ? (
           <ReviewSurface
+            activeCategory={categoryForQueueItem(current, state)}
             flip={flip}
             intervals={previewIntervals(state, current.card.id, now)}
             item={current}
             onGrade={grade}
             onReveal={() => setRevealed(true)}
+            position={Math.min(done + 1, sessionTotal)}
             remainingCounts={remainingCounts}
             revealed={revealed}
+            sessionTotal={sessionTotal}
             showIntervalHints={settings.showIntervalHints}
           />
         ) : (
@@ -594,11 +632,14 @@ export function StudyView() {
           mindmaps={mindmaps}
           onBrowse={setBrowseDeckId}
           onCreateDeck={setNewDeckSection}
+          onDeleteDeck={removeDeck}
           onMatch={startMatch}
+          onMoveDeck={moveDeck}
           onOpenMindmap={setViewingMindmap}
           onStartTest={setTakingTest}
           onStudy={startReview}
           onToggleSection={toggleSection}
+          onViewChange={setViewMode}
           state={state}
           testAttempts={testAttempts}
           tests={tests}
@@ -626,6 +667,63 @@ export function StudyView() {
         settings={settings}
       />
     </div>
+  )
+}
+
+function TodaysReviewBrief({
+  counts,
+  estimatedMinutes,
+  hasScheduledDue,
+  onStart,
+  total
+}: {
+  counts: ReviewCategoryCounts
+  estimatedMinutes: number
+  hasScheduledDue: boolean
+  onStart: () => void
+  total: number
+}) {
+  const hasFreshCards = counts.new > 0
+
+  return (
+    <section className="mx-6 mb-3 flex items-center justify-between gap-5 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
+          Today&rsquo;s review
+        </p>
+
+        {hasScheduledDue ? (
+          <p className="mt-1 text-base font-semibold tracking-tight">
+            {total} card{total === 1 ? '' : 's'}{' '}
+            <span className="font-normal text-muted-foreground">· about {estimatedMinutes} min</span>
+          </p>
+        ) : (
+          <p className="mt-1 text-base font-semibold tracking-tight">You&rsquo;re caught up</p>
+        )}
+
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] tabular-nums text-muted-foreground">
+          <span>
+            <span className="font-semibold text-foreground">{counts.new}</span> New
+          </span>
+          <span>
+            <span className="font-semibold text-foreground">{counts.learning}</span> Learning
+          </span>
+          <span>
+            <span className="font-semibold text-foreground">{counts.review}</span> Review
+          </span>
+        </div>
+      </div>
+
+      {hasScheduledDue ? (
+        <Button onClick={onStart} size="sm">
+          Start review →
+        </Button>
+      ) : hasFreshCards ? (
+        <Button onClick={onStart} size="sm">
+          Practice new cards
+        </Button>
+      ) : null}
+    </section>
   )
 }
 
@@ -882,11 +980,14 @@ function DeckBrowser({
   mindmaps,
   onBrowse,
   onCreateDeck,
+  onDeleteDeck,
   onMatch,
+  onMoveDeck,
   onOpenMindmap,
   onStartTest,
   onStudy,
   onToggleSection,
+  onViewChange,
   state,
   testAttempts,
   tests,
@@ -896,16 +997,21 @@ function DeckBrowser({
   mindmaps: MindmapFile[]
   onBrowse: (deckId: string) => void
   onCreateDeck: (section: string) => void
+  onDeleteDeck: (deckId: string) => void
   onMatch: (deckId: string) => void
+  onMoveDeck: (deckId: string, section: string) => void
   onOpenMindmap: (file: MindmapFile) => void
   onStartTest: (file: TestFile) => void
   onStudy: (deckId: string) => void
   onToggleSection: (course: string) => void
+  onViewChange: (view: DeckViewMode) => void
   state: StudyState
   testAttempts: TestAttemptsStore
   tests: TestFile[]
   view: DeckViewMode
 }) {
+  const [deleteDeckTarget, setDeleteDeckTarget] = useState<StudyDeck | null>(null)
+
   const { curvesByDeck, now } = useMemo(() => {
     const calculationTime = new Date()
     const curves = new Map(
@@ -924,8 +1030,12 @@ function DeckBrowser({
 
     return { curvesByDeck: curves, now: calculationTime }
   }, [state])
+
   const deckGroups = groupDecks(state, now)
-  const extrasByCourse = useMemo(() => groupExtras(state.sections, mindmaps, tests), [mindmaps, state.sections, tests])
+  const extrasByCourse = useMemo(
+    () => groupExtras(state.sections, mindmaps, tests),
+    [mindmaps, state.sections, tests]
+  )
 
   const extraOnlyCourses = [...extrasByCourse.keys()]
     .filter(course => !deckGroups.some(group => group.course === course))
@@ -939,7 +1049,16 @@ function DeckBrowser({
       extras: extrasByCourse.get(course),
       stats: { due: 0, fresh: 0, total: 0 }
     }))
-  ]
+  ].sort((a, b) => {
+    const aIsOther = a.course.toLocaleLowerCase() === 'other'
+    const bIsOther = b.course.toLocaleLowerCase() === 'other'
+
+    if (aIsOther !== bIsOther) {
+      return aIsOther ? 1 : -1
+    }
+
+    return b.stats.due - a.stats.due || a.course.localeCompare(b.course)
+  })
 
   if (!groups.length) {
     return (
@@ -949,32 +1068,61 @@ function DeckBrowser({
 
   return (
     <div className="pb-10">
-      <Heatmap state={state} />
+      <div className="flex justify-end px-8 pt-1">
+        <div className="flex items-center rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-0.5">
+          <Tip label="List view">
+            <Button
+              aria-label="List view"
+              aria-pressed={view === 'list'}
+              className={cn(view === 'list' && 'bg-(--ui-control-active-background) text-foreground')}
+              onClick={() => onViewChange('list')}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <IconList />
+            </Button>
+          </Tip>
+          <Tip label="Card view">
+            <Button
+              aria-label="Card view"
+              aria-pressed={view === 'cards'}
+              className={cn(view === 'cards' && 'bg-(--ui-control-active-background) text-foreground')}
+              onClick={() => onViewChange('cards')}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <IconLayoutGrid />
+            </Button>
+          </Tip>
+        </div>
+      </div>
+
       {groups.map(group => {
         const groupMindmaps = group.extras?.mindmaps ?? []
         const groupTests = group.extras?.tests ?? []
         const hasExtras = groupMindmaps.length > 0 || groupTests.length > 0
+        const hasResources = group.decks.length > 0 || hasExtras
         const isCollapsed = collapsedSections.has(group.course)
 
         return (
-          <section className="px-8 pt-7" key={group.course}>
-            <div className="mb-3 flex items-baseline justify-between">
-              <h2 className="text-[15px] font-semibold tracking-tight">
+          <section className="px-8 pt-5" key={group.course}>
+            <div className="mb-2 flex items-baseline justify-between gap-4">
+              <h2 className="min-w-0 text-sm font-semibold tracking-tight">
                 <button
                   aria-expanded={!isCollapsed}
-                  className="flex items-center gap-1.5 rounded-sm text-left hover:text-(--theme-primary) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
+                  className="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                   onClick={() => onToggleSection(group.course)}
                   type="button"
                 >
                   <IconChevronDown
                     aria-hidden="true"
-                    className={cn('transition-transform', isCollapsed && '-rotate-90')}
-                    size={15}
+                    className={cn('shrink-0 transition-transform', isCollapsed && '-rotate-90')}
+                    size={14}
                   />
-                  <span>{group.course}</span>
+                  <span className="truncate">{group.course}</span>
                 </button>
               </h2>
-              <span className="text-xs text-muted-foreground">
+              <span className="shrink-0 text-[0.6875rem] tabular-nums text-muted-foreground">
                 {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} ·{' '}
                 {group.stats.total} cards
                 {groupMindmaps.length > 0 &&
@@ -982,54 +1130,26 @@ function DeckBrowser({
                 {groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`}
               </span>
             </div>
-            {!isCollapsed && (
-              <>
-                {group.decks.length === 0 ? (
-                  hasExtras ? null : (
-                    <div className="rounded-xl border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-5">
-                      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
-                        Empty section
-                      </p>
-                      <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                        <span>No decks yet —</span>
-                        <Button onClick={() => onCreateDeck(group.course)} size="inline" variant="textStrong">
-                          add one
-                        </Button>
-                      </div>
-                    </div>
-                  )
-                ) : view === 'list' ? (
-                  <div className="flex flex-col gap-2">
+
+            {!isCollapsed &&
+              (hasResources ? (
+                view === 'list' ? (
+                  <div className="divide-y divide-(--ui-stroke-tertiary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
                     {group.decks.map(deck => (
                       <DeckRow
-                        deck={deck}
-                        key={deck.id}
-                        now={now}
-                        onBrowse={onBrowse}
-                        onMatch={onMatch}
-                        onStudy={onStudy}
-                        state={state}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {group.decks.map(deck => (
-                      <DeckCard
                         curve={curvesByDeck.get(deck.id) ?? []}
                         deck={deck}
                         key={deck.id}
                         now={now}
                         onBrowse={onBrowse}
+                        onDelete={() => setDeleteDeckTarget(deck)}
                         onMatch={onMatch}
+                        onMove={section => onMoveDeck(deck.id, section)}
                         onStudy={onStudy}
+                        sections={state.sections}
                         state={state}
                       />
                     ))}
-                  </div>
-                )}
-                {hasExtras && (
-                  <div className="mt-2 flex flex-col gap-2">
                     {groupMindmaps.map(mindmap => (
                       <MindmapRow key={mindmap.fileName} mindmap={mindmap} onOpen={() => onOpenMindmap(mindmap)} />
                     ))}
@@ -1042,27 +1162,115 @@ function DeckBrowser({
                       />
                     ))}
                   </div>
-                )}
-              </>
-            )}
+                ) : (
+                  <>
+                    {group.decks.length > 0 && (
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {group.decks.map(deck => (
+                          <DeckCard
+                            curve={curvesByDeck.get(deck.id) ?? []}
+                            deck={deck}
+                            key={deck.id}
+                            now={now}
+                            onBrowse={onBrowse}
+                            onDelete={() => setDeleteDeckTarget(deck)}
+                            onMatch={onMatch}
+                            onMove={section => onMoveDeck(deck.id, section)}
+                            onStudy={onStudy}
+                            sections={state.sections}
+                            state={state}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {hasExtras && (
+                      <div
+                        className={cn(
+                          'divide-y divide-(--ui-stroke-tertiary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)',
+                          group.decks.length > 0 && 'mt-3'
+                        )}
+                      >
+                        {groupMindmaps.map(mindmap => (
+                          <MindmapRow
+                            key={mindmap.fileName}
+                            mindmap={mindmap}
+                            onOpen={() => onOpenMindmap(mindmap)}
+                          />
+                        ))}
+                        {groupTests.map(test => (
+                          <TestRow
+                            attempts={testAttempts[test.fileName]?.attempts ?? []}
+                            key={test.fileName}
+                            onStart={() => onStartTest(test)}
+                            test={test}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+              ) : (
+                <div className="rounded-md border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-4">
+                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
+                    Empty section
+                  </p>
+                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <span>No decks yet —</span>
+                    <Button onClick={() => onCreateDeck(group.course)} size="inline" variant="textStrong">
+                      add one
+                    </Button>
+                  </div>
+                </div>
+              ))}
           </section>
         )
       })}
+
+      <Heatmap state={state} />
+
+      <DeleteDeckDialog
+        deck={deleteDeckTarget}
+        onClose={() => setDeleteDeckTarget(null)}
+        onConfirm={() => {
+          if (!deleteDeckTarget) {
+            return
+          }
+
+          onDeleteDeck(deleteDeckTarget.id)
+          setDeleteDeckTarget(null)
+        }}
+      />
     </div>
+  )
+}
+
+function ResourceIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="grid size-7 shrink-0 place-items-center rounded-md bg-(--ui-bg-quaternary) text-(--ui-text-tertiary)">
+      {children}
+    </span>
   )
 }
 
 function MindmapRow({ mindmap, onOpen }: { mindmap: MindmapFile; onOpen: () => void }) {
   return (
-    <button
-      className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 text-left transition-colors hover:border-(--theme-primary)/40"
-      onClick={onOpen}
-      type="button"
-    >
-      <IconSitemap className="shrink-0 text-muted-foreground" size={16} />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">{mindmap.title}</span>
-      <Badge variant="outline">Mind map</Badge>
-    </button>
+    <div className="flex w-full items-center gap-3 px-3 py-2.5">
+      <ResourceIcon>
+        <IconSitemap size={15} />
+      </ResourceIcon>
+
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{mindmap.title}</div>
+        <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground">Mind map · visual outline</div>
+      </div>
+
+      <span className="hidden w-40 shrink-0 text-right text-xs text-muted-foreground sm:block">Visual outline</span>
+
+      <Button onClick={onOpen} size="sm" variant="outline">
+        Open
+      </Button>
+    </div>
   )
 }
 
@@ -1071,42 +1279,27 @@ function TestRow({ attempts, onStart, test }: { attempts: TestAttempt[]; onStart
   const last = lastAttempt(attempts)
   const count = test.questions.length
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
-      return
-    }
-
-    event.preventDefault()
-    onStart()
-  }
-
   return (
-    <div
-      className="group flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 outline-none transition-[box-shadow,border-color] hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
-      onClick={onStart}
-      onKeyDown={onKeyDown}
-      role="button"
-      tabIndex={0}
-    >
-      <IconChecklist className="shrink-0 text-muted-foreground" size={16} />
+    <div className="flex w-full items-center gap-3 px-3 py-2.5">
+      <ResourceIcon>
+        <IconChecklist size={15} />
+      </ResourceIcon>
+
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{test.title}</div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
-          <span>
-            {count} question{count === 1 ? '' : 's'}
-          </span>
-          {best && (
-            <span>
-              · best {best.score}/{best.total}
-            </span>
-          )}
-          {last && last !== best && (
-            <span>
-              · last {last.score}/{last.total}
-            </span>
-          )}
+        <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground">
+          {count} question{count === 1 ? '' : 's'}
+          {best ? ` · best ${best.score}/${best.total}` : ''}
         </div>
       </div>
+
+      <span className="hidden w-40 shrink-0 text-right text-xs tabular-nums text-muted-foreground sm:block">
+        {last ? `Test ${last.score}/${last.total}` : 'Not taken yet'}
+      </span>
+
+      <Button onClick={onStart} size="sm" variant="outline">
+        {last ? 'Retake' : 'Start'}
+      </Button>
     </div>
   )
 }
@@ -1119,9 +1312,36 @@ function DuePill({ due }: { due: number }) {
   )
 }
 
-function RetentionSparkline({ curve }: { curve: RetentionPoint[] }) {
-  // SVG defs need document-unique ids — this component renders once per deck card.
-  const gradientId = useId()
+const RETENTION_DAY_MS = 24 * 60 * 60 * 1000
+
+function RetentionSparkline({ curve, now }: { curve: RetentionPoint[]; now: Date }) {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [inspecting, setInspecting] = useState(false)
+
+  if (!curve.length) {
+    return (
+      <div>
+        <svg aria-hidden="true" className="h-9 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
+          <line
+            stroke="var(--ui-stroke-secondary)"
+            strokeDasharray="3 4"
+            strokeLinecap="round"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+            x1="2"
+            x2="98"
+            y1="12"
+            y2="28"
+          />
+        </svg>
+        <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
+          <span className="font-medium text-foreground">No recall estimate yet</span>
+          <span> · Review a card to begin</span>
+        </p>
+      </div>
+    )
+  }
+
   const finalDay = curve.at(-1)?.day ?? 1
   const coordinates = curve.map(point => {
     const x = 2 + (point.day / Math.max(1, finalDay)) * 96
@@ -1130,128 +1350,247 @@ function RetentionSparkline({ curve }: { curve: RetentionPoint[] }) {
     return [x, y] as const
   })
   const points = coordinates.map(([x, y]) => `${x},${y}`).join(' ')
-  const area = `M ${coordinates.map(([x, y]) => `${x} ${y}`).join(' L ')} L 98 38 L 2 38 Z`
   const first = curve[0]
   const last = curve.at(-1) ?? first
+  const safeIndex = Math.min(activeIndex, curve.length - 1)
+  const activePoint = curve[safeIndex]
+  const [activeX, activeY] = coordinates[safeIndex]
+  const activeDate = new Date(now.getTime() + activePoint.day * RETENTION_DAY_MS).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short'
+  })
+  const activeLabel = `${activeDate} · estimated recall ${Math.round(activePoint.retention * 100)}%`
+  const tooltipTransform =
+    activeX < 22
+      ? 'translate(0, calc(-100% - 8px))'
+      : activeX > 78
+        ? 'translate(-100%, calc(-100% - 8px))'
+        : 'translate(-50%, calc(-100% - 8px))'
 
   return (
-    <div>
-      <svg aria-hidden="true" className="h-10 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
-        <defs>
-          <linearGradient id={`${gradientId}-fade`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--theme-primary)" stopOpacity="0.38" />
-            <stop offset="70%" stopColor="var(--theme-primary)" stopOpacity="0.08" />
-            <stop offset="100%" stopColor="var(--theme-primary)" stopOpacity="0" />
-          </linearGradient>
-          <filter height="300%" id={`${gradientId}-glow`} width="120%" x="-10%" y="-100%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" />
-          </filter>
-        </defs>
-        <path d={area} fill={`url(#${gradientId}-fade)`} />
-        {/* Soft halo under the crisp line — the "glow". */}
+    <div
+      aria-label={`${Math.round(first.retention * 100)}% recall now. Projected ${Math.round(last.retention * 100)}% in ${finalDay} days. Use the arrow keys to inspect the curve.`}
+      className="relative outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      onBlur={() => setInspecting(false)}
+      onFocus={() => setInspecting(true)}
+      onKeyDown={event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+          return
+        }
+
+        event.preventDefault()
+        setInspecting(true)
+        setActiveIndex(index =>
+          event.key === 'ArrowLeft'
+            ? Math.max(0, index - 1)
+            : Math.min(curve.length - 1, index + 1)
+        )
+      }}
+      onPointerLeave={event => {
+        if (document.activeElement !== event.currentTarget) {
+          setInspecting(false)
+        }
+      }}
+      onPointerMove={event => {
+        const rect = event.currentTarget.getBoundingClientRect()
+        const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)))
+
+        setActiveIndex(Math.round(ratio * (curve.length - 1)))
+        setInspecting(true)
+      }}
+      role="img"
+      tabIndex={0}
+    >
+      <svg aria-hidden="true" className="h-9 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
         <polyline
           fill="none"
-          filter={`url(#${gradientId}-glow)`}
-          opacity="0.75"
           points={points}
-          stroke="var(--theme-primary)"
+          stroke="var(--ui-stroke-secondary)"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="2.6"
-        />
-        <polyline
-          fill="none"
-          points={points}
-          stroke="var(--theme-primary)"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.4"
+          strokeWidth="1"
           vectorEffect="non-scaling-stroke"
         />
+
+        {inspecting && (
+          <>
+            <line
+              stroke="var(--ui-text-secondary)"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+              x1={activeX - 3}
+              x2={activeX + 3}
+              y1={activeY}
+              y2={activeY}
+            />
+            <line
+              stroke="var(--ui-text-secondary)"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+              x1={activeX}
+              x2={activeX}
+              y1={activeY - 3}
+              y2={activeY + 3}
+            />
+          </>
+        )}
+
         <circle
-          cx={coordinates[0][0]}
-          cy={coordinates[0][1]}
+          cx={coordinates[coordinates.length - 1][0]}
+          cy={coordinates[coordinates.length - 1][1]}
           fill="var(--theme-primary)"
-          filter={`url(#${gradientId}-glow)`}
-          opacity="0.9"
-          r="2.6"
+          r="1.7"
         />
-        <circle cx={coordinates[0][0]} cy={coordinates[0][1]} fill="var(--theme-primary)" r="1.6" />
       </svg>
-      <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
-        Recall {Math.round(first.retention * 100)}% → {Math.round(last.retention * 100)}% in {finalDay}d
-      </p>
+
+      {inspecting && (
+        <span
+          className="pointer-events-none absolute z-20 whitespace-nowrap bg-foreground px-1.5 py-1 text-[11px] font-bold leading-none text-background"
+          style={{
+            left: `${activeX}%`,
+            top: `${(activeY / 40) * 100}%`,
+            transform: tooltipTransform
+          }}
+        >
+          {activeLabel}
+        </span>
+      )}
+
+      <Tip label="FSRS estimate based on cards you’ve reviewed in this deck." side="bottom">
+        <p className="mt-0.5 cursor-help text-[0.6875rem] tabular-nums">
+          <span className="font-semibold text-foreground">{Math.round(first.retention * 100)}% recall now</span>
+          <span className="text-muted-foreground">
+            {' '}
+            · Projected {Math.round(last.retention * 100)}% in {finalDay} days
+          </span>
+        </p>
+      </Tip>
     </div>
   )
 }
 
+function DeckActionsMenu({
+  deck,
+  onBrowse,
+  onDelete,
+  onMatch,
+  onMove,
+  sections,
+  total
+}: {
+  deck: StudyDeck
+  onBrowse: () => void
+  onDelete: () => void
+  onMatch: () => void
+  onMove: (section: string) => void
+  sections: string[]
+  total: number
+}) {
+  const currentSection =
+    !deck.course?.trim() || deck.course.trim().toLocaleLowerCase() === 'other' ? 'Other' : deck.course.trim()
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button aria-label={`More actions for ${deck.name}`} size="icon-xs" variant="ghost">
+          <IconDots />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onSelect={onBrowse}>Cards</DropdownMenuItem>
+        <DropdownMenuItem disabled={total < 2} onSelect={onMatch}>
+          Match
+        </DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Move to section</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-44">
+            {sections.map(section => (
+              <DropdownMenuItem
+                disabled={section.toLocaleLowerCase() === currentSection.toLocaleLowerCase()}
+                key={section}
+                onSelect={() => onMove(section)}
+              >
+                <span className="min-w-0 flex-1 truncate">{section}</span>
+                {section.toLocaleLowerCase() === currentSection.toLocaleLowerCase() && (
+                  <span className="text-muted-foreground">✓</span>
+                )}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuItem
+              disabled={currentSection === 'Other'}
+              onSelect={() => onMove('')}
+            >
+              <span className="min-w-0 flex-1">Other</span>
+              {currentSection === 'Other' && <span className="text-muted-foreground">✓</span>}
+            </DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuItem onSelect={onDelete} variant="destructive">
+          Delete deck
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function DeckRow({
+  curve,
   deck,
   now,
   onBrowse,
+  onDelete,
   onMatch,
+  onMove,
   onStudy,
+  sections,
   state
 }: {
+  curve: RetentionPoint[]
   deck: StudyDeck
   now: Date
   onBrowse: (deckId: string) => void
+  onDelete: () => void
   onMatch: (deckId: string) => void
+  onMove: (section: string) => void
   onStudy: (deckId: string) => void
+  sections: string[]
   state: StudyState
 }) {
   const stats = deckStats(state, deck.id, now)
 
-  const openDeck = () => onStudy(deck.id)
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
-      return
-    }
-
-    event.preventDefault()
-    openDeck()
-  }
-
   return (
-    <div
-      className="group flex cursor-pointer items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 outline-none transition-[box-shadow,border-color] hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
-      onClick={openDeck}
-      onKeyDown={onKeyDown}
-      role="button"
-      tabIndex={0}
-    >
+    <div className="flex w-full items-center gap-3 px-3 py-2.5">
+      <ResourceIcon>
+        <IconCards size={15} />
+      </ResourceIcon>
+
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{deck.name}</span>
           {stats.due > 0 && <DuePill due={stats.due} />}
         </div>
-        <p className="mt-1.5 text-[11px] text-muted-foreground tabular-nums">
-          {stats.total} cards · {stats.fresh} new
+        <p className="mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
+          {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
         </p>
       </div>
-      <div className="flex shrink-0 gap-1.5 opacity-80 transition-opacity group-hover:opacity-100">
-        <Button
-          disabled={stats.total < 2}
-          onClick={event => {
-            event.stopPropagation()
-            onMatch(deck.id)
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          Match
-        </Button>
-        <Button
-          onClick={event => {
-            event.stopPropagation()
-            onBrowse(deck.id)
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          Cards
-        </Button>
+
+      <div className="hidden w-52 shrink-0 lg:block">
+        <RetentionSparkline curve={curve} now={now} />
       </div>
+
+      <Button onClick={() => onStudy(deck.id)} size="sm" variant="outline">
+        Study
+      </Button>
+
+      <DeckActionsMenu
+        deck={deck}
+        onBrowse={() => onBrowse(deck.id)}
+        onDelete={onDelete}
+        onMatch={() => onMatch(deck.id)}
+        onMove={onMove}
+        sections={sections}
+        total={stats.total}
+      />
     </div>
   )
 }
@@ -1261,107 +1600,102 @@ function DeckCard({
   deck,
   now,
   onBrowse,
+  onDelete,
   onMatch,
+  onMove,
   onStudy,
+  sections,
   state
 }: {
   curve: RetentionPoint[]
   deck: StudyDeck
   now: Date
   onBrowse: (deckId: string) => void
+  onDelete: () => void
   onMatch: (deckId: string) => void
+  onMove: (section: string) => void
   onStudy: (deckId: string) => void
+  sections: string[]
   state: StudyState
 }) {
   const stats = deckStats(state, deck.id, now)
 
-  const openDeck = () => onStudy(deck.id)
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
-      return
-    }
-
-    event.preventDefault()
-    openDeck()
-  }
-
   return (
-    <div
-      className="group flex cursor-pointer flex-col gap-4 rounded-2xl border border-border bg-card p-5 outline-none transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:border-(--theme-primary)/50 hover:ring-2 hover:ring-(--theme-primary)/20 hover:shadow-lg hover:shadow-black/20 focus-visible:ring-2 focus-visible:ring-(--theme-primary)/45"
-      onClick={openDeck}
-      onKeyDown={onKeyDown}
-      role="button"
-      tabIndex={0}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="text-[15px] font-semibold leading-snug tracking-tight">{deck.name}</h3>
+    <div className="flex flex-col gap-3 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4">
+      <div className="flex items-start gap-2.5">
+        <ResourceIcon>
+          <IconCards size={15} />
+        </ResourceIcon>
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-sm font-semibold">{deck.name}</h3>
+          <p className="mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
+            {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
+          </p>
+        </div>
         {stats.due > 0 && <DuePill due={stats.due} />}
       </div>
 
-      {curve.length > 0 ? (
-        <RetentionSparkline curve={curve} />
-      ) : (
-        <div>
-          <svg aria-hidden="true" className="h-10 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
-            <line
-              stroke="var(--ui-stroke-secondary)"
-              strokeDasharray="3 4"
-              strokeLinecap="round"
-              strokeWidth="1.2"
-              x1="2"
-              x2="98"
-              y1="10"
-              y2="30"
-            />
-          </svg>
-          <p className="mt-0.5 text-[11px] text-muted-foreground/70">
-            Study one card to light up this deck&rsquo;s forgetting curve.
-          </p>
-        </div>
-      )}
+      <RetentionSparkline curve={curve} now={now} />
 
-      {/* The forgetting curve above is the deck's progress story — no second bar. */}
-      <p className="mt-auto text-[11px] tabular-nums text-muted-foreground">
-        {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
-      </p>
-
-      <div className="flex gap-2">
-        <Button
-          disabled={stats.total < 2}
-          onClick={event => {
-            event.stopPropagation()
-            onMatch(deck.id)
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Match
+      <div className="mt-auto flex items-center justify-end gap-1">
+        <Button onClick={() => onStudy(deck.id)} size="sm" variant="outline">
+          Study
         </Button>
-        <Button
-          onClick={event => {
-            event.stopPropagation()
-            onBrowse(deck.id)
-          }}
-          size="sm"
-          variant="ghost"
-        >
-          Cards
-        </Button>
+        <DeckActionsMenu
+          deck={deck}
+          onBrowse={() => onBrowse(deck.id)}
+          onDelete={onDelete}
+          onMatch={() => onMatch(deck.id)}
+          onMove={onMove}
+          sections={sections}
+          total={stats.total}
+        />
       </div>
     </div>
   )
 }
 
+function DeleteDeckDialog({
+  deck,
+  onClose,
+  onConfirm
+}: {
+  deck: StudyDeck | null
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Dialog onOpenChange={open => !open && onClose()} open={Boolean(deck)}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete deck?</DialogTitle>
+          <DialogDescription>
+            {deck ? `“${deck.name}” and its local review schedule will be removed.` : 'This deck will be removed.'}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button onClick={onClose} variant="outline">
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} variant="destructive">
+            Delete deck
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // Contribution grid of review activity with streak stats, month labels, hover tooltips,
-// legend, and a today marker — the "dynamic" upgrade.
-const HEAT_MIX = ['', '30%', '52%', '76%', '100%']
+// legend, and a today marker.
+const HEAT_MIX = ['', '14%', '24%', '38%', '54%']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function heatColor(level: number): string {
   return level === 0
-    ? 'color-mix(in srgb, var(--ui-text-primary) 10%, transparent)'
-    : `color-mix(in srgb, var(--theme-primary) ${HEAT_MIX[level]}, transparent)`
+    ? 'color-mix(in srgb, var(--ui-text-primary) 8%, transparent)'
+    : `color-mix(in srgb, var(--ui-text-primary) ${HEAT_MIX[level]}, transparent)`
 }
 
 function Stat({ label, value }: { label: string; value: number | string }) {
@@ -1374,12 +1708,17 @@ function Stat({ label, value }: { label: string; value: number | string }) {
 }
 
 function Heatmap({ state }: { state: StudyState }) {
+  const [expanded, setExpanded] = useState(false)
   const todayIso = new Date().toISOString()
   const { cells, total } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso])
   const stats = useMemo(() => studyMotivation(state, todayIso), [state, todayIso])
   const todayKey = todayIso.slice(0, 10)
   const firstDayOffset = cells[0] ? new Date(`${cells[0].date}T00:00:00.000Z`).getUTCDay() : 0
   const weeks = Math.ceil((firstDayOffset + cells.length) / 7)
+  const daysIntoWeek = new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 1
+  const reviewsThisWeek = cells
+    .slice(-daysIntoWeek)
+    .reduce((sum, cell) => sum + cell.count, 0)
 
   const monthLabels: { col: number; label: string }[] = []
   if (cells[0]) {
@@ -1398,77 +1737,107 @@ function Heatmap({ state }: { state: StudyState }) {
   }
 
   return (
-    <div className="px-8 pt-2">
-      <div className="rounded-2xl border border-border bg-card p-5">
-        <div className="mb-4">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">
-            Review activity
-          </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs">
-            <Stat label="day streak" value={stats.currentStreak} />
-            <Stat label="longest" value={stats.longestStreak} />
-            <Stat label="days active" value={`${stats.daysLearnedPct}%`} />
-            {stats.retentionPct !== null && <Stat label="retention (30d)" value={`${stats.retentionPct}%`} />}
-            <span className="text-muted-foreground">{total} reviews · past 12 months</span>
+    <section className="px-8 pb-2 pt-8">
+      <div className="rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
+        <button
+          aria-expanded={expanded}
+          className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          onClick={() => setExpanded(value => !value)}
+          type="button"
+        >
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold">Review history</h2>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[0.6875rem] tabular-nums text-muted-foreground">
+              <span>{stats.currentStreak} day streak</span>
+              <span aria-hidden="true">·</span>
+              <span>{stats.retentionPct === null ? '—' : `${stats.retentionPct}%`} 30-day retention</span>
+              <span aria-hidden="true">·</span>
+              <span>{reviewsThisWeek} reviews this week</span>
+            </p>
           </div>
-          {total === 0 && <p className="mt-1 text-xs text-muted-foreground">Your year fills in as you grade cards.</p>}
-        </div>
+          <IconChevronDown
+            aria-hidden="true"
+            className={cn('shrink-0 text-muted-foreground transition-transform', !expanded && '-rotate-90')}
+            size={15}
+          />
+        </button>
 
-        <div className="overflow-x-auto pb-1">
-          <div className="min-w-max">
-            <div className="grid grid-cols-[2rem_auto] gap-x-2 gap-y-1">
-              <div />
-              <div className="relative h-3 text-[9px] text-muted-foreground" style={{ width: `${weeks * 14}px` }}>
-                {monthLabels.map(month => (
-                  <span
-                    className="absolute"
-                    key={`${month.label}-${month.col}`}
-                    style={{ left: `${month.col * 14}px` }}
-                  >
-                    {month.label}
-                  </span>
-                ))}
-              </div>
-              <div
-                className="grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground"
-                style={{ gridTemplateRows: 'repeat(7, 11px)' }}
-              >
-                {WEEKDAYS.map(day => (
-                  <span key={day}>{day}</span>
-                ))}
-              </div>
-              <div
-                className="grid grid-flow-col grid-rows-7 gap-[3px]"
-                style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}
-              >
-                {Array.from({ length: firstDayOffset }, (_, index) => (
-                  <span aria-hidden="true" key={`leading-${index}`} />
-                ))}
-                {cells.map(cell => (
-                  <Tip
-                    key={cell.date}
-                    label={`${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`}
-                    side="top"
-                  >
-                    <div
-                      className={cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60')}
-                      style={{ backgroundColor: heatColor(cell.level) }}
-                    />
-                  </Tip>
-                ))}
-              </div>
+        {expanded && (
+          <div className="border-t border-(--ui-stroke-tertiary) px-4 pb-4 pt-3">
+            <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs">
+              <Stat label="longest streak" value={stats.longestStreak} />
+              <Stat label="days active" value={`${stats.daysLearnedPct}%`} />
+              <span className="text-muted-foreground">{total} reviews · past 12 months</span>
             </div>
-            <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
-              <span>Less</span>
-              {[0, 1, 2, 3, 4].map(level => (
-                <span className="size-2.5 rounded-[2px]" key={level} style={{ backgroundColor: heatColor(level) }} />
-              ))}
-              <span>More</span>
+
+            {total === 0 && (
+              <p className="mb-3 text-xs text-muted-foreground">Your history fills in as you grade cards.</p>
+            )}
+
+            <div className="overflow-x-auto pb-1">
+              <div className="min-w-max">
+                <div className="grid grid-cols-[2rem_auto] gap-x-2 gap-y-1">
+                  <div />
+                  <div className="relative h-3 text-[9px] text-muted-foreground" style={{ width: `${weeks * 14}px` }}>
+                    {monthLabels.map(month => (
+                      <span
+                        className="absolute"
+                        key={`${month.label}-${month.col}`}
+                        style={{ left: `${month.col * 14}px` }}
+                      >
+                        {month.label}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div
+                    className="grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground"
+                    style={{ gridTemplateRows: 'repeat(7, 11px)' }}
+                  >
+                    {WEEKDAYS.map(day => (
+                      <span key={day}>{day}</span>
+                    ))}
+                  </div>
+
+                  <div
+                    className="grid grid-flow-col grid-rows-7 gap-[3px]"
+                    style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}
+                  >
+                    {Array.from({ length: firstDayOffset }, (_, index) => (
+                      <span aria-hidden="true" key={`leading-${index}`} />
+                    ))}
+                    {cells.map(cell => (
+                      <Tip
+                        key={cell.date}
+                        label={`${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`}
+                        side="top"
+                      >
+                        <div
+                          className={cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60')}
+                          style={{ backgroundColor: heatColor(cell.level) }}
+                        />
+                      </Tip>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
+                  <span>Less</span>
+                  {[0, 1, 2, 3, 4].map(level => (
+                    <span
+                      className="size-2.5 rounded-[2px]"
+                      key={level}
+                      style={{ backgroundColor: heatColor(level) }}
+                    />
+                  ))}
+                  <span>More</span>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -1945,29 +2314,41 @@ function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => voi
 }
 
 function ReviewSurface({
+  activeCategory,
   flip,
   intervals,
   item,
   onGrade,
   onReveal,
+  position,
   remainingCounts,
   revealed,
+  sessionTotal,
   showIntervalHints
 }: {
+  activeCategory: ReviewCategory
   flip: boolean
   intervals: Record<StudyRating, string>
   item: QueueItem
   onGrade: (rating: StudyRating) => void
   onReveal: () => void
-  remainingCounts: { learning: number; new: number; review: number }
+  position: number
+  remainingCounts: ReviewCategoryCounts
   revealed: boolean
+  sessionTotal: number
   showIntervalHints: boolean
 }) {
+  const countItems: { category: ReviewCategory; label: string; value: number }[] = [
+    { category: 'new', label: 'New', value: remainingCounts.new },
+    { category: 'learning', label: 'Learning', value: remainingCounts.learning },
+    { category: 'review', label: 'Review', value: remainingCounts.review }
+  ]
+
   return (
     <div className="flex flex-1 flex-col items-center px-6 pb-8">
       <div className="flex w-full max-w-2xl flex-1 flex-col">
-        <div className="flex items-center justify-between pb-2 text-xs text-muted-foreground">
-          <span className="truncate">
+        <div className="flex items-center justify-between gap-4 pb-2 text-xs text-muted-foreground">
+          <span className="min-w-0 truncate">
             {item.deckName}
             {item.isNew && (
               <Badge className="ml-2" variant="outline">
@@ -1975,24 +2356,34 @@ function ReviewSurface({
               </Badge>
             )}
           </span>
-          <span
-            aria-label="Cards remaining"
-            className="flex shrink-0 items-center gap-3 font-mono text-[0.6875rem] tabular-nums"
-          >
-            <span className="text-(--ui-blue)" title="New cards remaining">
-              {remainingCounts.new} <span className="font-sans text-muted-foreground">New</span>
+
+          <div className="flex shrink-0 items-center gap-4">
+            <span className="tabular-nums">
+              {position} of {sessionTotal}
             </span>
-            <span className="text-(--ui-red)" title="Learning cards remaining">
-              {remainingCounts.learning} <span className="font-sans text-muted-foreground">Learning</span>
+
+            <span
+              aria-label="Cards remaining"
+              className="flex items-center gap-3 text-[0.6875rem] tabular-nums"
+            >
+              {countItems.map(count => (
+                <span className="flex items-center gap-1.5" key={count.category}>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'size-1 rounded-full bg-(--ui-stroke-secondary)',
+                      activeCategory === count.category && 'bg-(--theme-primary)'
+                    )}
+                  />
+                  <span>
+                    <span className="font-medium text-foreground">{count.value}</span> {count.label}
+                  </span>
+                </span>
+              ))}
             </span>
-            <span className="text-(--ui-green)" title="Review cards remaining">
-              {remainingCounts.review} <span className="font-sans text-muted-foreground">Review</span>
-            </span>
-          </span>
+          </div>
         </div>
 
-        {/* Card. Flip build = a 3D-rotating card with distinct front/back faces; plain
-            build reveals the answer beneath a divider (unchanged behavior). */}
         {flip ? (
           <button
             aria-label={revealed ? item.card.back : 'Show answer'}
@@ -2045,7 +2436,10 @@ function ReviewSurface({
             <div className="grid grid-cols-4 gap-2">
               {GRADES.map(option => (
                 <Button
-                  className={cn('flex-col gap-0.5 py-5', option.rating === 'again' && 'text-destructive')}
+                  className={cn(
+                    'flex-col gap-0.5 py-5',
+                    option.rating === 'again' && 'text-(--theme-primary)'
+                  )}
                   key={option.rating}
                   onClick={() => onGrade(option.rating)}
                   variant="secondary"
