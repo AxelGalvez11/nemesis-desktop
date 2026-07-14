@@ -48,10 +48,24 @@ test('legacy home migration is offered only when unambiguous markers exist', () 
   // Fresh machine: nothing to offer.
   assert.equal(detectLegacyHomeMigration(withDirs()), null)
 
-  // Nemesis home already exists: never prompt, even with a legacy dir present.
+  // Nemesis home already holds a runtime: never prompt, even with a legacy dir present.
   assert.equal(
-    detectLegacyHomeMigration(withDirs('/Users/student/.nemesis', '/Users/student/.hermes', '/Users/student/.hermes/hermes-agent')),
+    detectLegacyHomeMigration(
+      withDirs(
+        '/Users/student/.nemesis',
+        '/Users/student/.nemesis/hermes-agent',
+        '/Users/student/.hermes',
+        '/Users/student/.hermes/hermes-agent'
+      )
+    ),
     null
+  )
+
+  // A runtime-less stub (failed beta.2 first boot: bootstrap-cache + logs only)
+  // must NOT block the offer.
+  assert.deepEqual(
+    detectLegacyHomeMigration(withDirs('/Users/student/.nemesis', '/Users/student/.hermes', '/Users/student/.hermes/hermes-agent')),
+    { legacyHome: '/Users/student/.hermes', nemesisHome: '/Users/student/.nemesis' }
   )
 
   // Legacy dir without agent markers (random stray folder): no prompt.

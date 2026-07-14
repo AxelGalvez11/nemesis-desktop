@@ -362,6 +362,10 @@ function maybeOfferLegacyHomeMigration() {
   }
 
   try {
+    // The dialog only fires when nemesisHome lacks a runtime, so anything
+    // there is a failed-boot stub (bootstrap-cache/, logs/) — clear it or the
+    // rename fails with EEXIST/ENOTEMPTY.
+    fs.rmSync(migration.nemesisHome, { force: true, recursive: true })
     fs.renameSync(migration.legacyHome, migration.nemesisHome)
   } catch (error) {
     dialog.showErrorBox(

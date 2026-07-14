@@ -51,8 +51,14 @@ function detectLegacyHomeMigration(options: {
   platform: NodeJS.Platform
 }): null | { legacyHome: string; nemesisHome: string } {
   const { exists, home, localAppData, nemesisHome, platform } = options
+  const joiner = platform === 'win32' ? path.win32 : path
+  const looksLikeAgentHome = (dir: string) =>
+    exists(joiner.join(dir, 'hermes-agent')) || exists(joiner.join(dir, 'config.yaml'))
 
-  if (exists(nemesisHome)) {
+  // A nemesis home that already contains a runtime wins outright. A mere stub
+  // (bootstrap-cache/ + logs/ left behind by a failed first boot) must NOT
+  // block the offer — beta.2's broken bootstrap created exactly such stubs.
+  if (looksLikeAgentHome(nemesisHome)) {
     return null
   }
 
@@ -62,11 +68,7 @@ function detectLegacyHomeMigration(options: {
     return null
   }
 
-  const joiner = platform === 'win32' ? path.win32 : path
-  const looksLikeAgentHome =
-    exists(joiner.join(legacyHome, 'hermes-agent')) || exists(joiner.join(legacyHome, 'config.yaml'))
-
-  return looksLikeAgentHome ? { legacyHome, nemesisHome } : null
+  return looksLikeAgentHome(legacyHome) ? { legacyHome, nemesisHome } : null
 }
 
 export {
