@@ -11,6 +11,7 @@ import {
   IconFolderPlus,
   IconLayoutGrid,
   IconList,
+  IconPencil,
   IconPlayerPause,
   IconPlus,
   IconSettings,
@@ -44,9 +45,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
+import { renameDesktopPath } from '@/lib/desktop-fs'
 import { cn } from '@/lib/utils'
 
-import { importedDeckFileNames, scanAllDeckFiles } from './deck-files'
+import { hasClozeMarker, renderClozeAnswer, renderClozePrompt } from './cloze'
+import { DECK_DIR, importedDeckFileNames, scanAllDeckFiles } from './deck-files'
 import {
   bestAttempt,
   groupExtras,
@@ -75,11 +78,15 @@ import {
   freshId,
   getSettings,
   gradeCard,
+  type GradeUndo,
   groupDecks,
+  LEECH_TAG,
   loadState,
+  localDayKey,
   previewIntervals,
   type QueueItem,
   reconcileDeckFiles,
+  renameDeck,
   reviewHeatmap,
   type ReviewOrder,
   saveState,
@@ -91,6 +98,7 @@ import {
   type StudySettings,
   type StudyState,
   toggleSuspendCard,
+  undoLastGrade,
   updateCard
 } from './model'
 import { deckRetentionCurve, type RetentionPoint } from './retention'
@@ -113,6 +121,28 @@ const ORDER_OPTIONS: SegmentedControlOption<ReviewOrder>[] = [
   { id: 'random', label: 'Random' }
 ]
 
+// FSRS request_retention choices (see StudySettings.desiredRetention). Values
+// are stringified for the Select; String(0.9) round-trips exactly.
+const RETENTION_OPTIONS: { label: string; value: string }[] = [
+  { label: '80%', value: '0.8' },
+  { label: '85%', value: '0.85' },
+  { label: '90% (default)', value: '0.9' },
+  { label: '95%', value: '0.95' }
+]
+
+/** "3 cards reviewed — 2 Good · 1 Again." for the end-of-session recap. */
+function sessionRecapLine(done: number, grades: Record<StudyRating, number>): string {
+  const parts = GRADES.filter(option => grades[option.rating] > 0)
+    .map(option => `${grades[option.rating]} ${option.label}`)
+    .join(' · ')
+
+  return `${done} card${done === 1 ? '' : 's'} reviewed${parts ? ` — ${parts}` : ''}.`
+}
+
+function zeroSessionGrades(): Record<StudyRating, number> {
+  return { again: 0, easy: 0, good: 0, hard: 0 }
+}
+
 type ReviewCategory = 'learning' | 'new' | 'review'
 
 interface ReviewCategoryCounts {
@@ -126,7 +156,7 @@ function categoryForQueueItem(item: QueueItem, state: StudyState): ReviewCategor
     return 'new'
   }
 
-  const cardState = state.schedule[item.card.id]?.state
+  const cardState = state.schedule[item.scheduleKey]?.state
 
   return cardState === 1 || cardState === 3 ? 'learning' : 'review'
 }
@@ -189,6 +219,10 @@ export function StudyView() {
   const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
   const [done, setDone] = useState(0)
   const [sessionTotal, setSessionTotal] = useState(0)
+  // Session-only (deliberately unpersisted): the pre-grade snapshot for Undo
+  // and the per-grade tallies for the end-of-session recap.
+  const [lastUndo, setLastUndo] = useState<null | (GradeUndo & { rating: StudyRating })>(null)
+  const [sessionGrades, setSessionGrades] = useState<Record<StudyRating, number>>(() => zeroSessionGrades())
   const [autoImported, setAutoImported] = useState<string[]>([])
   const [mindmaps, setMindmaps] = useState<MindmapFile[]>([])
   const [tests, setTests] = useState<TestFile[]>([])
@@ -341,6 +375,8 @@ export function StudyView() {
       setReviewing(true)
       setRevealed(false)
       setDone(0)
+      setLastUndo(null)
+      setSessionGrades(zeroSessionGrades())
     },
     [state]
   )
@@ -356,12 +392,30 @@ export function StudyView() {
         return
       }
 
-      update(gradeCard(state, current.card.id, rating, new Date()))
+      // Snapshot BEFORE grading so Undo can restore the exact schedule entry
+      // (or its absence, for a never-studied card).
+      const previous = state.schedule[current.scheduleKey]
+
+      setLastUndo({ rating, scheduleKey: current.scheduleKey, ...(previous ? { previous } : {}) })
+      setSessionGrades(counts => ({ ...counts, [rating]: counts[rating] + 1 }))
+      update(gradeCard(state, current.scheduleKey, rating, new Date()))
       setRevealed(false)
       setDone(count => count + 1)
     },
     [current, state, update]
   )
+
+  const undoGrade = useCallback(() => {
+    if (!lastUndo) {
+      return
+    }
+
+    update(undoLastGrade(state, lastUndo))
+    setSessionGrades(counts => ({ ...counts, [lastUndo.rating]: Math.max(0, counts[lastUndo.rating] - 1) }))
+    setDone(count => Math.max(0, count - 1))
+    setLastUndo(null)
+    setRevealed(false)
+  }, [lastUndo, state, update])
 
   // Anki muscle memory: Space/Enter flips, 1-4 grades, Escape leaves the session.
   useEffect(() => {
@@ -386,6 +440,14 @@ export function StudyView() {
         return
       }
 
+      // Anki's `u`: take back the last grade (only while a next card is shown).
+      if (event.key === 'u' && lastUndo) {
+        event.preventDefault()
+        undoGrade()
+
+        return
+      }
+
       if (!revealed && (event.key === ' ' || event.key === 'Enter')) {
         event.preventDefault()
         setRevealed(true)
@@ -406,7 +468,7 @@ export function StudyView() {
     window.addEventListener('keydown', onKey)
 
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, exitReview, grade, revealed, reviewing])
+  }, [current, exitReview, grade, lastUndo, revealed, reviewing, undoGrade])
 
   const setViewMode = useCallback((mode: DeckViewMode) => {
     setView(mode)
@@ -464,6 +526,32 @@ export function StudyView() {
       setBrowseDeckId(null)
     },
     [state, update]
+  )
+
+  const renameBrowsedDeck = useCallback(
+    async (name: string) => {
+      const deck = state.decks.find(candidate => candidate.id === browseDeckId)
+
+      if (!deck || deck.name === name) {
+        return
+      }
+
+      if (!deck.sourceFile) {
+        update(renameDeck(state, deck.id, name))
+
+        return
+      }
+
+      // File-backed deck: rename the vault file FIRST — reconcile relinks by
+      // file name, so state only changes once the disk rename succeeded. A
+      // thrown IPC error surfaces in the dialog and the old name stands.
+      const extension = deck.sourceFile.match(/\.(tsv|txt|md)$/i)?.[0] ?? '.tsv'
+      const fileName = `${name}${extension}`
+
+      await renameDesktopPath(`${DECK_DIR}/${deck.sourceFile}`, fileName)
+      update(renameDeck(state, deck.id, name, fileName))
+    },
+    [browseDeckId, state, update]
   )
 
   const importCards = useCallback(
@@ -584,10 +672,11 @@ export function StudyView() {
           <ReviewSurface
             activeCategory={categoryForQueueItem(current, state)}
             flip={flip}
-            intervals={previewIntervals(state, current.card.id, now)}
+            intervals={previewIntervals(state, current.scheduleKey, now)}
             item={current}
             onGrade={grade}
             onReveal={() => setRevealed(true)}
+            onUndo={lastUndo ? undoGrade : null}
             position={Math.min(done + 1, sessionTotal)}
             remainingCounts={remainingCounts}
             revealed={revealed}
@@ -599,7 +688,7 @@ export function StudyView() {
             className="flex-1"
             description={
               done > 0
-                ? `${done} card${done === 1 ? '' : 's'} reviewed. Come back when the next ones are due.`
+                ? `${sessionRecapLine(done, sessionGrades)} Come back when the next ones are due.`
                 : 'Nothing is due right now.'
             }
             title="All caught up"
@@ -617,6 +706,7 @@ export function StudyView() {
           onDeleteDeck={() => removeDeck(browseDeckId)}
           onMatch={() => startMatch(browseDeckId)}
           onMoveDeck={section => moveDeck(browseDeckId, section)}
+          onRename={renameBrowsedDeck}
           sections={sections}
           state={state}
         />
@@ -865,6 +955,80 @@ function NewSectionDialog({
   )
 }
 
+function RenameDeckDialog({
+  deck,
+  onClose,
+  onRename
+}: {
+  deck: StudyDeck
+  onClose: () => void
+  onRename: (name: string) => Promise<void>
+}) {
+  const [name, setName] = useState(deck.name)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<null | string>(null)
+  const trimmed = name.trim()
+
+  const submit = async () => {
+    if (!trimmed || busy) {
+      return
+    }
+
+    if (trimmed === deck.name) {
+      onClose()
+
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+
+    try {
+      await onRename(trimmed)
+      onClose()
+    } catch (err) {
+      // Nothing changed (the file rename failed first) — keep the old name.
+      setError(err instanceof Error ? err.message : 'Could not rename the deck.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog onOpenChange={open => !open && !busy && onClose()} open>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Rename deck</DialogTitle>
+          <DialogDescription>
+            {deck.sourceFile
+              ? `Also renames “${deck.sourceFile}” in your Flashcards folder, so the agent keeps this deck in sync.`
+              : 'Review progress stays with the deck.'}
+          </DialogDescription>
+        </DialogHeader>
+        <Input
+          autoFocus
+          onChange={event => setName(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter') {
+              void submit()
+            }
+          }}
+          placeholder="Deck name"
+          value={name}
+        />
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <DialogFooter>
+          <Button disabled={busy} onClick={onClose} variant="outline">
+            Cancel
+          </Button>
+          <Button disabled={!trimmed || busy} onClick={() => void submit()}>
+            {busy ? 'Renaming…' : 'Rename'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function SettingRow({
   children,
   description,
@@ -933,6 +1097,26 @@ function StudySettingsDialog({
               type="number"
               value={settings.reviewsPerDay}
             />
+          </SettingRow>
+          <SettingRow
+            description="Recall chance targeted when a card comes due. Higher = shorter intervals, more reviews."
+            label="Target retention"
+          >
+            <Select
+              onValueChange={value => onChange({ desiredRetention: Number(value) })}
+              value={String(settings.desiredRetention)}
+            >
+              <SelectTrigger aria-label="Target retention" className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RETENTION_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </SettingRow>
           <SettingRow label="Review order">
             <SegmentedControl onChange={order => onChange({ order })} options={ORDER_OPTIONS} value={settings.order} />
@@ -1471,20 +1655,21 @@ function RetentionSparkline({ curve, now }: { curve: RetentionPoint[]; now: Date
 
 function DeckActionsMenu({
   deck,
+  matchableCount,
   onBrowse,
   onDelete,
   onMatch,
   onMove,
-  sections,
-  total
+  sections
 }: {
   deck: StudyDeck
+  /** Non-cloze cards only — Match needs term/definition pairs. */
+  matchableCount: number
   onBrowse: () => void
   onDelete: () => void
   onMatch: () => void
   onMove: (section: string) => void
   sections: string[]
-  total: number
 }) {
   const currentSection =
     !deck.course?.trim() || deck.course.trim().toLocaleLowerCase() === 'other' ? 'Other' : deck.course.trim()
@@ -1498,7 +1683,7 @@ function DeckActionsMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuItem onSelect={onBrowse}>Cards</DropdownMenuItem>
-        <DropdownMenuItem disabled={total < 2} onSelect={onMatch}>
+        <DropdownMenuItem disabled={matchableCount < 2} onSelect={onMatch}>
           Match
         </DropdownMenuItem>
         <DropdownMenuSub>
@@ -1557,6 +1742,7 @@ function DeckRow({
   state: StudyState
 }) {
   const stats = deckStats(state, deck.id, now)
+  const matchableCount = deck.cards.filter(card => !hasClozeMarker(card.front)).length
 
   return (
     <div className="flex w-full items-center gap-3 px-3 py-2.5">
@@ -1584,12 +1770,12 @@ function DeckRow({
 
       <DeckActionsMenu
         deck={deck}
+        matchableCount={matchableCount}
         onBrowse={() => onBrowse(deck.id)}
         onDelete={onDelete}
         onMatch={() => onMatch(deck.id)}
         onMove={onMove}
         sections={sections}
-        total={stats.total}
       />
     </div>
   )
@@ -1619,6 +1805,7 @@ function DeckCard({
   state: StudyState
 }) {
   const stats = deckStats(state, deck.id, now)
+  const matchableCount = deck.cards.filter(card => !hasClozeMarker(card.front)).length
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4">
@@ -1643,12 +1830,12 @@ function DeckCard({
         </Button>
         <DeckActionsMenu
           deck={deck}
+          matchableCount={matchableCount}
           onBrowse={() => onBrowse(deck.id)}
           onDelete={onDelete}
           onMatch={() => onMatch(deck.id)}
           onMove={onMove}
           sections={sections}
-          total={stats.total}
         />
       </div>
     </div>
@@ -1712,7 +1899,8 @@ function Heatmap({ state }: { state: StudyState }) {
   const todayIso = new Date().toISOString()
   const { cells, total } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso])
   const stats = useMemo(() => studyMotivation(state, todayIso), [state, todayIso])
-  const todayKey = todayIso.slice(0, 10)
+  // Local calendar day — must match the cell dates reviewHeatmap now emits.
+  const todayKey = localDayKey(new Date(todayIso))
   const firstDayOffset = cells[0] ? new Date(`${cells[0].date}T00:00:00.000Z`).getUTCDay() : 0
   const weeks = Math.ceil((firstDayOffset + cells.length) / 7)
   const daysIntoWeek = new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 1
@@ -1847,6 +2035,7 @@ function CardBrowser({
   onDeleteDeck,
   onMatch,
   onMoveDeck,
+  onRename,
   sections,
   state
 }: {
@@ -1855,22 +2044,40 @@ function CardBrowser({
   onDeleteDeck: () => void
   onMatch: () => void
   onMoveDeck: (section: string) => void
+  onRename: (name: string) => Promise<void>
   sections: string[]
   state: StudyState
 }) {
   const [editing, setEditing] = useState<null | StudyCard>(null)
   const [adding, setAdding] = useState(false)
   const [armDelete, setArmDelete] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [query, setQuery] = useState('')
 
   if (!deck) {
     return <EmptyState className="flex-1" description="This deck no longer exists." title="Deck not found" />
   }
 
+  const matchableCount = deck.cards.filter(card => !hasClozeMarker(card.front)).length
+  const needle = query.trim().toLocaleLowerCase()
+  const visibleCards = needle
+    ? deck.cards.filter(card =>
+        `${card.front}\n${card.back}\n${card.tags.join('\n')}`.toLocaleLowerCase().includes(needle)
+      )
+    : deck.cards
+
   return (
     <div className="px-6 pb-8">
       <div className="mb-2 flex items-center justify-between gap-3 border-b border-border pb-1.5">
-        <div>
-          <h2 className="text-sm font-semibold">{deck.name}</h2>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-1">
+            <h2 className="truncate text-sm font-semibold">{deck.name}</h2>
+            <Tip label="Rename deck">
+              <Button aria-label="Rename deck" onClick={() => setRenaming(true)} size="icon-xs" variant="ghost">
+                <IconPencil />
+              </Button>
+            </Tip>
+          </div>
           <p className="text-xs text-muted-foreground">
             {deck.course ? `${deck.course} · ` : ''}
             {deck.cards.length} card{deck.cards.length === 1 ? '' : 's'}
@@ -1894,7 +2101,7 @@ function CardBrowser({
           >
             {armDelete ? 'Really delete?' : 'Delete deck'}
           </Button>
-          <Button disabled={deck.cards.length < 2} onClick={onMatch} size="sm" variant="outline">
+          <Button disabled={matchableCount < 2} onClick={onMatch} size="sm" variant="outline">
             Match
           </Button>
           <Button onClick={() => setAdding(true)} size="sm" variant="outline">
@@ -1903,8 +2110,27 @@ function CardBrowser({
         </div>
       </div>
 
+      {deck.cards.length > 0 && (
+        <div className="mb-2 flex items-center gap-2">
+          <Input
+            aria-label="Search cards"
+            className="h-8 max-w-64"
+            onChange={event => setQuery(event.target.value)}
+            placeholder="Search front, back, or tags"
+            value={query}
+          />
+          {needle && (
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {visibleCards.length} of {deck.cards.length}
+            </span>
+          )}
+        </div>
+      )}
+
       {deck.cards.length === 0 ? (
         <EmptyState className="min-h-40" description="Add a card or import a set." title="No cards in this deck" />
+      ) : visibleCards.length === 0 ? (
+        <EmptyState className="min-h-40" description="Try different text or clear the search." title="No cards match" />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full text-sm">
@@ -1917,7 +2143,7 @@ function CardBrowser({
               </tr>
             </thead>
             <tbody>
-              {deck.cards.map(card => (
+              {visibleCards.map(card => (
                 <tr
                   className={cn(
                     'cursor-pointer border-t border-border hover:bg-accent',
@@ -1929,6 +2155,11 @@ function CardBrowser({
                   <td className="max-w-xs truncate px-3 py-2">
                     {card.suspended && (
                       <IconPlayerPause className="-mt-px mr-1 inline text-muted-foreground" size={12} />
+                    )}
+                    {card.tags.includes(LEECH_TAG) && (
+                      <Badge className="mr-1.5 border-destructive/40 text-destructive" variant="outline">
+                        leech
+                      </Badge>
                     )}
                     {card.front}
                   </td>
@@ -1979,6 +2210,7 @@ function CardBrowser({
           }}
         />
       )}
+      {renaming && <RenameDeckDialog deck={deck} onClose={() => setRenaming(false)} onRename={onRename} />}
     </div>
   )
 }
@@ -2032,7 +2264,7 @@ function EditCardDialog({
             </Button>
           </div>
           <Button
-            disabled={!front.trim() || !back.trim()}
+            disabled={!front.trim() || (!back.trim() && !hasClozeMarker(front))}
             onClick={() =>
               onSave({
                 ...card,
@@ -2069,13 +2301,16 @@ function AddCardDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add card</DialogTitle>
-          <DialogDescription>New cards enter the review queue as “new”.</DialogDescription>
+          <DialogDescription>
+            New cards enter the review queue as “new”. Wrap text in {'{{c1::…}}'} for cloze blanks — each index
+            becomes its own card, and the back is optional.
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <Textarea
             className="min-h-20"
             onChange={event => setFront(event.target.value)}
-            placeholder="Front"
+            placeholder={'Front — plain, or cloze: {{c1::furosemide}} blocks {{c2::Na-K-2Cl}}'}
             value={front}
           />
           <Textarea
@@ -2091,7 +2326,7 @@ function AddCardDialog({
             Cancel
           </Button>
           <Button
-            disabled={!front.trim() || !back.trim()}
+            disabled={!front.trim() || (!back.trim() && !hasClozeMarker(front))}
             onClick={() =>
               onCreate(
                 front.trim(),
@@ -2144,10 +2379,10 @@ interface MatchTile {
   side: 'front' | 'back'
 }
 
-function buildMatchTiles(deck: StudyDeck, size: number): MatchTile[] {
+function buildMatchTiles(cards: StudyCard[], size: number): MatchTile[] {
   // Deterministic-enough shuffle without RNG dependence on the module: seed off the
   // clock once per round (fresh each mount).
-  const pool = [...deck.cards]
+  const pool = [...cards]
   const seed = Date.now()
 
   for (let i = pool.length - 1; i > 0; i--) {
@@ -2178,8 +2413,12 @@ function buildMatchTiles(deck: StudyDeck, size: number): MatchTile[] {
 }
 
 function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => void }) {
-  const size = deck ? Math.min(6, deck.cards.length) : 0
-  const [tiles, setTiles] = useState<MatchTile[]>(() => (deck ? buildMatchTiles(deck, size) : []))
+  // Cloze cards are fill-in-the-blank, not term/definition pairs — exclude them.
+  const [matchCards] = useState<StudyCard[]>(() =>
+    deck ? deck.cards.filter(card => !hasClozeMarker(card.front)) : []
+  )
+  const size = Math.min(6, matchCards.length)
+  const [tiles, setTiles] = useState<MatchTile[]>(() => buildMatchTiles(matchCards, size))
   const [selected, setSelected] = useState<null | string>(null)
   const [matched, setMatched] = useState<Set<string>>(new Set())
   const [wrong, setWrong] = useState<[string, string] | null>(null)
@@ -2187,17 +2426,17 @@ function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => voi
   const [won, setWon] = useState(false)
 
   const restart = useCallback(() => {
-    if (!deck) {
+    if (!matchCards.length) {
       return
     }
 
-    setTiles(buildMatchTiles(deck, size))
+    setTiles(buildMatchTiles(matchCards, size))
     setSelected(null)
     setMatched(new Set())
     setWrong(null)
     setElapsed(0)
     setWon(false)
-  }, [deck, size])
+  }, [matchCards, size])
 
   // Timer runs until the board is cleared.
   useEffect(() => {
@@ -2320,6 +2559,7 @@ function ReviewSurface({
   item,
   onGrade,
   onReveal,
+  onUndo,
   position,
   remainingCounts,
   revealed,
@@ -2332,6 +2572,8 @@ function ReviewSurface({
   item: QueueItem
   onGrade: (rating: StudyRating) => void
   onReveal: () => void
+  /** Take back the previous grade; null hides the affordance (nothing graded yet). */
+  onUndo: (() => void) | null
   position: number
   remainingCounts: ReviewCategoryCounts
   revealed: boolean
@@ -2343,6 +2585,13 @@ function ReviewSurface({
     { category: 'learning', label: 'Learning', value: remainingCounts.learning },
     { category: 'review', label: 'Review', value: remainingCounts.review }
   ]
+
+  // Cloze cards drill one index: blank it in the prompt, reveal everything in
+  // the answer, and show the (optional) back as a footnote under the answer.
+  const isCloze = item.clozeIndex !== undefined
+  const prompt = isCloze ? renderClozePrompt(item.card.front, item.clozeIndex ?? 0) : item.card.front
+  const answer = isCloze ? renderClozeAnswer(item.card.front) : item.card.back
+  const answerNote = isCloze && item.card.back.trim() ? item.card.back : null
 
   return (
     <div className="flex flex-1 flex-col items-center px-6 pb-8">
@@ -2358,6 +2607,11 @@ function ReviewSurface({
           </span>
 
           <div className="flex shrink-0 items-center gap-4">
+            {onUndo && (
+              <Button onClick={onUndo} size="inline" variant="text">
+                Undo <span className="text-[10px] opacity-60">u</span>
+              </Button>
+            )}
             <span className="tabular-nums">
               {position} of {sessionTotal}
             </span>
@@ -2386,16 +2640,17 @@ function ReviewSurface({
 
         {flip ? (
           <button
-            aria-label={revealed ? item.card.back : 'Show answer'}
+            aria-label={revealed ? answer : 'Show answer'}
             className="nemesis-flip flex-1 [perspective:1600px]"
             data-flipped={revealed ? 'true' : undefined}
             onClick={() => !revealed && onReveal()}
             type="button"
           >
             <div className="nemesis-flip-inner relative h-full min-h-64 w-full">
-              <FlipFace label="Question">{item.card.front}</FlipFace>
+              <FlipFace label="Question">{prompt}</FlipFace>
               <FlipFace back label="Answer" muted>
-                {item.card.back}
+                {answer}
+                {answerNote && <div className="pt-3 text-sm text-muted-foreground">{answerNote}</div>}
               </FlipFace>
             </div>
           </button>
@@ -2405,7 +2660,7 @@ function ReviewSurface({
               <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
                 Question
               </div>
-              <div className="text-lg leading-relaxed">{item.card.front}</div>
+              <div className="text-lg leading-relaxed">{prompt}</div>
             </div>
             {revealed && (
               <>
@@ -2414,7 +2669,8 @@ function ReviewSurface({
                   <div className="pb-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
                     Answer
                   </div>
-                  <div className="text-lg leading-relaxed text-foreground/80">{item.card.back}</div>
+                  <div className="text-lg leading-relaxed text-foreground/80">{answer}</div>
+                  {answerNote && <div className="pt-2 text-sm text-muted-foreground">{answerNote}</div>}
                 </div>
               </>
             )}
