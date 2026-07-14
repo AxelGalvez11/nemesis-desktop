@@ -61,4 +61,25 @@ function isOfficialSshRemote(url) {
   return isSshRemote(url) && canonicalGitHubRemote(url) === OFFICIAL_REPO_CANONICAL
 }
 
-export { canonicalGitHubRemote, isOfficialSshRemote, isSshRemote, OFFICIAL_REPO_CANONICAL, OFFICIAL_REPO_HTTPS_URL }
+// Explicit fetch refspec that force-creates refs/remotes/origin/<branch>.
+//
+// Installer checkouts are SINGLE-BRANCH clones (`git clone --depth 1
+// --branch <pinned>`), so remote.origin.fetch only maps the pinned branch.
+// A plain `git fetch origin main` on such a clone updates FETCH_HEAD but
+// never creates origin/main — every downstream consumer then breaks:
+// checkUpdates' `rev-parse origin/main` yields garbage (a permanent phantom
+// "update available"), and `hermes update`'s `checkout -B main origin/main`
+// aborts with "branch does not exist". Passing the full refspec on the
+// command line sidesteps the clone's narrow config without mutating it.
+function fetchRefspecFor(branch) {
+  return `+refs/heads/${branch}:refs/remotes/origin/${branch}`
+}
+
+export {
+  canonicalGitHubRemote,
+  fetchRefspecFor,
+  isOfficialSshRemote,
+  isSshRemote,
+  OFFICIAL_REPO_CANONICAL,
+  OFFICIAL_REPO_HTTPS_URL
+}

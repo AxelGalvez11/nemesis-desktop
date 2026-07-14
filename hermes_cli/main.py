@@ -8482,10 +8482,15 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             text=True,
         )
         if fetch_result.returncode != 0:
-            # Fallback to origin if upstream doesn't exist
+            # Fallback to origin if upstream doesn't exist. Explicit refspec so
+            # origin/<branch> exists afterwards even on single-branch clones
+            # (the rev-parse --verify guard below depends on it).
             print("→ Fetching from origin...")
             fetch_result = subprocess.run(
-                git_cmd + ["fetch"] + depth_args + ["origin", branch],
+                git_cmd
+                + ["fetch"]
+                + depth_args
+                + ["origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}"],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
                 text=True,
@@ -8497,9 +8502,13 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
             compare_branch = f"upstream/{branch}"
     else:
         # Non-default branch: compare against origin/<branch> directly.
+        # Explicit refspec — see the origin fetch above.
         print("→ Fetching from origin...")
         fetch_result = subprocess.run(
-            git_cmd + ["fetch"] + depth_args + ["origin", branch],
+            git_cmd
+            + ["fetch"]
+            + depth_args
+            + ["origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}"],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
@@ -9571,8 +9580,15 @@ def _cmd_update_impl(args, gateway_mode: bool):
         branch = _resolve_update_branch(args)
 
         print("→ Fetching updates...")
+        # Explicit refspec: installer checkouts are single-branch clones, so a
+        # plain `git fetch origin <branch>` only writes FETCH_HEAD for any
+        # branch other than the pinned one. The `checkout -B <branch>
+        # origin/<branch>` below then fails with "branch does not exist" even
+        # though the fetch succeeded. Force-mapping the remote-tracking ref on
+        # the command line works regardless of the clone's fetch config.
         fetch_result = subprocess.run(
-            git_cmd + ["fetch", "origin", branch],
+            git_cmd
+            + ["fetch", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}"],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,

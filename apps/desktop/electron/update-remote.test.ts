@@ -20,6 +20,7 @@ import test from 'node:test'
 
 import {
   canonicalGitHubRemote,
+  fetchRefspecFor,
   isOfficialSshRemote,
   isSshRemote,
   OFFICIAL_REPO_CANONICAL,
@@ -75,4 +76,15 @@ test('isOfficialSshRemote does NOT match forks, other hosts, or HTTPS', () => {
 test('OFFICIAL_REPO_HTTPS_URL canonicalizes to OFFICIAL_REPO_CANONICAL', () => {
   // Invariant: the URL we substitute in must be the same repo we detect.
   assert.equal(canonicalGitHubRemote(OFFICIAL_REPO_HTTPS_URL), OFFICIAL_REPO_CANONICAL)
+})
+
+test('fetchRefspecFor force-maps a branch into refs/remotes/origin', () => {
+  // Single-branch installer clones have a narrow remote.origin.fetch; the
+  // explicit refspec is what guarantees origin/<branch> exists after a fetch
+  // (checkUpdates' rev-parse and hermes update's checkout -B depend on it).
+  assert.equal(fetchRefspecFor('main'), '+refs/heads/main:refs/remotes/origin/main')
+  assert.equal(
+    fetchRefspecFor('codex/nemesis-beta-v0.1'),
+    '+refs/heads/codex/nemesis-beta-v0.1:refs/remotes/origin/codex/nemesis-beta-v0.1'
+  )
 })

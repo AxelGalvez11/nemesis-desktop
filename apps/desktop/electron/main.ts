@@ -129,7 +129,7 @@ import {
   sandboxFallbackFromEnv,
   sandboxPreflight
 } from './update-relaunch'
-import { isOfficialSshRemote, OFFICIAL_REPO_HTTPS_URL } from './update-remote'
+import { fetchRefspecFor, isOfficialSshRemote, OFFICIAL_REPO_HTTPS_URL } from './update-remote'
 import { fetchMarketplaceThemes, searchMarketplaceThemes } from './vscode-marketplace'
 import {
   computeWindowOptions,
@@ -2219,7 +2219,11 @@ async function checkUpdates() {
     }
   }
 
-  const fetched = await runGit(['fetch', '--quiet', 'origin', branch], { cwd: updateRoot })
+  // Fetch with an explicit refspec: installer checkouts are single-branch
+  // clones, and without it `origin/<branch>` never materializes for any
+  // branch other than the pinned one — the rev-parse below then "resolves"
+  // to the literal string and the app shows a permanent phantom update.
+  const fetched = await runGit(['fetch', '--quiet', 'origin', fetchRefspecFor(branch)], { cwd: updateRoot })
 
   if (fetched.code !== 0) {
     return {
