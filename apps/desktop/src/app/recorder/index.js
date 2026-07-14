@@ -13,10 +13,13 @@ import { NoteEditor } from '../library/note-editor';
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes';
 import { $account } from '@/nemesis-account';
 import { enhanceLectureNote, RecordingArchive } from './archive';
-import { $copilotAsk, $copilotEnabled, $copilotError, $copilotNotes, $copilotState, copilotAccess, forceCopilotRefresh, setCopilotEnabled } from './live-copilot';
+import { $copilotAsk, $copilotEnabled, $copilotError, $copilotNotes, $copilotState, copilotAccess, forceCopilotRefresh, setCopilotEnabled, initCopilotWiring } from './live-copilot';
 import { $elapsedMs, $liveCaptionsEnabled, $liveInsights, $liveStatus, $liveTranscript, $notepadDraft, $paused, $recentLectureNote, $recording, $recordingError, $recordingsVersion, $recordingTitle, $starting, $systemAudioEnabled, formatElapsed, getRecordingAnalyser, LECTURE_FOLDER, setLiveCaptionsEnabled, setNotepadDraft, setRecordingPaused, setRecordingTitle, setSystemAudioEnabled, startRecording, stopRecording, toggleLiveInsight } from './service';
 function useLiveWaveform(recording) {
     const canvasRef = useRef(null);
+    useEffect(() => {
+        initCopilotWiring();
+    }, []);
     useEffect(() => {
         if (!recording) {
             return;

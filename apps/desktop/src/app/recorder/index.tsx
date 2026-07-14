@@ -24,8 +24,7 @@ import {
   $copilotState,
   copilotAccess,
   forceCopilotRefresh,
-  setCopilotEnabled
-} from './live-copilot'
+  setCopilotEnabled, initCopilotWiring } from './live-copilot'
 import {
   $elapsedMs,
   $liveCaptionsEnabled,
@@ -56,6 +55,10 @@ import {
 
 function useLiveWaveform(recording: boolean) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    initCopilotWiring()
+  }, [])
 
   useEffect(() => {
     if (!recording) {

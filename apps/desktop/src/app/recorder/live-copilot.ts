@@ -160,19 +160,27 @@ export function forceCopilotRefresh(): void {
   void refresh(text)
 }
 
-// Self-wiring: reset when a recording starts; consider a refresh whenever new
-// transcript segments land. Module-level listeners are fine — the recorder
-// service is an app-lifetime singleton.
-$recording.listen(state => {
-  if (state === 'recording') resetCopilot()
-})
+// Wiring is attached on first recorder mount, NOT at module load: in the
+// single-chunk production bundle a circular import can leave these stores
+// undefined while this module's body runs (beta.2/3 blank-screen bug —
+// TypeError 'reading listen' killed the whole renderer before React mounted).
+let wired = false
 
-$liveTranscript.listen(segments => {
-  if (!$copilotEnabled.get() || inFlight) return
-  if ($recording.get() !== 'recording' || $paused.get()) return
-  const cadence = copilotAccess($account.get())
-  if (!cadence) return
-  const text = segments.join(' ')
-  if (!shouldRefresh(Date.now(), lastCallAt, text.length - lastSeenChars, cadence)) return
-  void refresh(text)
-})
+export function initCopilotWiring(): void {
+  if (wired) return
+  wired = true
+
+  $recording.listen(state => {
+    if (state === 'recording') resetCopilot()
+  })
+
+  $liveTranscript.listen(segments => {
+    if (!$copilotEnabled.get() || inFlight) return
+    if ($recording.get() !== 'recording' || $paused.get()) return
+    const cadence = copilotAccess($account.get())
+    if (!cadence) return
+    const text = segments.join(' ')
+    if (!shouldRefresh(Date.now(), lastCallAt, text.length - lastSeenChars, cadence)) return
+    void refresh(text)
+  })
+}
