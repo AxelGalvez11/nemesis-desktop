@@ -51,7 +51,8 @@ export function buildCopilotMessages(windowText: string, priorNotes: string[]): 
         'corrected term in your output. Reply with STRICT JSON only, no prose, no code fences: ' +
         '{"notes": string[], "ask": string[]}. notes = 0-3 short NEW bullet points capturing what was ' +
         'just taught (skip anything already in PRIOR NOTES; return [] if nothing new was said). ' +
-        'ask = 0-2 short, specific questions the student could ask next to deepen or clarify.',
+        'ask = 0-2 short, specific questions the student could ask next to deepen or clarify. ' +
+        'Plain text only — never use emojis or decorative symbols.',
       role: 'system'
     },
     {
