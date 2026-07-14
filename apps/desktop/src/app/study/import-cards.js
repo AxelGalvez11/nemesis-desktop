@@ -3,6 +3,7 @@
 // one card per line, term/definition split by TAB (Quizlet's default), " - " (its
 // common custom separator), or a comma as the last resort. Also fine for hand-typed
 // lists and CSV-ish exports from other tools.
+import { hasClozeMarker } from './cloze';
 const LINE_SPLIT = /\r?\n/;
 export function parseCardPaste(text) {
     const cards = [];
@@ -12,8 +13,15 @@ export function parseCardPaste(text) {
             continue;
         }
         const parsed = splitLine(line);
-        if (parsed) {
+        if (parsed && !hasClozeMarker(parsed.front)) {
             cards.push(parsed);
+            continue;
+        }
+        // A front carrying {{cN::…}} keeps the whole line: cloze cards are one-sided
+        // (the blank IS the answer, back optional), and separators inside markers —
+        // commas, " - " — would otherwise shred the deletion text.
+        if (hasClozeMarker(line)) {
+            cards.push({ back: '', front: line });
         }
     }
     return cards;

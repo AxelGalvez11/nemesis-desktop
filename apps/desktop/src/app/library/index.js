@@ -3,17 +3,24 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 // Markdown, a prose-styled CodeMirror editor (middle, de-code-ified via .nemesis-prose-editor
 // CSS), and a collapsible Outline/Links rail (right). Non-markdown files (PDF/images inline;
 // slides/docs open externally) preview in place. Autosaves 800ms after typing.
-import { IconArrowLeft, IconArrowRight, IconChevronRight, IconFilePlus, IconFileText, IconFileTypePdf, IconFolder, IconFolderOpen, IconFolderPlus, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPaperclip, IconPhoto, IconPresentation, IconX } from '@tabler/icons-react';
+import { IconArrowLeft, IconArrowRight, IconChevronRight, IconFilePlus, IconFileText, IconFileTypePdf, IconFolder, IconFolderOpen, IconFolderPlus, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPaperclip, IconPencil, IconPhoto, IconPresentation, IconTrash, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { SearchField } from '@/components/ui/search-field';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { buildResolvableTitleSet, findLinkedNote, isWikilinkResolved, rewriteWikilinks } from './links';
+import { isPathWithin, remappedPath } from './nav-remap';
 import { NoteEditor } from './note-editor';
 import { NoteRail } from './note-rail';
 import { PdfViewer } from './pdf-viewer';
+import { RenameDialog } from './rename-dialog';
+import { searchNotes } from './search';
 import { buildIndex, createFolder, loadVaultContents, saveNote, SEED_NOTES, VAULT_DIR } from './vault';
 function tabKey(tab) {
     return tab.kind === 'note' ? tab.note.path : tab.file.path;
@@ -80,8 +87,19 @@ export function LibraryView() {
     const [creating, setCreating] = useState(null);
     const [draft, setDraft] = useState('');
     const [saving, setSaving] = useState(false);
+    const [renameTarget, setRenameTarget] = useState(null);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    // Global search: the input's live value vs. the debounced value actually used to filter,
+    // so typing feels instant while re-filtering doesn't run on every keystroke.
+    const [searchInput, setSearchInput] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const searchDebounceRef = useRef(null);
     const [searchParams] = useSearchParams();
     const saveTimer = useRef(null);
+    // The note+content behind the currently-pending debounced save, if any — so a rename can
+    // flush it to disk first instead of letting a stale write recreate the old filename after
+    // the file has already moved.
+    const pendingSaveRef = useRef(null);
     const noteEditorRef = useRef(null);
     // Folder-tree sidebar visibility (persisted) + browser-style visit history.
     const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -116,6 +134,23 @@ export function LibraryView() {
         setCreating(mode);
         setDraft('');
     }, [setSidebar]);
+    // Debounced global search: the input updates immediately, the query that actually
+    // drives filtering lags by 150ms so fast typing doesn't re-filter on every keystroke.
+    const onSearchChange = useCallback((value) => {
+        setSearchInput(value);
+        if (searchDebounceRef.current) {
+            clearTimeout(searchDebounceRef.current);
+        }
+        searchDebounceRef.current = setTimeout(() => setSearchQuery(value), 150);
+    }, []);
+    const clearSearch = useCallback(() => {
+        if (searchDebounceRef.current) {
+            clearTimeout(searchDebounceRef.current);
+            searchDebounceRef.current = null;
+        }
+        setSearchInput('');
+        setSearchQuery('');
+    }, []);
     const recordVisit = useCallback((next) => {
         if (navigatingRef.current) {
             return;
@@ -227,6 +262,9 @@ export function LibraryView() {
             if (saveTimer.current) {
                 clearTimeout(saveTimer.current);
             }
+            if (searchDebounceRef.current) {
+                clearTimeout(searchDebounceRef.current);
+            }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [refresh]);
@@ -248,6 +286,17 @@ export function LibraryView() {
     }, [refresh]);
     const tree = useMemo(() => (contents ? buildTree(contents) : null), [contents]);
     const index = useMemo(() => (contents ? buildIndex(contents.notes) : null), [contents]);
+    // Every title/path a [[wikilink]] can resolve to — feeds both the editor's
+    // resolved-vs-unresolved link styling and (via isWikilinkResolved) openWikilink below,
+    // so the two never disagree about whether a given link would create a new note.
+    const resolvable = useMemo(() => buildResolvableTitleSet(contents?.notes ?? []), [contents]);
+    // Non-empty only while actively searching — the sidebar swaps the folder tree for this
+    // flat list (see the `searchQuery.trim()` branch below).
+    const searchHits = useMemo(() => (searchQuery.trim() ? searchNotes(contents?.notes ?? [], searchQuery) : []), [contents, searchQuery]);
+    const isSearching = searchQuery.trim().length > 0;
+    // Vault images only — an Obsidian "![[name]]" embed should resolve to a picture, not a
+    // stray PDF/slide deck that happens to share a name.
+    const imageFiles = useMemo(() => (contents?.files ?? []).filter(file => file.kind === 'image'), [contents]);
     // Deep links from the Graph page: /library?note=Title opens a note,
     // /library?create=note lands with the new-note field already open.
     useEffect(() => {
@@ -281,10 +330,32 @@ export function LibraryView() {
         if (saveTimer.current) {
             clearTimeout(saveTimer.current);
         }
+        pendingSaveRef.current = { content, note };
         saveTimer.current = setTimeout(() => {
             setSaving(true);
+            pendingSaveRef.current = null;
             void saveNote(note.title, content, note.folder).finally(() => setSaving(false));
         }, 800);
+    }, []);
+    // Write out a still-pending debounced save right now, instead of waiting for its timer.
+    // Used before a rename so the file being moved has the latest keystrokes on disk.
+    const flushPendingSave = useCallback(async () => {
+        const pending = pendingSaveRef.current;
+        if (!pending) {
+            return;
+        }
+        if (saveTimer.current) {
+            clearTimeout(saveTimer.current);
+            saveTimer.current = null;
+        }
+        pendingSaveRef.current = null;
+        setSaving(true);
+        try {
+            await saveNote(pending.note.title, pending.content, pending.note.folder);
+        }
+        finally {
+            setSaving(false);
+        }
     }, []);
     // Outline tab entries drive the editor imperatively — scrolling to a line isn't
     // something the editor's props model expresses, so this goes through its ref handle.
@@ -301,10 +372,10 @@ export function LibraryView() {
         }
         // Obsidian-style targets: plain [[Title]] or path-qualified
         // [[Folder/Title]] (the agent writes the latter into Home.md). Resolve
-        // both; a missing path-qualified note is created IN its folder rather
-        // than as a root note with a slash jammed into the name.
-        const wanted = target.toLowerCase();
-        const existing = loaded.notes.find(n => n.title.toLowerCase() === wanted || `${n.folder}/${n.title}`.toLowerCase() === wanted);
+        // both (same rule the editor's resolved/unresolved styling uses — see
+        // `resolvable` above); a missing path-qualified note is created IN its
+        // folder rather than as a root note with a slash jammed into the name.
+        const existing = findLinkedNote(target, loaded.notes);
         if (existing) {
             openInPlace({ kind: 'note', note: existing });
             return;
@@ -344,6 +415,115 @@ export function LibraryView() {
             }
         }
     }, [creating, draft, openSelection, refresh, targetFolder]);
+    // After a rename, point any open tab (or nav-history entry) that was showing the
+    // old path at the freshly-loaded note/file — otherwise it'd keep rendering a stale
+    // snapshot under an identity (`.path`) that no longer exists on disk.
+    const remapOpenTabs = useCallback((oldPath, newPath, refreshed) => {
+        const remap = (tab) => {
+            const mapped = remappedPath(tabKey(tab), oldPath, newPath);
+            if (mapped === null) {
+                return tab;
+            }
+            if (tab.kind === 'note') {
+                const fresh = refreshed.notes.find(n => n.path === mapped);
+                return fresh ? { kind: 'note', note: fresh } : tab;
+            }
+            const fresh = refreshed.files.find(f => f.path === mapped);
+            return fresh ? { file: fresh, kind: 'file' } : tab;
+        };
+        setTabs(current => current.map(remap));
+        setNavState(current => ({ ...current, stack: current.stack.map(remap) }));
+    }, []);
+    // Rename a note or folder on disk, then (for a note) cascade [[Old]] → [[New]] across
+    // every other note that links to it, then bring open tabs/history along.
+    const renameFsEntry = useCallback(async (target, rawNewName) => {
+        const api = window.hermesDesktop;
+        if (!api?.renamePath) {
+            throw new Error('Rename is not available in this build.');
+        }
+        // Flush ANY still-pending autosave first — unconditionally, not just for the note
+        // being renamed. Two ways a stale timer bites otherwise: (1) renaming folder/note X
+        // while a DIFFERENT open note still has a pending save — its 800ms timer can fire
+        // AFTER the wikilink cascade below rewrites it on disk, silently reverting that
+        // rewrite back to the old title; (2) renaming a note whose OWN edit hasn't flushed
+        // yet — the file that gets moved would be missing the latest keystrokes. Flushing
+        // first (before reading `contents` for the cascade, and before the rename itself)
+        // closes both.
+        await flushPendingSave();
+        if (target.kind === 'folder') {
+            const safeFolderName = rawNewName.replace(/[/\\:]/g, '-').trim();
+            if (!safeFolderName) {
+                throw new Error('Folder name cannot be empty.');
+            }
+            const renamed = await api.renamePath(target.path, safeFolderName);
+            const refreshed = await refresh();
+            if (refreshed) {
+                remapOpenTabs(target.path, renamed.path, refreshed);
+            }
+            return;
+        }
+        const safeTitle = rawNewName.replace(/[/\\:]/g, '-').trim() || 'Untitled';
+        const oldPath = target.note.path;
+        const oldTitle = target.note.title;
+        const renamed = await api.renamePath(oldPath, `${safeTitle}.md`);
+        // Cascade the title change into every OTHER note's wikilinks (the renamed note's
+        // own content is untouched — only its filename changed).
+        if (contents && api.writeTextFile) {
+            for (const other of contents.notes) {
+                if (other.path === oldPath) {
+                    continue;
+                }
+                const rewritten = rewriteWikilinks(other.content, oldTitle, safeTitle);
+                if (rewritten !== other.content) {
+                    await api.writeTextFile(other.path, rewritten);
+                }
+            }
+        }
+        const refreshed = await refresh();
+        if (refreshed) {
+            remapOpenTabs(oldPath, renamed.path, refreshed);
+        }
+    }, [contents, flushPendingSave, refresh, remapOpenTabs]);
+    const submitRename = useCallback((name) => (renameTarget ? renameFsEntry(renameTarget, name) : Promise.resolve()), [renameFsEntry, renameTarget]);
+    // Move a note or folder to the OS Trash, close any tabs it was open in, and drop it
+    // (and anything nested under it) from the visit history.
+    const deleteFsEntry = useCallback(async () => {
+        if (!deleteTarget) {
+            return;
+        }
+        const trash = window.hermesDesktop?.trashPath;
+        if (!trash) {
+            throw new Error('Moving to Trash is unavailable in this build.');
+        }
+        const path = deleteTarget.kind === 'note' ? deleteTarget.note.path : deleteTarget.path;
+        // Cancel (not flush!) a pending autosave for whatever's being deleted — a note being
+        // edited right now, or a note inside a folder being deleted. If its 800ms timer were
+        // left to fire after the trash call, it would silently recreate the file we just
+        // deleted with its last-known content.
+        if (pendingSaveRef.current && isPathWithin(pendingSaveRef.current.note.path, path)) {
+            if (saveTimer.current) {
+                clearTimeout(saveTimer.current);
+                saveTimer.current = null;
+            }
+            pendingSaveRef.current = null;
+        }
+        const ok = await trash(path);
+        if (!ok) {
+            throw new Error('Could not move this to Trash.');
+        }
+        await refresh();
+        const isDeleted = (tab) => isPathWithin(tabKey(tab), path);
+        const activeTabItem = tabs[activeTab];
+        const nextTabs = tabs.filter(tab => !isDeleted(tab));
+        if (nextTabs.length !== tabs.length) {
+            setTabs(nextTabs);
+            const stillThere = activeTabItem && !isDeleted(activeTabItem)
+                ? nextTabs.findIndex(tab => tabKey(tab) === tabKey(activeTabItem))
+                : -1;
+            setActiveTab(stillThere >= 0 ? stillThere : Math.max(0, Math.min(activeTab, nextTabs.length - 1)));
+        }
+        setNavState(current => ({ ...current, stack: current.stack.filter(tab => !isDeleted(tab)) }));
+    }, [activeTab, deleteTarget, refresh, tabs]);
     if (error) {
         return _jsx(EmptyState, { className: "h-full", description: `${error} (${VAULT_DIR})`, title: "Library unavailable" });
     }
@@ -359,11 +539,11 @@ export function LibraryView() {
                                     if (event.key === 'Escape') {
                                         setCreating(null);
                                     }
-                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: _jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
+                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("div", { className: "px-3 pb-2", children: _jsx(SearchField, { "aria-label": "Search notes", containerClassName: "w-full rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2 opacity-100", inputClassName: "w-full", onChange: onSearchChange, onClear: clearSearch, placeholder: "Search notes\u2026", value: searchInput }) }), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: isSearching ? (_jsx(SearchResults, { hits: searchHits, onSelect: note => openSelection({ kind: 'note', note }) })) : (_jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onRequestDelete: setDeleteTarget, onRequestRename: setRenameTarget, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
                                 const next = new Set(current);
                                 next.has(path) ? next.delete(path) : next.add(path);
                                 return next;
-                            }), selection: selection }) })] })), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [(tabs.length > 0 || !sidebarOpen) && (_jsxs("div", { className: "relative z-10 flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-webkit-app-region:no-drag]", children: [_jsxs("div", { className: "flex shrink-0 items-center gap-0.5 border-r border-(--ui-stroke-quaternary) px-1.5", children: [!sidebarOpen && (_jsx(Tip, { label: "Show file list", children: _jsx(Button, { "aria-label": "Show file list", onClick: () => setSidebar(true), size: "icon-xs", variant: "ghost", children: _jsx(IconLayoutSidebarLeftExpand, {}) }) })), _jsx(Tip, { label: "Back (\u2318[)", children: _jsx(Button, { "aria-label": "Back", disabled: nav.pos <= 0, onClick: () => goHistory(-1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowLeft, {}) }) }), _jsx(Tip, { label: "Forward (\u2318])", children: _jsx(Button, { "aria-label": "Forward", disabled: nav.pos >= nav.stack.length - 1, onClick: () => goHistory(1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowRight, {}) }) })] }), _jsx("div", { className: "flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out', i === activeTab
+                            }), selection: selection })) })] })), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [(tabs.length > 0 || !sidebarOpen) && (_jsxs("div", { className: "relative z-10 flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-webkit-app-region:no-drag]", children: [_jsxs("div", { className: "flex shrink-0 items-center gap-0.5 border-r border-(--ui-stroke-quaternary) px-1.5", children: [!sidebarOpen && (_jsx(Tip, { label: "Show file list", children: _jsx(Button, { "aria-label": "Show file list", onClick: () => setSidebar(true), size: "icon-xs", variant: "ghost", children: _jsx(IconLayoutSidebarLeftExpand, {}) }) })), _jsx(Tip, { label: "Back (\u2318[)", children: _jsx(Button, { "aria-label": "Back", disabled: nav.pos <= 0, onClick: () => goHistory(-1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowLeft, {}) }) }), _jsx(Tip, { label: "Forward (\u2318])", children: _jsx(Button, { "aria-label": "Forward", disabled: nav.pos >= nav.stack.length - 1, onClick: () => goHistory(1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowRight, {}) }) })] }), _jsx("div", { className: "flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out', i === activeTab
                                         ? 'bg-(--ui-bg-editor) text-foreground'
                                         : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'), onClick: () => {
                                         setActiveTab(i);
@@ -374,7 +554,9 @@ export function LibraryView() {
                                             }, type: "button", children: _jsx(IconX, { size: 11 }) })] }, tabKey(tab)))) })] })), selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "shrink-0 border-b border-(--ui-stroke-quaternary) px-7 pb-4 pt-6", children: _jsxs("div", { className: "flex items-end justify-between gap-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [_jsx("span", { children: "Library" }), selection.note.folder
                                                             .split('/')
                                                             .filter(Boolean)
-                                                            .map((part, index) => (_jsxs("span", { className: "contents", children: [_jsx(IconChevronRight, { className: "shrink-0 opacity-50", size: 11 }), _jsx("span", { className: "truncate", children: part })] }, `${part}-${index}`)))] }), _jsx("h2", { className: "truncate text-2xl font-semibold tracking-[-0.025em]", children: selection.note.title })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)", children: [_jsxs("span", { className: "tabular-nums", children: [countWords(selection.note.content), " words"] }), saving && _jsx("span", { className: "text-(--ui-text-quaternary)", children: "Saving\u2026" })] })] }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-7 pb-3", children: _jsx(NoteEditor, { initialValue: selection.note.content, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target), ref: noteEditorRef }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx("div", { className: "grid flex-1 place-items-center text-center", children: _jsxs("div", { className: "flex flex-col items-center gap-3", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: "No note open" }), _jsx("div", { className: "mt-1 text-xs text-muted-foreground", children: "Pick a note on the left, or start a fresh one." })] }), _jsxs(Button, { onClick: () => startCreating('note'), size: "sm", variant: "secondary", children: [_jsx(IconFilePlus, { size: 15 }), "New note"] })] }) }))] }), activeNote && index && (_jsx(NoteRail, { activeNote: activeNote, index: index, notes: contents.notes, onOpenNote: note => openInPlace({ kind: 'note', note }), onSelectHeading: handleSelectHeading }))] }));
+                                                            .map((part, index) => (_jsxs("span", { className: "contents", children: [_jsx(IconChevronRight, { className: "shrink-0 opacity-50", size: 11 }), _jsx("span", { className: "truncate", children: part })] }, `${part}-${index}`)))] }), _jsx("h2", { className: "truncate text-2xl font-semibold tracking-[-0.025em]", children: selection.note.title })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)", children: [_jsxs("span", { className: "tabular-nums", children: [countWords(selection.note.content), " words"] }), saving && _jsx("span", { className: "text-(--ui-text-quaternary)", children: "Saving\u2026" }), _jsx(Tip, { label: "Rename note", children: _jsx(Button, { "aria-label": "Rename note", onClick: () => setRenameTarget({ kind: 'note', note: selection.note }), size: "icon-xs", variant: "ghost", children: _jsx(IconPencil, {}) }) }), _jsx(Tip, { label: "Delete note", children: _jsx(Button, { "aria-label": "Delete note", onClick: () => setDeleteTarget({ kind: 'note', note: selection.note }), size: "icon-xs", variant: "ghost", children: _jsx(IconTrash, {}) }) })] })] }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-7 pb-3", children: _jsx(NoteEditor, { imageContext: { files: imageFiles, noteFolder: selection.note.folder, vaultDir: VAULT_DIR }, initialValue: selection.note.content, isResolved: target => isWikilinkResolved(target, resolvable), notes: contents.notes, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target), ref: noteEditorRef }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx("div", { className: "grid flex-1 place-items-center text-center", children: _jsxs("div", { className: "flex flex-col items-center gap-3", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: "No note open" }), _jsx("div", { className: "mt-1 text-xs text-muted-foreground", children: "Pick a note on the left, or start a fresh one." })] }), _jsxs(Button, { onClick: () => startCreating('note'), size: "sm", variant: "secondary", children: [_jsx(IconFilePlus, { size: 15 }), "New note"] })] }) }))] }), activeNote && index && (_jsx(NoteRail, { activeNote: activeNote, index: index, notes: contents.notes, onCreateUnresolved: target => void openWikilink(target), onOpenNote: note => openInPlace({ kind: 'note', note }), onSelectHeading: handleSelectHeading })), _jsx(RenameDialog, { initialValue: renameTarget ? (renameTarget.kind === 'note' ? renameTarget.note.title : renameTarget.name) : '', label: renameTarget?.kind === 'folder' ? 'folder' : 'note', onClose: () => setRenameTarget(null), onSubmit: submitRename, open: Boolean(renameTarget) }), _jsx(ConfirmDialog, { busyLabel: "Moving to Trash\u2026", confirmLabel: "Move to Trash", description: deleteTarget
+                    ? `“${deleteTarget.kind === 'note' ? deleteTarget.note.title : deleteTarget.name}” will move to the system Trash, where it can still be recovered.${deleteTarget.kind === 'folder' ? ' Everything inside it moves too.' : ''}`
+                    : undefined, destructive: true, doneLabel: "Moved to Trash", onClose: () => setDeleteTarget(null), onConfirm: deleteFsEntry, open: Boolean(deleteTarget), title: `Move ${deleteTarget?.kind === 'folder' ? 'folder' : 'note'} to Trash?` })] }));
 }
 function FileGlyph({ kind }) {
     const Icon = kind === 'pdf'
@@ -390,19 +572,28 @@ function FileGlyph({ kind }) {
                         : IconPaperclip;
     return _jsx(Icon, { className: "shrink-0 opacity-60", size: 14 });
 }
-function TreeLevel({ collapsed, depth, node, onSelect, onToggle, selection }) {
+// Flat results list that replaces the folder tree while a search is active — filename
+// matches first, then body matches with a one-line snippet (see search.ts).
+function SearchResults({ hits, onSelect }) {
+    if (!hits.length) {
+        return (_jsxs("div", { className: "rounded-lg border border-dashed border-(--ui-stroke-tertiary) px-3 py-3", children: [_jsx("p", { className: "text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)", children: "No matches" }), _jsx("p", { className: "mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground", children: "Nothing in this vault's titles or text matches that search." })] }));
+    }
+    return (_jsx("div", { className: "space-y-0.5", children: hits.map(hit => (_jsxs("button", { className: "flex w-full flex-col items-start gap-0.5 rounded-lg px-2 py-1.5 text-left transition-[transform,color,background-color] duration-200 ease-out hover:bg-(--ui-row-hover-background) active:scale-[0.98]", onClick: () => onSelect(hit.note), type: "button", children: [_jsxs("span", { className: "flex w-full min-w-0 items-center gap-2 text-[0.8125rem] text-(--ui-text-secondary)", children: [_jsx(IconFileText, { className: "shrink-0 opacity-55", size: 14 }), _jsx("span", { className: "truncate font-medium", children: hit.note.title }), hit.note.folder && _jsx("span", { className: "shrink-0 truncate text-[0.65rem] text-(--ui-text-quaternary)", children: hit.note.folder })] }), hit.snippet && (_jsx("span", { className: "w-full truncate pl-[1.375rem] text-[0.6875rem] text-(--ui-text-tertiary)", children: hit.snippet }))] }, hit.note.path))) }));
+}
+function TreeLevel({ collapsed, depth, node, onRequestDelete, onRequestRename, onSelect, onToggle, selection }) {
     return (_jsxs("div", { className: cn('space-y-0.5', depth > 0 && 'ml-3 border-l border-(--ui-stroke-quaternary) pl-1.5'), children: [node.folders
                 .slice()
                 .sort((a, b) => a.name.localeCompare(b.name))
                 .map(folder => {
                 const isCollapsed = collapsed.has(folder.path);
-                return (_jsxs("div", { className: "pb-0.5", children: [_jsxs("button", { className: "group/folder flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[0.68rem] font-semibold uppercase tracking-[0.075em] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]", onClick: () => onToggle(folder.path), type: "button", children: [_jsx(IconChevronRight, { className: cn('shrink-0 transition-transform duration-200 ease-out', !isCollapsed && 'rotate-90'), size: 12 }), isCollapsed ? (_jsx(IconFolder, { className: "shrink-0 text-(--ui-text-tertiary) group-hover/folder:text-(--theme-primary)", size: 14 })) : (_jsx(IconFolderOpen, { className: "shrink-0 text-(--theme-primary)", size: 14 })), _jsx("span", { className: "truncate", children: folder.name })] }), !isCollapsed && (_jsx(TreeLevel, { collapsed: collapsed, depth: depth + 1, node: folder, onSelect: onSelect, onToggle: onToggle, selection: selection }))] }, folder.path));
+                const folderTarget = { kind: 'folder', name: folder.name, path: folder.path };
+                return (_jsxs("div", { className: "pb-0.5", children: [_jsxs(ContextMenu, { children: [_jsx(ContextMenuTrigger, { asChild: true, children: _jsxs("button", { className: "group/folder flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[0.68rem] font-semibold uppercase tracking-[0.075em] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]", onClick: () => onToggle(folder.path), type: "button", children: [_jsx(IconChevronRight, { className: cn('shrink-0 transition-transform duration-200 ease-out', !isCollapsed && 'rotate-90'), size: 12 }), isCollapsed ? (_jsx(IconFolder, { className: "shrink-0 text-(--ui-text-tertiary) group-hover/folder:text-(--theme-primary)", size: 14 })) : (_jsx(IconFolderOpen, { className: "shrink-0 text-(--theme-primary)", size: 14 })), _jsx("span", { className: "truncate", children: folder.name })] }) }), _jsxs(ContextMenuContent, { children: [_jsxs(ContextMenuItem, { onSelect: () => onRequestRename(folderTarget), children: [_jsx(IconPencil, {}), "Rename"] }), _jsxs(ContextMenuItem, { onSelect: () => onRequestDelete(folderTarget), variant: "destructive", children: [_jsx(IconTrash, {}), "Delete"] })] })] }), !isCollapsed && (_jsx(TreeLevel, { collapsed: collapsed, depth: depth + 1, node: folder, onRequestDelete: onRequestDelete, onRequestRename: onRequestRename, onSelect: onSelect, onToggle: onToggle, selection: selection }))] }, folder.path));
             }), node.notes
                 .slice()
                 .sort((a, b) => a.title.localeCompare(b.title))
-                .map(note => (_jsxs("button", { className: cn('relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]', selection?.kind === 'note' &&
-                    selection.note.path === note.path &&
-                    'font-semibold text-foreground before:bg-(--theme-primary)'), onClick: () => onSelect({ kind: 'note', note }), type: "button", children: [_jsx(IconFileText, { className: "shrink-0 opacity-55", size: 14 }), _jsx("span", { className: "truncate", children: note.title })] }, note.path))), node.files
+                .map(note => (_jsxs(ContextMenu, { children: [_jsx(ContextMenuTrigger, { asChild: true, children: _jsxs("button", { className: cn('relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]', selection?.kind === 'note' &&
+                                selection.note.path === note.path &&
+                                'font-semibold text-foreground before:bg-(--theme-primary)'), onClick: () => onSelect({ kind: 'note', note }), type: "button", children: [_jsx(IconFileText, { className: "shrink-0 opacity-55", size: 14 }), _jsx("span", { className: "truncate", children: note.title })] }) }), _jsxs(ContextMenuContent, { children: [_jsxs(ContextMenuItem, { onSelect: () => onRequestRename({ kind: 'note', note }), children: [_jsx(IconPencil, {}), "Rename"] }), _jsxs(ContextMenuItem, { onSelect: () => onRequestDelete({ kind: 'note', note }), variant: "destructive", children: [_jsx(IconTrash, {}), "Delete"] })] })] }, note.path))), node.files
                 .slice()
                 .sort((a, b) => a.name.localeCompare(b.name))
                 .map(file => (_jsxs("button", { className: cn('relative flex w-full items-center gap-2 truncate rounded-lg px-2 py-1.5 text-left text-[0.8125rem] text-(--ui-text-tertiary) transition-[transform,color,background-color] duration-200 ease-out before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-transparent hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]', selection?.kind === 'file' &&

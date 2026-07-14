@@ -5,9 +5,11 @@
 // v1 persistence is a small localStorage JSON blob (same pattern as store/onboarding);
 // the upgrade path is backend/vault storage once Nemesis accounts land.
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
+import { clozeIndexes, clozeScheduleKey } from './cloze';
 export const DEFAULT_STUDY_SETTINGS = {
     newPerDay: 20,
     reviewsPerDay: 0,
+    desiredRetention: 0.9,
     order: 'due',
     flip: true,
     showIntervalHints: true
@@ -19,7 +21,17 @@ const QUEUE_LIMIT = 200;
 // Pre-settings flip toggle lived in its own key (see study/index.tsx); loadState
 // migrates it into settings.flip once, then this key is never consulted again.
 const LEGACY_FLIP_KEY = 'nemesis.study.flip';
-const scheduler = fsrs();
+// One FSRS scheduler per desired retention (see StudySettings.desiredRetention),
+// rebuilt only when the setting changes — grading and interval previews are hot.
+let scheduler = fsrs({ request_retention: DEFAULT_STUDY_SETTINGS.desiredRetention });
+let schedulerRetention = DEFAULT_STUDY_SETTINGS.desiredRetention;
+function schedulerFor(desiredRetention) {
+    if (desiredRetention !== schedulerRetention) {
+        scheduler = fsrs({ request_retention: desiredRetention });
+        schedulerRetention = desiredRetention;
+    }
+    return scheduler;
+}
 const RATING = {
     again: Rating.Again,
     easy: Rating.Easy,
@@ -46,6 +58,19 @@ function isDue(stored, now) {
         return true; // never studied → new → due
     }
     return new Date(stored.due).getTime() <= now.getTime();
+}
+/** Local calendar day key (yyyy-mm-dd). Day-based features — daily caps, the
+ *  day-stable shuffle, streaks, the heatmap — follow the student's clock, so a
+ *  23:30 review belongs to today, not to tomorrow's UTC date. */
+export function localDayKey(date) {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${month}-${day}`;
+}
+/** The local calendar day `offset` days from `date` (constructor arithmetic —
+ *  safe across month ends and DST shifts, where fixed 24h math drifts). */
+function shiftLocalDay(date, offset) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
 }
 function normalizeSections(sections, decks) {
     const names = [];
@@ -131,18 +156,19 @@ function hashSeed(key) {
     }
     return hash >>> 0;
 }
-/** Deterministic per-card order for a UTC day key: each card's rank comes from
- *  hashing (dayKey, its own id), never from the other cards in the queue — so
- *  grading a card away doesn't reshuffle the rest (a plain Fisher-Yates reseeded
+/** Deterministic per-item order for a local day key: each item's rank comes from
+ *  hashing (dayKey, its own schedule key), never from the other cards in the queue —
+ *  so grading a card away doesn't reshuffle the rest (a plain Fisher-Yates reseeded
  *  on every shrinking queue would: the same seed applied to an (n-1)-length array
  *  is a different permutation, not "the old one minus a card"). A fresh dayKey
  *  gives every card a fresh rank the next day. */
 function orderForDay(items, dayKey) {
-    return [...items].sort((a, b) => hashSeed(`${dayKey}:${a.card.id}`) - hashSeed(`${dayKey}:${b.card.id}`));
+    return [...items].sort((a, b) => hashSeed(`${dayKey}:${a.scheduleKey}`) - hashSeed(`${dayKey}:${b.scheduleKey}`));
 }
-/** New-vs-review split of everything graded on `dayKey` (UTC yyyy-mm-dd). An entry
- *  counts as "new" the first time its cardId ever appears in the log — matching the
- *  isNew: !stored rule below — and as a "review" every time after that. */
+/** New-vs-review split of everything graded on `dayKey` (local yyyy-mm-dd, see
+ *  localDayKey). An entry counts as "new" the first time its cardId ever appears
+ *  in the log — matching the isNew: !stored rule below — and as a "review" every
+ *  time after that. */
 function todayActivity(reviews, dayKey) {
     const seenBefore = new Set();
     let newCount = 0;
@@ -150,7 +176,7 @@ function todayActivity(reviews, dayKey) {
     for (const entry of reviews) {
         const isFirstEver = !seenBefore.has(entry.cardId);
         seenBefore.add(entry.cardId);
-        if (entry.at.slice(0, 10) !== dayKey) {
+        if (localDayKey(new Date(entry.at)) !== dayKey) {
             continue;
         }
         if (isFirstEver) {
@@ -162,11 +188,20 @@ function todayActivity(reviews, dayKey) {
     }
     return { newCount, reviewCount };
 }
+/** A card's schedule slots: the card itself, or one slot per distinct cloze
+ *  index — each drilled and scheduled independently (Anki cloze semantics). */
+function scheduleTargets(card) {
+    const indexes = clozeIndexes(card.front);
+    if (!indexes.length) {
+        return [{ key: card.id }];
+    }
+    return indexes.map(index => ({ clozeIndex: index, key: clozeScheduleKey(card.id, index) }));
+}
 /** Review queue: due reviews first, then new cards (or a day-stable shuffle of
  *  both, in 'random' order), capped by today's new/review daily limits. Pure. */
 export function buildQueue(state, deckId, now) {
     const settings = getSettings(state);
-    const dayKey = now.toISOString().slice(0, 10);
+    const dayKey = localDayKey(now);
     const { newCount, reviewCount } = todayActivity(state.reviews, dayKey);
     const dueItems = [];
     const newItems = [];
@@ -178,12 +213,21 @@ export function buildQueue(state, deckId, now) {
             if (card.suspended) {
                 continue;
             }
-            const stored = state.schedule[card.id];
-            if (!isDue(stored, now)) {
-                continue;
+            for (const target of scheduleTargets(card)) {
+                const stored = state.schedule[target.key];
+                if (!isDue(stored, now)) {
+                    continue;
+                }
+                const item = {
+                    card,
+                    clozeIndex: target.clozeIndex,
+                    deckId: deck.id,
+                    deckName: deck.name,
+                    isNew: !stored,
+                    scheduleKey: target.key
+                };
+                (item.isNew ? newItems : dueItems).push(item);
             }
-            const item = { card, deckId: deck.id, deckName: deck.name, isNew: !stored };
-            (item.isNew ? newItems : dueItems).push(item);
         }
     }
     const newCap = settings.newPerDay > 0 ? Math.max(0, settings.newPerDay - newCount) : newItems.length;
@@ -201,17 +245,20 @@ export function deckStats(state, deckId, now) {
             continue;
         }
         for (const card of deck.cards) {
-            total++;
+            const targets = scheduleTargets(card);
+            total += targets.length;
             if (card.suspended) {
                 continue;
             }
-            const stored = state.schedule[card.id];
-            if (!stored) {
-                fresh++;
-                due++;
-            }
-            else if (isDue(stored, now)) {
-                due++;
+            for (const target of targets) {
+                const stored = state.schedule[target.key];
+                if (!stored) {
+                    fresh++;
+                    due++;
+                }
+                else if (isDue(stored, now)) {
+                    due++;
+                }
             }
         }
     }
@@ -231,12 +278,24 @@ export function addCard(state, deckId, front, back, tags) {
     const card = { back, front, id: freshId('card'), tags };
     return mapDeckCards(state, deckId, cards => [...cards, card]);
 }
-/** Delete a card AND its FSRS schedule so state doesn't leak. */
+/** Drop schedule entries for the given card ids — each card's own key AND any
+ *  of its cloze slots (`${id}#c${n}`). Returns a fresh map. */
+function pruneCardSchedules(schedule, cardIds) {
+    const ids = new Set(cardIds);
+    const next = {};
+    for (const [key, entry] of Object.entries(schedule)) {
+        const at = key.indexOf('#c');
+        const baseId = at >= 0 ? key.slice(0, at) : key;
+        if (!ids.has(baseId)) {
+            next[key] = entry;
+        }
+    }
+    return next;
+}
+/** Delete a card AND its FSRS schedule (incl. cloze slots) so state doesn't leak. */
 export function deleteCard(state, deckId, cardId) {
     const next = mapDeckCards(state, deckId, cards => cards.filter(card => card.id !== cardId));
-    const schedule = { ...next.schedule };
-    delete schedule[cardId];
-    return { ...next, schedule };
+    return { ...next, schedule: pruneCardSchedules(next.schedule, [cardId]) };
 }
 export function toggleSuspendCard(state, deckId, cardId) {
     return mapDeckCards(state, deckId, cards => cards.map(card => (card.id === cardId ? { ...card, suspended: !card.suspended } : card)));
@@ -249,11 +308,11 @@ export function deleteDeck(state, deckId) {
     if (!deck) {
         return state;
     }
-    const schedule = { ...state.schedule };
-    for (const card of deck.cards) {
-        delete schedule[card.id];
-    }
-    return { ...state, decks: state.decks.filter(candidate => candidate.id !== deckId), schedule };
+    return {
+        ...state,
+        decks: state.decks.filter(candidate => candidate.id !== deckId),
+        schedule: pruneCardSchedules(state.schedule, deck.cards.map(card => card.id))
+    };
 }
 export function addSection(state, name) {
     const section = name.trim();
@@ -269,6 +328,16 @@ export function assignDeckSection(state, deckId, section) {
     return {
         ...state,
         decks: state.decks.map(deck => (deck.id === deckId ? { ...deck, course } : deck))
+    };
+}
+/** Rename a deck. For file-backed decks pass the renamed vault file name so the
+ *  next reconcile matches it instead of treating the old link as deleted — the
+ *  caller renames the actual file FIRST (see the Study rename dialog), so state
+ *  only changes once the disk rename succeeded. */
+export function renameDeck(state, deckId, name, sourceFile) {
+    return {
+        ...state,
+        decks: state.decks.map(deck => deck.id === deckId ? { ...deck, name, ...(sourceFile ? { sourceFile } : {}) } : deck)
     };
 }
 // --- Deck-file reconcile (agent-managed decks) --------------------------------
@@ -425,13 +494,7 @@ export function reconcileDeckFiles(state, candidates) {
     if (!changed) {
         return state;
     }
-    let schedule = state.schedule;
-    if (prunedIds.length) {
-        schedule = { ...schedule };
-        for (const id of prunedIds) {
-            delete schedule[id];
-        }
-    }
+    const schedule = prunedIds.length ? pruneCardSchedules(state.schedule, prunedIds) : state.schedule;
     // Same section rules as everywhere else: new courses appear, manually-added
     // (now empty) sections stay. The review log keeps its history — see deleteDeck.
     return { ...state, decks, schedule, sections: normalizeSections(state.sections, decks) };
@@ -460,20 +523,19 @@ export function adoptLegacyDeckFiles(state, importedFileNames) {
 }
 export function studyMotivation(state, todayIso, windowDays = 90) {
     const DAY = 86_400_000;
-    const days = new Set(state.reviews.map(review => review.at.slice(0, 10)));
-    const todayMs = new Date(`${todayIso.slice(0, 10)}T00:00:00.000Z`).getTime();
-    // Current streak: consecutive days ending today (or yesterday, so an unstudied
-    // "today so far" doesn't zero the streak before the student sits down).
+    const days = new Set(state.reviews.map(review => localDayKey(new Date(review.at))));
+    const today = new Date(todayIso);
+    // Current streak: consecutive local days ending today (or yesterday, so an
+    // unstudied "today so far" doesn't zero the streak before the student sits down).
     let currentStreak = 0;
-    let cursor = todayMs;
-    if (!days.has(new Date(cursor).toISOString().slice(0, 10))) {
-        cursor -= DAY;
-    }
-    while (days.has(new Date(cursor).toISOString().slice(0, 10))) {
+    let offset = days.has(localDayKey(today)) ? 0 : -1;
+    while (days.has(localDayKey(shiftLocalDay(today, offset)))) {
         currentStreak++;
-        cursor -= DAY;
+        offset--;
     }
-    // Longest streak across all history.
+    // Longest streak across all history. Keys are local calendar dates; parsing
+    // them at UTC midnight is a pure calendar trick — consecutive dates sit
+    // exactly one DAY apart in that mapping, whatever the machine's timezone.
     const sorted = [...days].sort();
     let longestStreak = 0;
     let run = 0;
@@ -486,11 +548,11 @@ export function studyMotivation(state, todayIso, windowDays = 90) {
     }
     let learned = 0;
     for (let i = 0; i < windowDays; i++) {
-        if (days.has(new Date(todayMs - i * DAY).toISOString().slice(0, 10))) {
+        if (days.has(localDayKey(shiftLocalDay(today, -i)))) {
             learned++;
         }
     }
-    const cutoff = new Date(todayMs - 30 * DAY).toISOString();
+    const cutoff = shiftLocalDay(today, -30).toISOString();
     const recent = state.reviews.filter(review => review.at >= cutoff);
     const retentionPct = recent.length
         ? Math.round((recent.filter(review => review.rating !== 'again').length / recent.length) * 100)
@@ -502,16 +564,71 @@ export function studyMotivation(state, todayIso, windowDays = 90) {
         retentionPct
     };
 }
-/** Grade a card → next state (immutable: returns a new StudyState). */
-export function gradeCard(state, cardId, rating, now) {
-    const stored = state.schedule[cardId];
-    const current = stored ? revive(stored) : createEmptyCard(now);
-    const outcome = scheduler.repeat(current, now)[RATING[rating]];
+// Anki leech semantics: a card that keeps lapsing is wasting review time. Once
+// its lapse count reaches the threshold it is auto-suspended and tagged so the
+// student rewrites (or re-learns) it before it re-enters the queue. Suspension
+// is per-card here, so a leeched cloze slot parks its whole parent card.
+const LEECH_LAPSES = 8;
+export const LEECH_TAG = 'leech';
+function applyLeech(state, scheduleKey) {
+    const at = scheduleKey.indexOf('#c');
+    const cardId = at >= 0 ? scheduleKey.slice(0, at) : scheduleKey;
     return {
         ...state,
-        schedule: { ...state.schedule, [cardId]: freeze(outcome.card) },
-        reviews: [...state.reviews, { cardId, rating, at: now.toISOString() }]
+        decks: state.decks.map(deck => {
+            const card = deck.cards.find(candidate => candidate.id === cardId);
+            if (!card || card.suspended) {
+                return deck;
+            }
+            return {
+                ...deck,
+                cards: deck.cards.map(candidate => candidate.id === cardId
+                    ? {
+                        ...candidate,
+                        suspended: true,
+                        tags: candidate.tags.includes(LEECH_TAG) ? candidate.tags : [...candidate.tags, LEECH_TAG]
+                    }
+                    : candidate)
+            };
+        })
     };
+}
+/** Grade a card (or one cloze slot) → next state (immutable). `scheduleKey` is
+ *  the queue item's schedule key (QueueItem.scheduleKey). A lapse that crosses
+ *  the leech threshold auto-suspends + tags the card (see applyLeech). */
+export function gradeCard(state, scheduleKey, rating, now) {
+    const stored = state.schedule[scheduleKey];
+    const current = stored ? revive(stored) : createEmptyCard(now);
+    const outcome = schedulerFor(getSettings(state).desiredRetention).repeat(current, now)[RATING[rating]];
+    const next = {
+        ...state,
+        schedule: { ...state.schedule, [scheduleKey]: freeze(outcome.card) },
+        reviews: [...state.reviews, { cardId: scheduleKey, rating, at: now.toISOString() }]
+    };
+    // Only a real lapse (one that increments the count) can newly cross the
+    // threshold — re-grading an unsuspended old leech as Good must not re-park it.
+    return outcome.card.lapses > current.lapses && outcome.card.lapses >= LEECH_LAPSES
+        ? applyLeech(next, scheduleKey)
+        : next;
+}
+/** Reverse the most recent gradeCard: restore the pre-grade schedule snapshot
+ *  and pop that review-log entry. Deliberately session-only — the snapshot lives
+ *  in component state, never in the persisted blob, so it cannot survive a
+ *  reload. Leech suspension is not reverted (matching Anki, where unsuspending
+ *  is an explicit act in the browser). */
+export function undoLastGrade(state, undo) {
+    const last = state.reviews.at(-1);
+    if (!last || last.cardId !== undo.scheduleKey) {
+        return state; // something else was graded since the snapshot — refuse quietly
+    }
+    const schedule = { ...state.schedule };
+    if (undo.previous) {
+        schedule[undo.scheduleKey] = undo.previous;
+    }
+    else {
+        delete schedule[undo.scheduleKey];
+    }
+    return { ...state, reviews: state.reviews.slice(0, -1), schedule };
 }
 /** Group decks by course (the "folder"). Ungrouped decks fall under "Other". Pure. */
 export function groupDecks(state, now) {
@@ -549,20 +666,19 @@ export function groupDecks(state, now) {
 export function reviewHeatmap(state, todayIso, weeks = 52) {
     const perDay = new Map();
     for (const review of state.reviews) {
-        const day = review.at.slice(0, 10); // UTC calendar day from the ISO timestamp
+        const day = localDayKey(new Date(review.at)); // the student's calendar day
         perDay.set(day, (perDay.get(day) ?? 0) + 1);
     }
-    // Work entirely in UTC so the per-day keys (UTC) and cell dates (UTC) always agree,
-    // regardless of the machine's timezone. Do not pad forward to Saturday: the
-    // rolling window ends on today, so no future cells displace an older month.
-    const DAY = 86_400_000;
-    const todayUtc = new Date(`${todayIso.slice(0, 10)}T00:00:00.000Z`);
+    // Work entirely in the machine's LOCAL calendar so the per-day keys and cell
+    // dates always agree with the daily caps and streaks (localDayKey everywhere).
+    // Do not pad forward to Saturday: the rolling window ends on today, so no
+    // future cells displace an older month.
+    const today = new Date(todayIso);
     const dayCount = weeks * 7;
-    const startMs = todayUtc.getTime() - (dayCount - 1) * DAY;
     const cells = [];
     let total = 0;
-    for (let i = 0; i < dayCount; i++) {
-        const iso = new Date(startMs + i * DAY).toISOString().slice(0, 10);
+    for (let i = dayCount - 1; i >= 0; i--) {
+        const iso = localDayKey(shiftLocalDay(today, -i));
         const count = perDay.get(iso) ?? 0;
         total += count;
         cells.push({ count, date: iso, level: count === 0 ? 0 : count < 5 ? 1 : count < 12 ? 2 : count < 25 ? 3 : 4 });
@@ -570,10 +686,10 @@ export function reviewHeatmap(state, todayIso, weeks = 52) {
     return { cells, total };
 }
 /** Interval each grade would schedule, humanized — the hint row under the grade buttons. */
-export function previewIntervals(state, cardId, now) {
-    const stored = state.schedule[cardId];
+export function previewIntervals(state, scheduleKey, now) {
+    const stored = state.schedule[scheduleKey];
     const current = stored ? revive(stored) : createEmptyCard(now);
-    const outcome = scheduler.repeat(current, now);
+    const outcome = schedulerFor(getSettings(state).desiredRetention).repeat(current, now);
     const label = (grade) => humanizeGap(outcome[grade].card.due.getTime() - now.getTime());
     return {
         again: label(Rating.Again),
