@@ -24,7 +24,9 @@ const mainOut = resolve(distDir, 'electron-main.mjs')
 const preloadEntry = resolve(root, 'electron/preload.ts')
 const preloadOut = resolve(distDir, 'electron-preload.js')
 
-const external = ['electron', 'node-pty', 'fs']
+// sherpa-onnx-node is the on-device speech engine (native addon) — resolved at
+// runtime from dist/node_modules, staged by stage-native-deps like node-pty.
+const external = ['electron', 'node-pty', 'fs', 'sherpa-onnx-node']
 // Production bundles bake packaged=true so unpackaged `electron .` still
 // behaves like a packaged build. Dev bundles (`--dev`) leave the env alone
 // so HERMES_DESKTOP_DEV_SERVER / source-tree resolution keep working.
@@ -63,3 +65,20 @@ await build({
   logLevel: 'info',
 })
 console.log(`bundled ${preloadOut}${isDev ? ' (dev)' : ''}`)
+
+// Bundle asr-worker.ts → dist/asr-worker.cjs (utilityProcess child that hosts
+// the sherpa-onnx speech engine off the main process)
+const asrWorkerEntry = resolve(root, 'electron/asr-worker.ts')
+const asrWorkerOut = resolve(distDir, 'asr-worker.cjs')
+await build({
+  entryPoints: [asrWorkerEntry],
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node20',
+  outfile: asrWorkerOut,
+  external,
+  define,
+  logLevel: 'info',
+})
+console.log(`bundled ${asrWorkerOut}${isDev ? ' (dev)' : ''}`)

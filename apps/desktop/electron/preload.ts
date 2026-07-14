@@ -7,6 +7,15 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // Student build: hand the metering-proxy device key to main so the agent
   // backend gets pointed at the Nemesis LLM proxy (zero-setup model access).
   nemesisLlmSync: deviceKey => ipcRenderer.invoke('nemesis:llm:sync', { deviceKey }),
+  // On-device speech engine: accurate transcription in the main process
+  // (model auto-downloads once; progress arrives via nemesis:asr:progress).
+  nemesisAsrTranscribe: (samples, sampleRate) => ipcRenderer.invoke('nemesis:asr:transcribe', { sampleRate, samples }),
+  onNemesisAsrProgress: callback => {
+    const listener = (_event, progress) => callback(progress)
+    ipcRenderer.on('nemesis:asr:progress', listener)
+
+    return () => ipcRenderer.removeListener('nemesis:asr:progress', listener)
+  },
   getGatewayWsUrl: profile => ipcRenderer.invoke('hermes:gateway:ws-url', profile),
   openSessionWindow: (sessionId, opts) => ipcRenderer.invoke('hermes:window:openSession', sessionId, opts),
   openNewSessionWindow: () => ipcRenderer.invoke('hermes:window:openNewSession'),

@@ -46,8 +46,10 @@ function getTranscriber(modelId, onStatus) {
     transcriberPromises.set(modelId, created);
     return created;
 }
-/** Decode any browser-playable audio (webm/opus here) to 16 kHz mono Float32 — Whisper's input. */
-async function decodeTo16kMono(arrayBuffer) {
+/** Decode any browser-playable audio (webm/opus here) to 16 kHz mono Float32 — the
+ *  input format for both the WASM models here and the native engine (native-asr.ts).
+ *  NOTE: decodeAudioData DETACHES the given ArrayBuffer — pass a fresh copy per call. */
+export async function decodeTo16kMono(arrayBuffer) {
     const ctx = new AudioContext();
     try {
         const decoded = await ctx.decodeAudioData(arrayBuffer);

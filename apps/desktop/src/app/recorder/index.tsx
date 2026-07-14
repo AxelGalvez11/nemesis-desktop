@@ -522,7 +522,8 @@ export function RecorderView() {
               {transcriptRefine && transcriptRefine.title === lectureNote && transcriptRefine.state !== 'failed' && (
                 <span className="basis-full text-[0.65rem] text-muted-foreground">
                   {transcriptRefine.state === 'refining'
-                    ? 'Refining the transcript with the accurate on-device model — the note updates itself when done.'
+                    ? (transcriptRefine.detail ??
+                      'Refining the transcript with the accurate on-device model — the note updates itself when done.')
                     : 'Transcript refined with the accurate model.'}
                 </span>
               )}

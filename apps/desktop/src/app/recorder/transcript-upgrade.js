@@ -5,10 +5,11 @@
 // we wrote. A student edit to that section always wins over the refine.
 export const TRANSCRIPT_HEADING = '\n## Transcript\n\n';
 export const EMPTY_TRANSCRIPT_BODY = '_no speech captured_';
-/** Recordings longer than this keep their live transcript; the student can still
- *  run the accurate pass by hand via "Transcribe" in Recordings (a single-threaded
- *  on-device model gets slow on very long audio). */
+/** Cap for the WASM fallback only — single-threaded whisper-base.en gets slow on
+ *  long audio. The native parakeet engine (~20x realtime) uses the far higher
+ *  NATIVE_REFINE_MAX_MS, which exists purely to bound renderer decode memory. */
 export const AUTO_REFINE_MAX_MS = 30 * 60_000;
+export const NATIVE_REFINE_MAX_MS = 3 * 60 * 60_000;
 /**
  * Returns the note content with its Transcript section swapped for the refined
  * text, or null when the swap must not happen (no Transcript section, or the

@@ -130,8 +130,43 @@ export function stageNodePty({ platform = process.platform, arch = process.arch 
   return destRoot
 }
 
+/**
+ * Stages the on-device speech engine: sherpa-onnx-node (JS surface) plus its
+ * per-platform native package (sherpa-onnx.node + onnxruntime dylibs), which
+ * addon.js resolves as a SIBLING package (`../sherpa-onnx-<platform>-<arch>/`).
+ * Both land side by side in dist/node_modules. Missing platform package (e.g.
+ * cross-building) is a warning, not an error — the app falls back to the
+ * in-renderer WASM transcriber at runtime.
+ */
+export function stageSherpaOnnx({ platform = process.platform, arch = process.arch } = {}) {
+  const jsPkgJson = require.resolve('sherpa-onnx-node/package.json', { paths: [projectRoot] })
+  const jsRoot = dirname(jsPkgJson)
+  const jsDest = resolve(projectRoot, 'dist/node_modules/sherpa-onnx-node')
+  rmSync(jsDest, { recursive: true, force: true })
+  cpSync(jsRoot, jsDest, { recursive: true })
+
+  const platformName = platform === 'win32' ? 'win' : platform
+  const nativePkg = `sherpa-onnx-${platformName}-${arch}`
+  const nativeDest = resolve(projectRoot, `dist/node_modules/${nativePkg}`)
+  rmSync(nativeDest, { recursive: true, force: true })
+
+  try {
+    const nativePkgJson = require.resolve(`${nativePkg}/package.json`, { paths: [projectRoot] })
+    cpSync(dirname(nativePkgJson), nativeDest, { recursive: true })
+    console.log(`[stage-native-deps] staged sherpa-onnx (${platform}-${arch}) -> ${nativeDest}`)
+  } catch {
+    console.warn(
+      `[stage-native-deps] ${nativePkg} not installed — on-device speech engine will be ` +
+        `unavailable on this target (recorder falls back to the WASM transcriber).`
+    )
+  }
+
+  return jsDest
+}
+
 // Allow direct CLI invocation: node scripts/stage-native-deps.mjs [platform] [arch]
 if (isMain(import.meta.url)) {
   const [platform, arch] = process.argv.slice(2)
   stageNodePty({ platform, arch })
+  stageSherpaOnnx({ platform, arch })
 }

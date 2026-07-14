@@ -27,6 +27,12 @@ declare global {
       // Student build: hand the metering-proxy device key to main, which points
       // the agent backend at the Nemesis LLM proxy and restarts it if needed.
       nemesisLlmSync?: (deviceKey: string) => Promise<{ ok: boolean; changed?: boolean; error?: string }>
+      // On-device speech engine (recorder accuracy pass). Model downloads once
+      // (~480 MB) on first use; progress events stream via onNemesisAsrProgress.
+      nemesisAsrTranscribe?: (samples: Float32Array, sampleRate: number) => Promise<{ ok: boolean; text?: string; error?: string }>
+      onNemesisAsrProgress?: (
+        callback: (progress: { pct?: number; phase: 'downloading' | 'preparing' | 'transcribing' }) => void
+      ) => () => void
       getGatewayWsUrl: (profile?: null | string) => Promise<string>
       // Open (or focus) a standalone OS window for a single chat session so
       // the user can work with multiple chats side by side. Returns ok:false

@@ -26,6 +26,7 @@ import { useRefreshHotkey } from '../hooks/use-refresh-hotkey';
 import { loadFolderNotes, saveNote } from '../library/vault';
 import { PanelAction, PanelPill, PanelSectionLabel } from '../overlays/panel';
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes';
+import { nativeAsrAvailable, nativeAsrStatusLabel, nativeTranscribe } from './native-asr';
 import { correctPharmTerms } from './pharm-lexicon';
 import { LECTURE_FOLDER, RECORDINGS_DIR } from './service';
 import { transcribeAudio } from './transcribe';
@@ -152,15 +153,28 @@ export function RecordingArchive({ reloadToken }) {
     const transcribe = useCallback(async (file) => {
         setTranscribingStatus(status => ({ ...status, [file.path]: 'Loading model…' }));
         try {
-            const buffer = await readAudioBuffer(file);
-            const text = await transcribeAudio(buffer, update => setTranscribingStatus(status => ({
-                ...status,
-                [file.path]: update.stage === 'loading-model'
-                    ? `Loading model… ${Math.round(update.progress ?? 0)}%`
-                    : update.stage === 'decoding'
-                        ? 'Decoding audio…'
-                        : 'Transcribing…'
-            })));
+            // Native parakeet engine first (accurate + fast); WASM whisper fallback.
+            let text = null;
+            if (nativeAsrAvailable()) {
+                try {
+                    text = await nativeTranscribe(await readAudioBuffer(file), update => setTranscribingStatus(status => ({ ...status, [file.path]: nativeAsrStatusLabel(update) })));
+                }
+                catch {
+                    text = null;
+                }
+            }
+            if (text === null) {
+                // Fresh buffer — the native attempt's decode detaches the previous one.
+                const buffer = await readAudioBuffer(file);
+                text = await transcribeAudio(buffer, update => setTranscribingStatus(status => ({
+                    ...status,
+                    [file.path]: update.stage === 'loading-model'
+                        ? `Loading model… ${Math.round(update.progress ?? 0)}%`
+                        : update.stage === 'decoding'
+                            ? 'Decoding audio…'
+                            : 'Transcribing…'
+                })));
+            }
             const { changes, corrected } = correctPharmTerms(text || '');
             setTranscripts(current => ({ ...current, [file.path]: corrected || '(No speech detected.)' }));
             setCorrections(current => ({ ...current, [file.path]: changes.length }));

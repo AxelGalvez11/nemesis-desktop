@@ -104,6 +104,7 @@ import {
   PRIMARY_PROTOCOL,
   upsertEnvVars
 } from './nemesis-identity'
+import { registerNemesisAsr } from './nemesis-asr'
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
 import { registerSchoolBrowserIpc } from './school-browser'
 import { installSchoolView, registerSchoolViewIpc } from './school-view'
@@ -7082,6 +7083,9 @@ ipcMain.handle('hermes:backend:touch', async (_event, profile) => {
 // The device key is the only secret and it's the student's own, scoped + revocable
 // server-side. Fixed URL prefix — the renderer cannot point the backend anywhere else.
 const NEMESIS_LLM_PROXY_BASE = 'https://qyjmivntajbigjswhahb.supabase.co/functions/v1/nemesis-llm/v1'
+
+// On-device speech engine (recorder's accurate transcription pass).
+registerNemesisAsr()
 
 ipcMain.handle('nemesis:llm:sync', async (_event, payload) => {
   try {

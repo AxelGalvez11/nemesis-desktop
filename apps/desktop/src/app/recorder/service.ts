@@ -9,8 +9,9 @@ import { createFolder, loadFolderNotes, saveNote } from '../library/vault'
 
 import { deriveRecordingTitle } from './autoname'
 import { copilotNotesMarkdown } from './live-copilot'
+import { nativeAsrAvailable, nativeAsrStatusLabel, nativeTranscribe } from './native-asr'
 import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
-import { AUTO_REFINE_MAX_MS, replaceTranscriptSection } from './transcript-upgrade'
+import { AUTO_REFINE_MAX_MS, NATIVE_REFINE_MAX_MS, replaceTranscriptSection } from './transcript-upgrade'
 
 export const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
 export const LECTURE_FOLDER = 'Lectures'
@@ -41,8 +42,11 @@ export const $systemAudioEnabled = atom(true)
 export const $liveCaptionsEnabled = atom(true)
 export const $recentLectureNote = atom<null | string>(null)
 export const $recordingsVersion = atom(0)
-/** Background accurate-transcription pass over the note that was just saved. */
-export const $transcriptRefine = atom<null | { state: 'failed' | 'refined' | 'refining'; title: string }>(null)
+/** Background accurate-transcription pass over the note that was just saved.
+ *  `detail` carries live progress copy (model download %, etc.) when present. */
+export const $transcriptRefine = atom<null | { detail?: string; state: 'failed' | 'refined' | 'refining'; title: string }>(
+  null
+)
 
 let recorder: MediaRecorder | null = null
 let streams: MediaStream[] = []
@@ -280,21 +284,47 @@ function releaseCapture(): void {
   $paused.set(false)
 }
 
-/** Post-stop accuracy pass: re-transcribe the finished audio with the batch model
- *  (whisper-base.en) and swap it into the saved note's Transcript section. Runs in
- *  the background after the note is already safe on disk; a student edit to the
- *  section, an over-long recording, or any failure leaves the live transcript as-is. */
+/** Post-stop accuracy pass: re-transcribe the finished audio with the accurate
+ *  engine and swap it into the saved note's Transcript section. Prefers the
+ *  native parakeet engine (~20x realtime, no practical length limit); falls back
+ *  to the in-renderer whisper-base.en WASM model (≤30 min recordings) when the
+ *  native engine is unavailable or fails. Runs in the background after the note
+ *  is already safe on disk; a student edit to the section always wins. */
 async function refineTranscript(blob: Blob, noteTitle: string, savedLiveTranscript: string, recordedMs: number): Promise<void> {
-  if (recordedMs > AUTO_REFINE_MAX_MS) {
+  const native = nativeAsrAvailable()
+
+  if (recordedMs > (native ? NATIVE_REFINE_MAX_MS : AUTO_REFINE_MAX_MS)) {
     return
   }
 
   $transcriptRefine.set({ state: 'refining', title: noteTitle })
 
   try {
-    const { transcribeAudio } = await import('./transcribe')
+    let raw: null | string = null
 
-    const raw = await transcribeAudio(await blob.arrayBuffer())
+    if (native) {
+      try {
+        raw = await nativeTranscribe(await blob.arrayBuffer(), status => {
+          $transcriptRefine.set({ detail: nativeAsrStatusLabel(status), state: 'refining', title: noteTitle })
+        })
+      } catch {
+        raw = null // fall through to the WASM model below
+      }
+    }
+
+    if (raw === null) {
+      if (recordedMs > AUTO_REFINE_MAX_MS) {
+        // Too long for the slow WASM fallback — keep the live transcript.
+        $transcriptRefine.set(null)
+
+        return
+      }
+
+      $transcriptRefine.set({ state: 'refining', title: noteTitle })
+      const { transcribeAudio } = await import('./transcribe')
+      raw = await transcribeAudio(await blob.arrayBuffer())
+    }
+
     const { corrected } = correctPharmTerms(raw)
 
     if (!corrected.trim()) {

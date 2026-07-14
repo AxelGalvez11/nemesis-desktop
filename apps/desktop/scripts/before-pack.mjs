@@ -60,7 +60,7 @@
  */
 import { existsSync, rmSync } from 'node:fs'
 import { Arch } from 'electron-builder'
-import { stageNodePty } from './stage-native-deps.mjs'
+import { stageNodePty, stageSherpaOnnx } from './stage-native-deps.mjs'
 
 export function cleanStaleAppOutDir(appOutDir) {
   if (!appOutDir || typeof appOutDir !== 'string') {
@@ -100,7 +100,8 @@ export default async function beforePack(context) {
         )
       } else {
         await stageNodePty({ platform, arch: archName })
-        console.log(`[before-pack] re-staged node-pty for target ${platform}-${archName}`)
+        await stageSherpaOnnx({ platform, arch: archName })
+        console.log(`[before-pack] re-staged node-pty + sherpa-onnx for target ${platform}-${archName}`)
       }
     }
   } catch (err) {
