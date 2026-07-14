@@ -1,15 +1,22 @@
 // ChatGPT-style thinking preview (student build). While a turn runs, the strip
 // shows (1) an INTENT LINE — the model's own first thought sentence(s), readable
-// body text that tells the student what it's about to do — and (2) below it a
-// shimmering live status ("Searching PubMed for 'tesamorelin'…", or "Thinking").
+// body text that tells the student what it's about to do — and (2) a shimmering
+// live status ("Searching PubMed for 'tesamorelin'…", or "Thinking").
 // The raw trail (reasoning disclosure + tool rows) is hidden while running
 // (styles.css) EXCEPT tool cards waiting on an approval, which must stay
 // clickable. Once the turn settles, everything folds into one quiet row —
 // "Worked for 21s" / "Thought for 8s" — that expands the full trail on demand.
+//
+// The strip renders TWICE per message (assistant-message.tsx): a 'header'
+// instance above the prose that owns the settled toggle, the turn clock, and
+// the trail-collapse attribute — and a 'live' instance below the prose so the
+// running status reads as "here's what I said → here's what I'm doing now"
+// instead of floating above text that streamed in after it (owner ask, 3×).
 import { useAuiState } from '@assistant-ui/react'
 import { type FC, useCallback, useEffect, useRef, useState } from 'react'
 
 import { currentActivityEvent, phraseForActivity } from '@/components/assistant-ui/thread/activity-phrase'
+import { contentHasVisibleText } from '@/components/assistant-ui/thread/content'
 import { Codicon } from '@/components/ui/codicon'
 import { cn } from '@/lib/utils'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
@@ -73,7 +80,7 @@ export function extractIntent(raw: string): string {
   return `${cut.slice(0, cut.lastIndexOf(' '))}…`
 }
 
-export const ActivityStrip: FC = () => {
+export const ActivityStrip: FC<{ placement?: 'header' | 'live' }> = ({ placement = 'header' }) => {
   const [open, setOpen] = useState(false)
   // Bumped when the clock stops so the settled label re-renders with a duration
   // (the settle render itself runs before the effect records `end`).
@@ -82,6 +89,7 @@ export const ActivityStrip: FC = () => {
   const messageId = useAuiState(s => s.message.id)
   const running = useAuiState(s => s.message.status?.type === 'running')
   const steps = useAuiState(s => s.message.parts.filter(part => part?.type === 'tool-call').length)
+
   const hasReasoning = useAuiState(s =>
     s.message.parts.some(part => part?.type === 'reasoning' && typeof part.text === 'string' && part.text.trim().length > 0)
   )
@@ -115,11 +123,17 @@ export const ActivityStrip: FC = () => {
     return first && first.type === 'reasoning' ? extractIntent(first.text) : ''
   })
 
+  // Once real prose has streamed, the turn's opening thought is old news —
+  // showing it BELOW that prose would read as a stale stray sentence, so the
+  // live instance drops the intent line and keeps only the status shimmer.
+  const hasProse = useAuiState(s => contentHasVisibleText(s.message.content))
+
   const active = NEMESIS_STUDENT_BUILD && (steps > 0 || hasReasoning)
 
-  // Wall clock: arm on the first running render, freeze on settle.
+  // Wall clock: arm on the first running render, freeze on settle. The header
+  // instance owns it (exactly one writer per message).
   useEffect(() => {
-    if (!NEMESIS_STUDENT_BUILD) {
+    if (!NEMESIS_STUDENT_BUILD || placement !== 'header') {
       return
     }
 
@@ -133,11 +147,16 @@ export const ActivityStrip: FC = () => {
       TURN_CLOCK.set(messageId, { ...entry, end: Date.now() })
       setClockTick(tick => tick + 1)
     }
-  }, [messageId, running])
+  }, [messageId, placement, running])
 
   // The trail lives in a sibling subtree (MessagePrimitive.Parts), so the collapse is
   // driven by an attribute on the shared message root + a CSS rule in styles.css.
+  // Header-owned: its anchor stays mounted through every phase of the turn.
   useEffect(() => {
+    if (placement !== 'header') {
+      return
+    }
+
     const root = ref.current?.closest('[data-role="assistant"]')
 
     if (!root) {
@@ -151,7 +170,7 @@ export const ActivityStrip: FC = () => {
     }
 
     root.setAttribute('data-nemesis-activity', running ? 'live' : open ? 'open' : 'collapsed')
-  }, [active, open, running])
+  }, [active, open, placement, running])
 
   // Branches render different elements (div / button), so the ref is a shared
   // callback rather than a per-element RefObject.
@@ -159,16 +178,19 @@ export const ActivityStrip: FC = () => {
     ref.current = node
   }, [])
 
-  if (running && (livePhrase || intent || hasReasoning)) {
+  if (placement === 'live') {
+    if (!running || !(livePhrase || intent || hasReasoning)) {
+      return null
+    }
+
     return (
       <div
         aria-live="polite"
-        className="mb-1 flex min-w-0 max-w-full flex-col gap-1"
+        className="mt-1.5 mb-1 flex min-w-0 max-w-full flex-col gap-1"
         data-slot="aui_activity-phrase"
-        ref={attachRef}
         role="status"
       >
-        {intent && (
+        {intent && !hasProse && (
           <p className="nemesis-intent-line text-[0.875rem] leading-relaxed text-(--ui-text-secondary)">{intent}</p>
         )}
         {/* Keyed by phrase: a new phrase remounts the wrapper, replaying the CSS
@@ -191,6 +213,7 @@ export const ActivityStrip: FC = () => {
 
   const clock = TURN_CLOCK.get(messageId)
   const seconds = clock?.end !== undefined ? Math.max(1, Math.round((clock.end - clock.start) / 1000)) : null
+
   const label = open
     ? 'Hide work'
     : seconds !== null

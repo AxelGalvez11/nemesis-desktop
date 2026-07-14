@@ -9,12 +9,12 @@ import {
 import { useStore } from '@nanostores/react'
 import { type FC, useCallback, useMemo, useState } from 'react'
 
+import { ActivityStrip } from '@/components/assistant-ui/thread/activity-strip'
 import {
   contentHasVisibleText,
   messageContentText,
   pickPrimaryPreviewTarget
 } from '@/components/assistant-ui/thread/content'
-import { ActivityStrip } from '@/components/assistant-ui/thread/activity-strip'
 import { MESSAGE_PARTS_COMPONENTS } from '@/components/assistant-ui/thread/message-parts'
 import { MessageSources } from '@/components/assistant-ui/thread/message-sources'
 import { StreamStallIndicator } from '@/components/assistant-ui/thread/status'
@@ -33,11 +33,11 @@ import {
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { GitBranchIcon, Loader2Icon, Volume2Icon, VolumeXIcon, XIcon } from '@/lib/icons'
-import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { extractPreviewTargets } from '@/lib/preview-targets'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
 import { cn } from '@/lib/utils'
 import { playSpeechText, stopVoicePlayback } from '@/lib/voice-playback'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { notifyError } from '@/store/notifications'
 import { $voicePlayback } from '@/store/voice-playback'
 
@@ -108,8 +108,13 @@ export const AssistantMessage: FC<{
         data-slot="aui_assistant-message-content"
       >
         {/* Todos render in the composer status stack now, not inline. */}
-        <ActivityStrip />
+        {/* Header instance: settled "Worked for Xs" toggle + trail collapse. */}
+        <ActivityStrip placement="header" />
         <MessagePrimitive.Parts components={MESSAGE_PARTS_COMPONENTS} />
+        {/* Live instance: while the turn runs, the shimmering status renders
+            BELOW whatever the assistant has said so far — "here's the plan →
+            here's what I'm doing", not a status floating above later prose. */}
+        <ActivityStrip placement="live" />
         {isRunning && <StreamStallIndicator />}
         {previewTargets.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">

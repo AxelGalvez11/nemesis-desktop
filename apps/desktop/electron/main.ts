@@ -18,6 +18,7 @@ import {
   net as electronNet,
   ipcMain,
   Menu,
+  autoUpdater as nativeAutoUpdater,
   nativeImage,
   nativeTheme,
   Notification,
@@ -8795,12 +8796,14 @@ app.on('open-url', (event, url) => {
 
 // --- In-app auto-update (beta.6) -------------------------------------------
 // electron-updater against the public GitHub releases feed (package.json
-// build.publish). Downloads in the background, then offers ONE dialog:
-// "Restart now" applies immediately; otherwise the update installs on the
-// next natural quit (autoInstallOnAppQuit). Packaged builds only; every
-// failure is log-only — the notify-banner (nemesis-update-banner) remains the
-// manual fallback path. Version lines are semver prereleases (0.1.0-beta.N),
-// which electron-updater orders correctly.
+// build.publish). Downloads in the background; the THEMED in-app banner
+// (nemesis-update-banner, polling nemesis:updater:status) is the only update
+// surface — beta.10 dropped the native "Restart now" dialog, which was
+// unthemed and stacked on top of the banner saying the same thing. Users who
+// dismiss the banner still get the update on the next natural quit
+// (autoInstallOnAppQuit). Packaged builds only; every failure is log-only.
+// Version lines are semver prereleases (0.1.0-beta.N), which electron-updater
+// orders correctly.
 const AUTO_UPDATE_RECHECK_MS = 4 * 60 * 60 * 1000
 
 // Surfaced to the renderer so the update banner reflects the SILENT updater
@@ -8825,7 +8828,13 @@ function startAutoUpdater() {
   ipcMain.handle('nemesis:updater:status', () => autoUpdaterState)
   ipcMain.handle('nemesis:updater:install', () => {
     if (autoUpdaterState === 'downloaded') {
-      appUpdater.quitAndInstall()
+      // The updater's window-close must NOT be treated as a Cmd+W hide (see
+      // mainWindow 'close') — a hidden-not-closed window stalls the quit and
+      // leaves the OLD app running headless (beta.9 incident). Flip the quit
+      // flag here AND in before-quit-for-update below; quitAndInstall runs on
+      // the next tick so this handler resolves back to the renderer first.
+      isAppQuitting = true
+      setImmediate(() => appUpdater.quitAndInstall())
     }
 
     return autoUpdaterState
@@ -8837,26 +8846,10 @@ function startAutoUpdater() {
   })
 
   appUpdater.on('update-downloaded', info => {
+    // No dialog: the in-app banner polls nemesis:updater:status and flips to
+    // "Restart now" on its own within seconds.
     autoUpdaterState = 'downloaded'
     rememberLog(`[auto-update] downloaded ${info?.version || 'update'}`)
-
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      return
-    }
-
-    const choice = dialog.showMessageBoxSync(mainWindow, {
-      buttons: ['Restart now', 'On next quit'],
-      cancelId: 1,
-      defaultId: 0,
-      detail: 'The update is downloaded. Restart Nemesis to use it now, or it installs automatically when you quit.',
-      message: `Nemesis ${info?.version || ''} is ready`.trim(),
-      type: 'info'
-    })
-
-    if (choice === 0) {
-      // The quit path SIGTERMs backend children like any normal quit.
-      appUpdater.quitAndInstall()
-    }
   })
 
   const check = () => {
@@ -8941,6 +8934,17 @@ function configureSpellChecker() {
     rememberLog(`Spellchecker setup failed: ${error.message}`)
   }
 }
+
+// Squirrel.Mac's restart path (electron-updater quitAndInstall drives
+// Electron's NATIVE autoUpdater on macOS) closes all windows after emitting
+// THIS event — plain 'before-quit' does not fire first. Without the flag
+// flip, the macOS hide-on-close handler preventDefaults the close, the quit
+// stalls forever, and the user is left with the OLD version running headless
+// (beta.9 incident: pressed "Restart now", app never came back — process
+// alive, window hidden, no ShipIt ever spawned).
+nativeAutoUpdater.on('before-quit-for-update', () => {
+  isAppQuitting = true
+})
 
 app.on('before-quit', () => {
   isAppQuitting = true
