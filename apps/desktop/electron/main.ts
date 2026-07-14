@@ -29,6 +29,7 @@ import {
   shell,
   systemPreferences
 } from 'electron'
+import electronUpdaterPkg from 'electron-updater'
 import nodePty from 'node-pty'
 
 import { dashboardFallbackArgs, sourceDeclaresServe } from './backend-command'
@@ -4539,7 +4540,23 @@ function getWindowState() {
   }
 }
 
+// Exits we caused on purpose (provider sync, profile switch) must not surface
+// the red "Backend stopped" notification — the backend respawns immediately.
+// Each expected teardown arms one suppression; the child's exit consumes it.
+let expectedBackendExits = 0
+
+function suppressNextBackendExit() {
+  expectedBackendExits += 1
+}
+
 function sendBackendExit(payload) {
+  if (expectedBackendExits > 0) {
+    expectedBackendExits -= 1
+    rememberLog('[backend] suppressed expected-exit notification (intentional restart)')
+
+    return
+  }
+
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
@@ -7107,6 +7124,7 @@ ipcMain.handle('nemesis:llm:sync', async (_event, payload) => {
         // Boot failed on its own; nothing live to restart.
       }
 
+      suppressNextBackendExit()
       await teardownPrimaryBackendAndWait()
 
       for (const profile of [...backendPool.keys()]) {
@@ -8696,8 +8714,67 @@ app.on('open-url', (event, url) => {
   handleDeepLink(url)
 })
 
+// --- In-app auto-update (beta.6) -------------------------------------------
+// electron-updater against the public GitHub releases feed (package.json
+// build.publish). Downloads in the background, then offers ONE dialog:
+// "Restart now" applies immediately; otherwise the update installs on the
+// next natural quit (autoInstallOnAppQuit). Packaged builds only; every
+// failure is log-only — the notify-banner (nemesis-update-banner) remains the
+// manual fallback path. Version lines are semver prereleases (0.1.0-beta.N),
+// which electron-updater orders correctly.
+const AUTO_UPDATE_RECHECK_MS = 4 * 60 * 60 * 1000
+
+function startAutoUpdater() {
+  if (!IS_PACKAGED) {
+    return
+  }
+
+  const { autoUpdater: appUpdater } = electronUpdaterPkg
+
+  appUpdater.autoDownload = true
+  appUpdater.autoInstallOnAppQuit = true
+  appUpdater.logger = null
+
+  appUpdater.on('error', error => {
+    rememberLog(`[auto-update] ${error?.message || error}`)
+  })
+
+  appUpdater.on('update-downloaded', info => {
+    rememberLog(`[auto-update] downloaded ${info?.version || 'update'}`)
+
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      buttons: ['Restart now', 'On next quit'],
+      cancelId: 1,
+      defaultId: 0,
+      detail: 'The update is downloaded. Restart Nemesis to use it now, or it installs automatically when you quit.',
+      message: `Nemesis ${info?.version || ''} is ready`.trim(),
+      type: 'info'
+    })
+
+    if (choice === 0) {
+      // The quit path SIGTERMs backend children like any normal quit.
+      appUpdater.quitAndInstall()
+    }
+  })
+
+  const check = () => {
+    appUpdater.checkForUpdates().catch(error => {
+      rememberLog(`[auto-update] check failed: ${error?.message || error}`)
+    })
+  }
+
+  // First check after boot settles; then a slow recheck for long-running apps.
+  setTimeout(check, 20_000)
+  setInterval(check, AUTO_UPDATE_RECHECK_MS)
+}
+
 app.whenReady().then(() => {
   maybeOfferLegacyHomeMigration()
+  startAutoUpdater()
 
   if (IS_MAC) {
     Menu.setApplicationMenu(buildApplicationMenu())
