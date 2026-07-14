@@ -2216,6 +2216,15 @@ install_node_deps() {
                         log_warn "Playwright browser installation failed — install dependencies above and retry."
                     }
                     ;;
+                macos)
+                    # macOS needs no system-dep step: the Chromium download alone
+                    # is sufficient, so browser tools work out of the box.
+                    cd "$INSTALL_DIR" && run_playwright_install 600 npx playwright install chromium && \
+                        log_success "Chromium installed — browser tools ready" || {
+                        log_warn "Chromium download failed — browser tools disabled until you run:"
+                        log_info "  cd $INSTALL_DIR && npx playwright install chromium"
+                    }
+                    ;;
                 *)
                     log_warn "Playwright does not support automatic dependency installation on $DISTRO."
                     log_info "Install Chromium/browser system dependencies for your distribution, then run:"
