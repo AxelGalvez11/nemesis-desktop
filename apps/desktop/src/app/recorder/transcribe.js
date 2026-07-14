@@ -8,12 +8,14 @@
 //   - LIVE (whisper-tiny.en, ~40MB): the rolling caption shown WHILE recording. Must keep
 //     up with ~8s chunks in real time single-threaded, so speed wins over accuracy — these
 //     captions are ephemeral scaffolding, not the saved record.
-//   - BATCH (whisper-base.en, ~1 tier up): the transcript produced AFTER stop — the one
-//     saved to the Library note and fed to "Enhance"/flashcards. Accuracy matters most here
-//     and there's no real-time constraint, so we spend the extra compute. base.en is the
-//     documented accuracy step up from tiny and still loads reliably in single-threaded
-//     onnxruntime-web (small.en fp32 would be ~1GB — too heavy for a one-time hub pull).
-import { pipeline, env } from '@huggingface/transformers';
+//   - BATCH (whisper-base.en, ~1 tier up): the accuracy pass. After stop, the recorder
+//     saves the note with the live captions immediately, then refineTranscript (service.ts)
+//     re-transcribes the audio through this model in the background and swaps the note's
+//     Transcript section (recordings ≤30 min). The "Transcribe" button in Recordings runs
+//     the same model by hand for anything else. base.en is the documented accuracy step up
+//     from tiny and still loads reliably in single-threaded onnxruntime-web (small.en fp32
+//     would be ~1GB — too heavy for a one-time hub pull).
+import { env, pipeline } from '@huggingface/transformers';
 // Fetch models from the hub (we don't ship them in the bundle).
 env.allowLocalModels = false;
 // Force single-threaded WASM — no SAB under file://.

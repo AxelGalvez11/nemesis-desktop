@@ -8,12 +8,11 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { $account } from '@/nemesis-account'
 import { setComposerDraft } from '@/store/composer'
 
 import { NoteEditor } from '../library/note-editor'
 import { LIBRARY_ROUTE, NEW_CHAT_ROUTE } from '../routes'
-
-import { $account } from '@/nemesis-account'
 
 import { enhanceLectureNote, RecordingArchive } from './archive'
 import {
@@ -24,7 +23,7 @@ import {
   $copilotState,
   copilotAccess,
   forceCopilotRefresh,
-  setCopilotEnabled, initCopilotWiring } from './live-copilot'
+  initCopilotWiring, setCopilotEnabled } from './live-copilot'
 import {
   $elapsedMs,
   $liveCaptionsEnabled,
@@ -40,6 +39,7 @@ import {
   $recordingTitle,
   $starting,
   $systemAudioEnabled,
+  $transcriptRefine,
   formatElapsed,
   getRecordingAnalyser,
   LECTURE_FOLDER,
@@ -140,6 +140,7 @@ export function RecorderView() {
   const withSystemAudio = useStore($systemAudioEnabled)
   const liveCaptions = useStore($liveCaptionsEnabled)
   const lectureNote = useStore($recentLectureNote)
+  const transcriptRefine = useStore($transcriptRefine)
   const recordingsVersion = useStore($recordingsVersion)
   const error = useStore($recordingError)
   const navigate = useNavigate()
@@ -517,6 +518,13 @@ export function RecorderView() {
                 <Button onClick={askQueued} size="xs" variant="outline">
                   Review {queuedCount} queued drug{queuedCount === 1 ? '' : 's'}
                 </Button>
+              )}
+              {transcriptRefine && transcriptRefine.title === lectureNote && transcriptRefine.state !== 'failed' && (
+                <span className="basis-full text-[0.65rem] text-muted-foreground">
+                  {transcriptRefine.state === 'refining'
+                    ? 'Refining the transcript with the accurate on-device model — the note updates itself when done.'
+                    : 'Transcript refined with the accurate model.'}
+                </span>
               )}
             </div>
           )}

@@ -3,11 +3,14 @@
 // running when the student navigates elsewhere in the desktop app.
 import { atom } from 'nanostores'
 
-import { createFolder, saveNote } from '../library/vault'
+import { telemetryCapture } from '@/nemesis-telemetry'
+
+import { createFolder, loadFolderNotes, saveNote } from '../library/vault'
 
 import { deriveRecordingTitle } from './autoname'
 import { copilotNotesMarkdown } from './live-copilot'
 import { correctPharmTerms, detectPharmTerms } from './pharm-lexicon'
+import { AUTO_REFINE_MAX_MS, replaceTranscriptSection } from './transcript-upgrade'
 
 export const RECORDINGS_DIR = '~/Documents/Nemesis Recordings'
 export const LECTURE_FOLDER = 'Lectures'
@@ -38,6 +41,8 @@ export const $systemAudioEnabled = atom(true)
 export const $liveCaptionsEnabled = atom(true)
 export const $recentLectureNote = atom<null | string>(null)
 export const $recordingsVersion = atom(0)
+/** Background accurate-transcription pass over the note that was just saved. */
+export const $transcriptRefine = atom<null | { state: 'failed' | 'refined' | 'refining'; title: string }>(null)
 
 let recorder: MediaRecorder | null = null
 let streams: MediaStream[] = []
@@ -275,9 +280,51 @@ function releaseCapture(): void {
   $paused.set(false)
 }
 
+/** Post-stop accuracy pass: re-transcribe the finished audio with the batch model
+ *  (whisper-base.en) and swap it into the saved note's Transcript section. Runs in
+ *  the background after the note is already safe on disk; a student edit to the
+ *  section, an over-long recording, or any failure leaves the live transcript as-is. */
+async function refineTranscript(blob: Blob, noteTitle: string, savedLiveTranscript: string, recordedMs: number): Promise<void> {
+  if (recordedMs > AUTO_REFINE_MAX_MS) {
+    return
+  }
+
+  $transcriptRefine.set({ state: 'refining', title: noteTitle })
+
+  try {
+    const { transcribeAudio } = await import('./transcribe')
+
+    const raw = await transcribeAudio(await blob.arrayBuffer())
+    const { corrected } = correctPharmTerms(raw)
+
+    if (!corrected.trim()) {
+      $transcriptRefine.set(null)
+
+      return
+    }
+
+    const notes = await loadFolderNotes(LECTURE_FOLDER)
+    const saved = notes.find(candidate => candidate.title === noteTitle)
+    const next = saved ? replaceTranscriptSection(saved.content, savedLiveTranscript, corrected) : null
+
+    if (!next) {
+      $transcriptRefine.set(null)
+
+      return
+    }
+
+    await saveNote(noteTitle, next, LECTURE_FOLDER)
+    $recordingsVersion.set($recordingsVersion.get() + 1)
+    $transcriptRefine.set({ state: 'refined', title: noteTitle })
+  } catch {
+    $transcriptRefine.set({ state: 'failed', title: noteTitle })
+  }
+}
+
 async function persist(): Promise<void> {
   try {
     const at = new Date()
+    const recordedMs = $elapsedMs.get()
     const blob = new Blob(chunks, { type: 'audio/webm' })
     const buffer = new Uint8Array(await blob.arrayBuffer())
     let binary = ''
@@ -301,11 +348,13 @@ async function persist(): Promise<void> {
     const transcript = $liveTranscript.get().join(' ').replace(/\s+/g, ' ').trim()
     const typedNotes = $notepadDraft.get().trim()
     const typedTitle = $recordingTitle.get().trim()
+
     // Final naming pass over the complete transcript; a student-typed title always wins.
     const noteTitle =
       titleEdited && typedTitle
         ? typedTitle
         : (deriveRecordingTitle(transcript, at) ?? (typedTitle || lectureNoteTitle(at)))
+
     await createFolder(LECTURE_FOLDER)
     await saveNote(
       noteTitle,
@@ -314,6 +363,7 @@ async function persist(): Promise<void> {
     )
     $recentLectureNote.set(noteTitle)
     $liveStatus.set('')
+    void refineTranscript(blob, noteTitle, transcript, recordedMs)
   } catch (error) {
     $recordingError.set(error instanceof Error ? error.message : 'Could not save the recording.')
   } finally {
@@ -340,6 +390,7 @@ export async function startRecording(): Promise<void> {
   $liveInsights.set([])
   $notepadDraft.set('')
   $recentLectureNote.set(null)
+  $transcriptRefine.set(null)
   titleEdited = false
   $recordingTitle.set(lectureNoteTitle(new Date()))
 
@@ -421,6 +472,8 @@ export async function startRecording(): Promise<void> {
     $elapsedMs.set(0)
     tick = setInterval(refreshElapsed, 250)
     $recording.set('recording')
+    // Feature counter only — no audio, transcript, or title ever leaves this call.
+    telemetryCapture('recorder_started')
   } catch (error) {
     releaseCapture()
     $recording.set('idle')

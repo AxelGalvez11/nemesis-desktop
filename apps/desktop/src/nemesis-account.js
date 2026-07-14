@@ -9,6 +9,7 @@
 // behind a usage-metered proxy is the documented next step (docs/design note in the
 // nemesis kit).
 import { atom } from 'nanostores';
+import { resetTelemetryIdentity, telemetryIdentify } from '@/nemesis-telemetry';
 // Public client credentials — the same values the Nemesis account portal ships to every
 // browser. Safe to embed: the anon key only grants what RLS policies allow.
 export const SUPABASE_URL = 'https://qyjmivntajbigjswhahb.supabase.co';
@@ -189,6 +190,8 @@ async function applySession(session) {
     // Zero-setup model access: every verified sign-in (re)wires the agent backend
     // to the metering proxy. Fire-and-forget so account state never waits on it.
     void syncBackendLlm();
+    // No-op unless telemetry is running (consent-gated); uses the uuid, never the email.
+    telemetryIdentify(session.userId);
 }
 function applyUnavailableSession(session, previous) {
     const trialEnd = previous?.trialEnd || (previous?.planStatus === 'trialing' ? previous.periodEnd : undefined) || session.trialEnd;
@@ -314,6 +317,7 @@ export async function signOut() {
         // ignore
     }
     $deviceKey.set(null);
+    resetTelemetryIdentity();
     saveSession(null);
     try {
         window.localStorage.removeItem(BYPASS_KEY);

@@ -9,10 +9,14 @@ import { type FC, useEffect, useState } from 'react'
 
 import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { $account } from '@/nemesis-account'
+import { setTelemetryEnabled, telemetryIdentify } from '@/nemesis-telemetry'
 
-const CONSENT_VERSION = '2026-07-13'
+// 2026-07-14: bumped for a real data-practice change — anonymous usage stats +
+// crash reports (PostHog) were added, disclosed below with a default-on checkbox.
+const CONSENT_VERSION = '2026-07-14'
 const CONSENT_STORAGE_KEY = 'nemesis.consent.accepted'
 const PRIVACY_URL = 'https://app.enternemesis.com/legal/privacy'
 
@@ -24,9 +28,16 @@ function readAcceptedVersion(): null | string {
   }
 }
 
+/** True once the student has accepted the CURRENT consent version (used by the
+ *  app shell to decide whether telemetry may start on launch). */
+export function hasAcceptedCurrentConsent(): boolean {
+  return readAcceptedVersion() === CONSENT_VERSION
+}
+
 export const NemesisConsentGate: FC = () => {
   const account = useStore($account)
   const [acceptedVersion, setAcceptedVersion] = useState<null | string>(() => readAcceptedVersion())
+  const [shareStats, setShareStats] = useState(true)
 
   // Re-check on sign-in transitions so a fresh machine shows the gate exactly once.
   useEffect(() => {
@@ -42,6 +53,13 @@ export const NemesisConsentGate: FC = () => {
       window.localStorage.setItem(CONSENT_STORAGE_KEY, CONSENT_VERSION)
     } catch {
       // localStorage unavailable: still let the user in for this session.
+    }
+
+    // Applies the checkbox: enabling also starts telemetry right away.
+    setTelemetryEnabled(shareStats)
+
+    if (shareStats && account.userId) {
+      telemetryIdentify(account.userId)
     }
 
     setAcceptedVersion(CONSENT_VERSION)
@@ -83,6 +101,22 @@ export const NemesisConsentGate: FC = () => {
               </button>
               .
             </p>
+          </div>
+          <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+            <div className="text-sm font-medium">Helping us fix bugs (your choice)</div>
+            <p className="pt-1 text-muted-foreground">
+              With the box below checked, Nemesis sends anonymous usage counts (which features get used) and crash
+              reports — never your chats, notes, files, or recordings. Change your mind any time in Settings →
+              Account &amp; usage.
+            </p>
+            <label className="mt-2 flex cursor-pointer items-start gap-2">
+              <Checkbox
+                checked={shareStats}
+                className="mt-0.5"
+                onCheckedChange={value => setShareStats(value === true)}
+              />
+              <span className="text-muted-foreground">Share anonymous usage stats &amp; crash reports</span>
+            </label>
           </div>
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
             <div className="text-sm font-medium">You stay in charge</div>

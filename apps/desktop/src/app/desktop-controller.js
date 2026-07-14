@@ -7,7 +7,7 @@ import { BootFailureOverlay } from '@/components/boot-failure-overlay';
 import { DesktopInstallOverlay } from '@/components/desktop-install-overlay';
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay';
 import { NemesisAccountGate } from '@/components/nemesis-account-gate';
-import { NemesisConsentGate } from '@/components/nemesis-consent-gate';
+import { hasAcceptedCurrentConsent, NemesisConsentGate } from '@/components/nemesis-consent-gate';
 import { NemesisUpdateBanner } from '@/components/nemesis-update-banner';
 import { DesktopOnboardingOverlay } from '@/components/onboarding';
 import { Pane, PaneMain } from '@/components/pane-shell';
@@ -19,6 +19,7 @@ import { isFocusWithin } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { adoptOAuthSession, consumeOAuthState } from '@/nemesis-account';
+import { startTelemetry } from '@/nemesis-telemetry';
 import { useSkinCommand } from '@/themes/use-skin-command';
 import { formatRefValue } from '../components/assistant-ui/directive-text';
 import { getSessionMessages, triggerCronJob } from '../hermes';
@@ -206,6 +207,13 @@ export function DesktopController() {
             unsubscribe?.();
             stopUpdatePoller();
         };
+    }, []);
+    // Telemetry only ever starts once the CURRENT consent version was accepted
+    // (the consent gate itself starts it the moment a student first accepts).
+    useEffect(() => {
+        if (hasAcceptedCurrentConsent()) {
+            startTelemetry();
+        }
     }, []);
     // Remember the open chat so a relaunch reopens it instead of an empty new-chat.
     useEffect(() => {

@@ -7,6 +7,7 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import {
   $account,
   BILLING_URL,
@@ -20,6 +21,7 @@ import {
   type UsageSnapshot,
   type WeeklyUsageDay
 } from '@/nemesis-account'
+import { setTelemetryEnabled, telemetryEnabled } from '@/nemesis-telemetry'
 
 function formatTokens(value: number): string {
   if (value >= 1_000_000) {
@@ -218,6 +220,32 @@ export function UsageSettings() {
         research brief, a slide deck) use more than a quick question. Lecture transcription runs on your own Mac and
         never counts against this.
       </p>
+
+      <PrivacyCard />
+    </div>
+  )
+}
+
+/** Opt-out for the anonymous telemetry disclosed at the consent screen. Applies
+ *  immediately in both directions (see setTelemetryEnabled). */
+function PrivacyCard() {
+  const [share, setShare] = useState(() => telemetryEnabled())
+
+  const toggle = (next: boolean) => {
+    setShare(next)
+    setTelemetryEnabled(next)
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-5">
+      <div>
+        <div className="text-sm font-medium">Share anonymous usage stats &amp; crash reports</div>
+        <p className="pt-1 text-xs leading-relaxed text-muted-foreground">
+          Feature counts and crash reports only — never your chats, notes, files, or recordings. Turning this off
+          stops sharing immediately.
+        </p>
+      </div>
+      <Switch checked={share} onCheckedChange={toggle} />
     </div>
   )
 }
