@@ -34,11 +34,15 @@ export interface NoteRailProps {
   activeNote: VaultNote
   index: VaultIndex
   notes: VaultNote[]
+  /** Create-and-open the note an unresolved [[wikilink]] target points at — clicking an
+   *  Unresolved pill is the same "make this link real" affordance as clicking the link
+   *  itself in the editor (index.tsx's openWikilink). */
+  onCreateUnresolved: (target: string) => void
   onOpenNote: (note: VaultNote) => void
   onSelectHeading: (line: number) => void
 }
 
-export function NoteRail({ activeNote, index, notes, onOpenNote, onSelectHeading }: NoteRailProps) {
+export function NoteRail({ activeNote, index, notes, onCreateUnresolved, onOpenNote, onSelectHeading }: NoteRailProps) {
   const [collapsed, setCollapsed] = useState(() => storedBoolean(COLLAPSED_KEY, false))
   const [tab, setTab] = useState<RailTab>('outline')
 
@@ -117,12 +121,15 @@ export function NoteRail({ activeNote, index, notes, onOpenNote, onSelectHeading
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {unresolved.map(target => (
-                        <span
-                          className="rounded-full border border-dashed border-(--ui-stroke-secondary) px-2.5 py-1 text-[0.6875rem] text-muted-foreground"
-                          key={target}
-                        >
-                          {target}
-                        </span>
+                        <Tip key={target} label={`Create “${target}”`}>
+                          <button
+                            className="rounded-full border border-dashed border-(--ui-stroke-secondary) px-2.5 py-1 text-[0.6875rem] text-muted-foreground transition-[color,border-color,background-color] duration-200 ease-out hover:border-(--theme-primary)/50 hover:bg-(--ui-bg-primary) hover:text-foreground active:scale-[0.98]"
+                            onClick={() => onCreateUnresolved(target)}
+                            type="button"
+                          >
+                            {target}
+                          </button>
+                        </Tip>
                       ))}
                     </div>
                   </div>
