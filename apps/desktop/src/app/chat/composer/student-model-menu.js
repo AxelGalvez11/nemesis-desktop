@@ -1,20 +1,42 @@
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 // Nemesis student model picker. Students never see "deepseek" or any model/provider name —
-// they choose an ANSWER MODE (Fast vs Thinking) and, when thinking, an effort level. These
-// map to the same per-turn fast-mode + reasoning-effort the agent already honors; the actual
-// model stays whatever Nemesis provisions. Nemesis provides (and bills for) the AI, so model
+// they choose one of THREE answer modes (owner ask, 2026-07-14): Instant / Medium / High.
+// These map to the per-turn fast-mode + reasoning-effort the agent already honors
+// (Instant = fast mode on; Medium/High = thinking with that effort). The actual model
+// stays whatever Nemesis provisions — Nemesis provides (and bills for) the AI, so model
 // selection is ours, not the student's.
 import { useStore } from '@nanostores/react';
 import { cn } from '@/lib/utils';
 import { $currentFastMode, $currentReasoningEffort, setCurrentFastMode, setCurrentReasoningEffort } from '@/store/session';
-const EFFORTS = [
-    ['low', 'Light'],
-    ['medium', 'Balanced'],
-    ['high', 'Deep']
+export function currentAnswerMode(fast, effort) {
+    if (fast) {
+        return 'instant';
+    }
+    return effort === 'high' ? 'high' : 'medium';
+}
+export function answerModeLabel(mode) {
+    return mode === 'instant' ? 'Instant' : mode === 'high' ? 'High' : 'Medium';
+}
+const MODES = [
+    { description: 'Fastest answers for quick questions.', label: 'Instant', mode: 'instant' },
+    { description: 'Thinks it through first — the everyday default.', label: 'Medium', mode: 'medium' },
+    {
+        description: 'Deepest reasoning for hard problems. Slower and uses more of your daily allowance.',
+        label: 'High',
+        mode: 'high'
+    }
 ];
+function applyAnswerMode(mode) {
+    if (mode === 'instant') {
+        setCurrentFastMode(() => true);
+        return;
+    }
+    setCurrentFastMode(() => false);
+    setCurrentReasoningEffort(() => (mode === 'high' ? 'high' : 'medium'));
+}
 export function StudentModelMenu() {
     const fast = useStore($currentFastMode);
     const effort = useStore($currentReasoningEffort) || 'medium';
-    const segment = (active) => cn('flex-1 rounded-md px-2 py-1.5 text-sm transition-colors', active ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent');
-    return (_jsxs("div", { className: "w-64 p-1", children: [_jsx("div", { className: "px-3 pb-1.5 pt-2 text-xs font-medium text-muted-foreground", children: "Answer mode" }), _jsxs("div", { className: "flex gap-1 px-2", children: [_jsx("button", { className: segment(fast), onClick: () => setCurrentFastMode(() => true), type: "button", children: "Fast" }), _jsx("button", { className: segment(!fast), onClick: () => setCurrentFastMode(() => false), type: "button", children: "Thinking" })] }), _jsx("p", { className: "px-3 pb-1 pt-1.5 text-xs text-muted-foreground", children: fast ? 'Quick answers for simple questions.' : 'Reasons step by step — better for hard problems.' }), !fast && (_jsxs(_Fragment, { children: [_jsx("div", { className: "mx-2 my-1.5 border-t border-border" }), _jsx("div", { className: "px-3 pb-1.5 text-xs font-medium text-muted-foreground", children: "Effort" }), _jsx("div", { className: "flex gap-1 px-2 pb-1", children: EFFORTS.map(([value, label]) => (_jsx("button", { className: cn('flex-1 rounded-md px-2 py-1.5 text-xs transition-colors', effort === value ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'), onClick: () => setCurrentReasoningEffort(() => value), type: "button", children: label }, value))) })] }))] }));
+    const active = currentAnswerMode(fast, effort);
+    return (_jsxs("div", { className: "w-72 p-1", children: [_jsx("div", { className: "px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground", children: "Answer mode" }), _jsx("div", { className: "flex flex-col gap-0.5 px-1 pb-1", children: MODES.map(({ description, label, mode }) => (_jsxs("button", { className: cn('flex flex-col items-start gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors', active === mode ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'), onClick: () => applyAnswerMode(mode), type: "button", children: [_jsx("span", { className: "text-sm font-medium", children: label }), _jsx("span", { className: cn('text-xs', active === mode ? 'text-primary-foreground/75' : 'text-muted-foreground'), children: description })] }, mode))) })] }));
 }

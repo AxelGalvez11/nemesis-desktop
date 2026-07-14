@@ -8,9 +8,9 @@ import { GlyphSpinner } from '@/components/ui/glyph-spinner'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { ChevronDown } from '@/lib/icons'
-import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
-import { formatModelStatusLabel, reasoningEffortLabel } from '@/lib/model-status-label'
+import { formatModelStatusLabel } from '@/lib/model-status-label'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import {
   $currentFastMode,
   $currentModel,
@@ -19,7 +19,7 @@ import {
   setModelPickerOpen
 } from '@/store/session'
 
-import { StudentModelMenu } from './student-model-menu'
+import { answerModeLabel, currentAnswerMode, StudentModelMenu } from './student-model-menu'
 import type { ChatBarState } from './types'
 
 const PILL = cn(
@@ -50,7 +50,7 @@ export function ModelPill({
 
   // Student build: no provider/model names ever — just the answer mode.
   if (NEMESIS_STUDENT_BUILD) {
-    const modeLabel = fastMode ? 'Fast' : `Thinking${reasoningEffort ? ` · ${reasoningEffortLabel(reasoningEffort)}` : ''}`
+    const modeLabel = answerModeLabel(currentAnswerMode(fastMode, reasoningEffort || 'medium'))
 
     return (
       <DropdownMenu onOpenChange={setOpen} open={open}>
