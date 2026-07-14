@@ -400,7 +400,7 @@ function NewSectionDialog({ onClose, onCreate, sections }) {
                         if (event.key === 'Enter' && valid) {
                             onCreate(name);
                         }
-                    }, placeholder: "Section name (e.g. Pharmacology)", value: name }), normalized && unavailable && (_jsx("p", { className: "text-xs text-muted-foreground", children: "That section already exists. \u201COther\u201D is reserved for ungrouped decks." })), _jsxs(DialogFooter, { children: [_jsx(Button, { onClick: onClose, variant: "outline", children: "Cancel" }), _jsx(Button, { disabled: !valid, onClick: () => onCreate(name), children: "Create section" })] })] }) }));
+                    }, placeholder: "Section name (e.g. Microeconomics)", value: name }), normalized && unavailable && (_jsx("p", { className: "text-xs text-muted-foreground", children: "That section already exists. \u201COther\u201D is reserved for ungrouped decks." })), _jsxs(DialogFooter, { children: [_jsx(Button, { onClick: onClose, variant: "outline", children: "Cancel" }), _jsx(Button, { disabled: !valid, onClick: () => onCreate(name), children: "Create section" })] })] }) }));
 }
 function RenameDeckDialog({ deck, onClose, onRename }) {
     const [name, setName] = useState(deck.name);

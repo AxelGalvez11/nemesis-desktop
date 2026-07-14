@@ -1299,7 +1299,9 @@ export function ChatSidebar({
                         </Button>
                       ) : null}
                       <div className="grid size-6 place-items-center">
-                        {!NEMESIS_STUDENT_BUILD && !showAllProfiles && agentSessions.length > 0 ? (
+                        {/* beta.5: students get the Projects view too — it was the only way
+                            to create a project once a session was already running. */}
+                        {!showAllProfiles && agentSessions.length > 0 ? (
                           <Button
                             aria-label={agentsGrouped ? s.showSessions : s.showProjects}
                             className={cn(
@@ -1446,6 +1448,7 @@ interface StudentSidebarFooterProps {
 
 function StudentSidebarFooter({ onOpenSettings }: StudentSidebarFooterProps) {
   const account = useStore($account)
+
   const accountEmail = account.bypass
     ? 'Offline mode'
     : account.status === 'signed-in'
@@ -1453,6 +1456,7 @@ function StudentSidebarFooter({ onOpenSettings }: StudentSidebarFooterProps) {
       : account.status === 'loading'
         ? 'Account'
         : 'Sign in'
+
   const accountInitial = account.email?.trim().charAt(0).toUpperCase() || 'N'
 
   return (

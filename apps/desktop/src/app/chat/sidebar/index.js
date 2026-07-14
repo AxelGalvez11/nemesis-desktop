@@ -752,7 +752,7 @@ export function ChatSidebar({ currentView, onNavigate, onLoadMoreSessions, onLoa
                                                 else {
                                                     onNewSessionInWorkspace(null);
                                                 }
-                                            }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "add", size: "0.75rem" }) })) : null, _jsx("div", { className: "grid size-6 place-items-center", children: !NEMESIS_STUDENT_BUILD && !showAllProfiles && agentSessions.length > 0 ? (_jsx(Button, { "aria-label": agentsGrouped ? s.showSessions : s.showProjects, className: cn(HEADER_NAV_BTN, agentsGrouped && 'bg-(--ui-control-active-background) text-foreground opacity-100'), onClick: event => {
+                                            }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "add", size: "0.75rem" }) })) : null, _jsx("div", { className: "grid size-6 place-items-center", children: !showAllProfiles && agentSessions.length > 0 ? (_jsx(Button, { "aria-label": agentsGrouped ? s.showSessions : s.showProjects, className: cn(HEADER_NAV_BTN, agentsGrouped && 'bg-(--ui-control-active-background) text-foreground opacity-100'), onClick: event => {
                                                     event.stopPropagation();
                                                     setSidebarRecentsOpen(true);
                                                     setSidebarAgentsGrouped(!agentsGrouped);

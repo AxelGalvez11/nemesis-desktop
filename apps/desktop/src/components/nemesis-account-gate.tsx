@@ -25,6 +25,7 @@ import {
   ACCOUNT_BYPASS_ENABLED,
   BILLING_URL,
   bypassAccount,
+  desktopOAuthStartUrl,
   getTrialTiming,
   initAccount,
   planLabel,
@@ -42,6 +43,7 @@ export const NemesisAccountGate: FC = () => {
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
+  const [oauthStarted, setOauthStarted] = useState<null | string>(null)
   const [refreshingPlan, setRefreshingPlan] = useState(false)
   const [dismissedTrialEnd, setDismissedTrialEnd] = useState<null | string>(null)
   const trialTiming = getTrialTiming(account)
@@ -124,6 +126,30 @@ export const NemesisAccountGate: FC = () => {
           </div>
 
           <div className="flex flex-col gap-2.5">
+            {(['google', 'apple'] as const).map(provider => (
+              <Button
+                key={provider}
+                onClick={() => {
+                  setOauthStarted(provider)
+                  void window.hermesDesktop?.openExternal?.(desktopOAuthStartUrl(provider))
+                }}
+                variant="secondary"
+              >
+                Continue with {provider === 'google' ? 'Google' : 'Apple'}
+              </Button>
+            ))}
+            {oauthStarted && (
+              <p aria-live="polite" className="text-center text-xs text-muted-foreground">
+                Finishing sign-in in your browser — this window updates automatically when you&apos;re done.
+              </p>
+            )}
+
+            <div className="flex items-center gap-3 py-1">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-[11px] uppercase tracking-wide text-muted-foreground/70">or</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+
             <Input
               autoFocus
               onChange={event => setEmail(event.target.value)}
@@ -304,9 +330,11 @@ export const NemesisAccountGate: FC = () => {
               <Button
                 onClick={() => {
                   const subject = encodeURIComponent('Nemesis bug report')
+
                   const body = encodeURIComponent(
                     'What happened:\n\n\nWhat I expected:\n\n\nWhat I was doing right before:\n\n\n(Nemesis beta on macOS)'
                   )
+
                   void window.hermesDesktop?.openExternal?.(`mailto:support@enternemesis.com?subject=${subject}&body=${body}`)
                 }}
                 size="sm"

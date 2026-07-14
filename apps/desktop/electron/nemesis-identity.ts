@@ -52,6 +52,7 @@ function detectLegacyHomeMigration(options: {
 }): null | { legacyHome: string; nemesisHome: string } {
   const { exists, home, localAppData, nemesisHome, platform } = options
   const joiner = platform === 'win32' ? path.win32 : path
+
   const looksLikeAgentHome = (dir: string) =>
     exists(joiner.join(dir, 'hermes-agent')) || exists(joiner.join(dir, 'config.yaml'))
 
@@ -71,6 +72,58 @@ function detectLegacyHomeMigration(options: {
   return looksLikeAgentHome(legacyHome) ? { legacyHome, nemesisHome } : null
 }
 
+// Upsert KEY=value lines into a dotenv-style file body without disturbing any
+// other line (comments, unrelated vars, blank lines, ordering). An existing
+// assignment for a key is rewritten in place — even when commented-out lookalikes
+// exist elsewhere — and missing keys are appended under a managed banner. Pure
+// so the sync IPC handler's file semantics are unit-testable.
+const NEMESIS_ENV_BANNER = '# Managed by Nemesis sign-in — safe to delete; rewritten on next launch.'
+
+function upsertEnvVars(content: string, vars: Record<string, string>): string {
+  const lines = content.length ? content.split('\n') : []
+  const pending = new Map(Object.entries(vars))
+
+  const rewritten = lines.map(line => {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line)
+
+    if (!match || !pending.has(match[1])) {
+      return line
+    }
+
+    const key = match[1]
+    const value = pending.get(key)
+    pending.delete(key)
+
+    return `${key}=${value}`
+  })
+
+  if (pending.size === 0) {
+    return rewritten.join('\n')
+  }
+
+  const appended = [...rewritten]
+
+  // Drop a single trailing blank line so the appended block sits flush, then
+  // restore the trailing newline at the end.
+  while (appended.length && appended[appended.length - 1].trim() === '') {
+    appended.pop()
+  }
+
+  if (appended.length) {
+    appended.push('')
+  }
+
+  appended.push(NEMESIS_ENV_BANNER)
+
+  for (const [key, value] of pending) {
+    appended.push(`${key}=${value}`)
+  }
+
+  appended.push('')
+
+  return appended.join('\n')
+}
+
 export {
   APP_ID,
   APP_NAME,
@@ -80,5 +133,7 @@ export {
   detectLegacyHomeMigration,
   extractNemesisDeepLink,
   LEGACY_PROTOCOL,
-  PRIMARY_PROTOCOL
+  NEMESIS_ENV_BANNER,
+  PRIMARY_PROTOCOL,
+  upsertEnvVars
 }

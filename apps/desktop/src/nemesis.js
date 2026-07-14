@@ -11,7 +11,11 @@ export const STUDENT_HIDDEN_PALETTE = new Set(['nav-terminal', 'nav-skills', 'na
  *  provider, so model/provider controls stay visible and hosted-usage claims stay hidden. */
 // 2026-07-13: 'providers' and 'config:model' removed — student plans include Nemesis
 // intelligence via the metered proxy, so provider/key/model settings are not student-facing.
+// 2026-07-14 (beta.5): 'usage' restored — students asked where to see their plan + weekly
+// AI usage; the page now also carries account status (usage-settings.tsx).
 export const STUDENT_SETTINGS_KEEP = new Set([
+    'usage',
+    'keybinds',
     'connections',
     'config:appearance',
     'config:chat',

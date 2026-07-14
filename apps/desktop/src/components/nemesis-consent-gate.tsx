@@ -1,7 +1,9 @@
 // One-time privacy + responsibility consent (student build). Shown after the first
-// successful sign-in, before the app is usable. Plain-language and truthful: it names
-// the data processors (the web privacy policy does too) even though marketing copy
-// stays white-labeled. Acceptance is stored locally per consent version.
+// successful sign-in, before the app is usable. Plain-language and truthful: the
+// on-screen copy describes partner categories; the named data-processor list lives in
+// the linked Privacy Policy (the legally required disclosure surface). Copy-only edits
+// must NOT bump CONSENT_VERSION — that re-gates every existing install; bump only when
+// the actual data practices change. Acceptance is stored locally per consent version.
 import { useStore } from '@nanostores/react'
 import { type FC, useEffect, useState } from 'react'
 
@@ -28,11 +30,12 @@ export const NemesisConsentGate: FC = () => {
 
   // Re-check on sign-in transitions so a fresh machine shows the gate exactly once.
   useEffect(() => {
-    if (account.status === 'signed-in') setAcceptedVersion(readAcceptedVersion())
+    if (account.status === 'signed-in') {setAcceptedVersion(readAcceptedVersion())}
   }, [account.status])
 
-  if (!NEMESIS_STUDENT_BUILD || account.bypass || account.status !== 'signed-in') return null
-  if (acceptedVersion === CONSENT_VERSION) return null
+  if (!NEMESIS_STUDENT_BUILD || account.bypass || account.status !== 'signed-in') {return null}
+
+  if (acceptedVersion === CONSENT_VERSION) {return null}
 
   const accept = () => {
     try {
@@ -40,6 +43,7 @@ export const NemesisConsentGate: FC = () => {
     } catch {
       // localStorage unavailable: still let the user in for this session.
     }
+
     setAcceptedVersion(CONSENT_VERSION)
   }
 
@@ -67,10 +71,17 @@ export const NemesisConsentGate: FC = () => {
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
             <div className="text-sm font-medium">Leaves this Mac to do the work</div>
             <p className="pt-1 text-muted-foreground">
-              To answer and research, the text of your requests and relevant excerpts are processed by our service
-              partners: DeepSeek (AI reasoning), Tavily and Firecrawl (web search and reading), and Supabase (account
-              and plan). Partners can change as the engine improves; the current list always lives in the Privacy
-              Policy.
+              To answer and research, the text of your requests and relevant excerpts are processed by our vetted
+              service partners — for AI reasoning, web search and reading, and account management. The full, current
+              list of partners always lives in the{' '}
+              <button
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() => void window.hermesDesktop?.openExternal?.(PRIVACY_URL)}
+                type="button"
+              >
+                Privacy Policy
+              </button>
+              .
             </p>
           </div>
           <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">

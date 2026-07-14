@@ -100,7 +100,8 @@ import {
   defaultNemesisHome,
   detectLegacyHomeMigration,
   extractNemesisDeepLink,
-  PRIMARY_PROTOCOL
+  PRIMARY_PROTOCOL,
+  upsertEnvVars
 } from './nemesis-identity'
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
 import { registerSchoolBrowserIpc } from './school-browser'
@@ -7056,6 +7057,69 @@ ipcMain.handle('hermes:backend:touch', async (_event, profile) => {
   touchPoolBackend(profile)
 
   return { ok: true }
+})
+// Zero-setup model access (student build). After sign-in the renderer hands us
+// its metering-proxy device key; we point the agent backend at the Nemesis LLM
+// proxy by writing the two DeepSeek-provider override vars into $HERMES_HOME/.env
+// (the backend reads that file at spawn) and restarting any live local backend.
+// The device key is the only secret and it's the student's own, scoped + revocable
+// server-side. Fixed URL prefix — the renderer cannot point the backend anywhere else.
+const NEMESIS_LLM_PROXY_BASE = 'https://qyjmivntajbigjswhahb.supabase.co/functions/v1/nemesis-llm/v1'
+
+ipcMain.handle('nemesis:llm:sync', async (_event, payload) => {
+  try {
+    const deviceKey = typeof payload?.deviceKey === 'string' ? payload.deviceKey.trim() : ''
+
+    if (!/^nmk_[0-9a-f]{16,128}$/.test(deviceKey)) {
+      return { ok: false, error: 'invalid device key' }
+    }
+
+    const envPath = path.join(HERMES_HOME, '.env')
+    let current = ''
+
+    try {
+      current = fs.readFileSync(envPath, 'utf8')
+    } catch {
+      // No .env yet — first sign-in on a fresh runtime.
+    }
+
+    const next = upsertEnvVars(current, {
+      DEEPSEEK_API_KEY: deviceKey,
+      DEEPSEEK_BASE_URL: NEMESIS_LLM_PROXY_BASE
+    })
+
+    if (next === current) {
+      return { ok: true, changed: false }
+    }
+
+    fs.mkdirSync(path.dirname(envPath), { recursive: true })
+    fs.writeFileSync(envPath, next, { mode: 0o600 })
+    rememberLog('[nemesis-llm] backend provider synced to the Nemesis metering proxy')
+
+    // Restart live local backends so the new env takes effect. If boot (or the
+    // first-launch install) is still in flight, let it settle first — the child
+    // it spawns will already read the freshly written .env, and tearing down a
+    // half-built connection would race the installer.
+    if (connectionPromise) {
+      try {
+        await connectionPromise
+      } catch {
+        // Boot failed on its own; nothing live to restart.
+      }
+
+      await teardownPrimaryBackendAndWait()
+
+      for (const profile of [...backendPool.keys()]) {
+        await teardownPoolBackendAndWait(profile)
+      }
+    }
+
+    return { ok: true, changed: true }
+  } catch (err) {
+    rememberLog(`[nemesis-llm] provider sync failed: ${err.message}`)
+
+    return { ok: false, error: err.message }
+  }
 })
 ipcMain.handle('hermes:gateway:ws-url', async (_event, profile) => freshGatewayWsUrl(profile))
 ipcMain.handle('hermes:window:openSession', async (_event, sessionId, opts) => {

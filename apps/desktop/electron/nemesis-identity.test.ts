@@ -11,7 +11,9 @@ import {
   defaultNemesisHome,
   detectLegacyHomeMigration,
   extractNemesisDeepLink,
-  PRIMARY_PROTOCOL
+  NEMESIS_ENV_BANNER,
+  PRIMARY_PROTOCOL,
+  upsertEnvVars
 } from './nemesis-identity'
 
 const DESKTOP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -95,4 +97,53 @@ test('legacy home migration maps Windows paths through LOCALAPPDATA', () => {
     platform: 'win32'
   })
   assert.deepEqual(result, { legacyHome: legacy, nemesisHome: `${local}\\nemesis` })
+})
+
+// --- upsertEnvVars -----------------------------------------------------------
+
+test('upsertEnvVars appends managed vars to an empty file', () => {
+  const result = upsertEnvVars('', { DEEPSEEK_API_KEY: 'nmk_abc', DEEPSEEK_BASE_URL: 'https://proxy/v1' })
+
+  assert.ok(result.includes('DEEPSEEK_API_KEY=nmk_abc\n'))
+  assert.ok(result.includes('DEEPSEEK_BASE_URL=https://proxy/v1\n'))
+  assert.ok(result.includes(NEMESIS_ENV_BANNER))
+  assert.ok(result.endsWith('\n'))
+})
+
+test('upsertEnvVars rewrites an existing assignment in place', () => {
+  const before = '# my notes\nDEEPSEEK_API_KEY=old_key\nOTHER=1\n'
+  const result = upsertEnvVars(before, { DEEPSEEK_API_KEY: 'nmk_new' })
+
+  assert.equal(result, '# my notes\nDEEPSEEK_API_KEY=nmk_new\nOTHER=1\n')
+})
+
+test('upsertEnvVars leaves commented lookalikes alone and appends the real var', () => {
+  const before = '# DEEPSEEK_API_KEY=commented\n'
+  const result = upsertEnvVars(before, { DEEPSEEK_API_KEY: 'nmk_live' })
+
+  assert.ok(result.includes('# DEEPSEEK_API_KEY=commented'))
+  assert.ok(result.includes('\nDEEPSEEK_API_KEY=nmk_live'))
+})
+
+test('upsertEnvVars handles export-prefixed assignments', () => {
+  const before = 'export DEEPSEEK_BASE_URL=https://old\n'
+  const result = upsertEnvVars(before, { DEEPSEEK_BASE_URL: 'https://new/v1' })
+
+  assert.equal(result, 'DEEPSEEK_BASE_URL=https://new/v1\n')
+})
+
+test('upsertEnvVars is idempotent', () => {
+  const once = upsertEnvVars('KEEP=1\n', { DEEPSEEK_API_KEY: 'nmk_x', DEEPSEEK_BASE_URL: 'https://p/v1' })
+  const twice = upsertEnvVars(once, { DEEPSEEK_API_KEY: 'nmk_x', DEEPSEEK_BASE_URL: 'https://p/v1' })
+
+  assert.equal(once, twice)
+})
+
+test('upsertEnvVars mixed update-and-append keeps unrelated lines byte-identical', () => {
+  const before = 'A=1\nDEEPSEEK_API_KEY=stale\n\n# trailing comment\n'
+  const result = upsertEnvVars(before, { DEEPSEEK_API_KEY: 'nmk_y', DEEPSEEK_BASE_URL: 'https://p/v1' })
+
+  assert.ok(result.startsWith('A=1\nDEEPSEEK_API_KEY=nmk_y\n'))
+  assert.ok(result.includes('# trailing comment'))
+  assert.ok(result.includes('DEEPSEEK_BASE_URL=https://p/v1'))
 })

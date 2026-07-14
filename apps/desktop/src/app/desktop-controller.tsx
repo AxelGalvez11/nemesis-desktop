@@ -18,6 +18,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { isFocusWithin } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
+import { adoptOAuthSession, consumeOAuthState } from '@/nemesis-account'
 import { useSkinCommand } from '@/themes/use-skin-command'
 
 import { formatRefValue } from '../components/assistant-ui/directive-text'
@@ -374,6 +375,35 @@ export function DesktopController() {
   // it into the composer — the user reviews/edits, then sends; the agent (or
   // the shared command handler) creates the job. Signal readiness so a link
   // that arrived during boot is flushed exactly once.
+  // nemesis://auth/callback?refresh_token=… — Google/Apple sign-in finishing in
+  // the browser hands the session back here. Only the refresh token is used and
+  // it's exchanged with Supabase before anything is trusted (adoptOAuthSession).
+  useEffect(() => {
+    const unsubscribe = window.hermesDesktop?.onDeepLink?.(payload => {
+      if (!payload || payload.kind !== 'auth') {
+        return
+      }
+
+      const refreshToken = payload.params?.refresh_token
+
+      if (typeof refreshToken !== 'string' || !refreshToken) {
+        return
+      }
+
+      // Reject links this app didn't initiate (state must match the one-shot
+      // nonce minted when the student clicked Continue with Google/Apple).
+      if (!consumeOAuthState(payload.params?.state)) {
+        return
+      }
+
+      void adoptOAuthSession(refreshToken).catch(() => {
+        // Expired or forged link: the sign-in gate stays up; the student can retry.
+      })
+    })
+
+    return () => unsubscribe?.()
+  }, [])
+
   useEffect(() => {
     const unsubscribe = window.hermesDesktop?.onDeepLink?.(payload => {
       if (!payload || payload.kind !== 'blueprint' || !payload.name) {
@@ -1095,7 +1125,11 @@ export function DesktopController() {
       {!isSecondaryWindow() && <NemesisAccountGate />}
       {!isSecondaryWindow() && <NemesisConsentGate />}
       {!isSecondaryWindow() && <NemesisUpdateBanner />}
-      {!isSecondaryWindow() && (
+      {/* Student build: never show the upstream "connect a model provider" onboarding.
+          Nemesis provisions the model through the metering proxy at sign-in
+          (nemesis:llm:sync), so a provider/credential error is OUR bug, not a
+          student setup step. */}
+      {!isSecondaryWindow() && !NEMESIS_STUDENT_BUILD && (
         <DesktopOnboardingOverlay
           enabled={gatewayState === 'open'}
           onCompleted={() => {

@@ -138,7 +138,7 @@ export function parseLectureSections(content: string): LectureSections {
 export function enhanceLectureNote(noteTitle: string, navigate: NavigateFunction): void {
   setComposerDraft(
     `Open my lecture note "${noteTitle}.md" in ~/Documents/Nemesis Library/${LECTURE_FOLDER}/ and add a clean, structured "AI notes" section immediately above the existing "Transcript" section. ` +
-      'Use both "My notes" and "Transcript" as source material: keep my wording where it is good, fix transcription garbles against pharmacology vocabulary, ' +
+      'Use both "My notes" and "Transcript" as source material: keep my wording where it is good, fix transcription garbles against the vocabulary of the course subject, ' +
       'and organize the AI notes with useful headings and bullets. Preserve the original Transcript section, My notes section, and the header lines about the recording date and audio file. Update that same file with the result. ' +
       'At the end add a "Flashcard candidates" section with 5 exam-style Q&A pairs from this lecture. Tell me when the file is updated.'
   )
@@ -160,8 +160,8 @@ async function readAudioBuffer(file: RecordingFile): Promise<ArrayBuffer> {
 
 function draftFlashcardsPrompt(transcript: string): string {
   return (
-    'Turn this lecture transcript into 8-15 exam-quality flashcards for a pharmacy/health-sciences student. ' +
-    'Application-level questions (mechanisms, adverse effects, interactions, monitoring), one concept per card, no "what is X" filler. ' +
+    'Turn this lecture transcript into 8-15 exam-quality flashcards for a university student — match the subject of the transcript. ' +
+    'Application-level questions (mechanisms, causes and consequences, trade-offs, applied problems), one concept per card, no "what is X" filler. ' +
     'Reply with ONLY tab-separated lines, one card per line: front<TAB>back. No headers, no numbering, no commentary — ' +
     "I'll paste your reply straight into Study → Import cards.\n\nTranscript:\n" +
     transcript

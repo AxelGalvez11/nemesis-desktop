@@ -1,11 +1,25 @@
-// Usage settings (student build): today's model-token budget for the signed-in
-// plan, read live from the metering proxy's /usage endpoint. Read-only — the
-// same key→plan→counter the proxy enforces, so it can't disagree with reality.
+// Account & usage settings (student build). One page answers "who am I signed in
+// as, what plan am I on, and how much AI have I used" — account status from the
+// live subscription read, today's allowance from the metering proxy's /usage
+// endpoint, and a 7-day view read straight from the student's own usage counters
+// (RLS-scoped). All read-only; subscription changes open in the browser.
 import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { $account, fetchUsage, planLabel, type UsageSnapshot } from '@/nemesis-account'
+import {
+  $account,
+  BILLING_URL,
+  fetchUsage,
+  fetchWeeklyUsage,
+  getTrialTiming,
+  planLabel,
+  refreshEntitlement,
+  signOut,
+  trialCountdownLabel,
+  type UsageSnapshot,
+  type WeeklyUsageDay
+} from '@/nemesis-account'
 
 function formatTokens(value: number): string {
   if (value >= 1_000_000) {
@@ -19,10 +33,31 @@ function formatTokens(value: number): string {
   return String(value)
 }
 
+/** The last 7 UTC days (oldest first), each with that day's used tokens (0 when
+ *  the student didn't use Nemesis that day — the table only has rows for active
+ *  days). */
+function fillWeek(rows: WeeklyUsageDay[], now = Date.now()): WeeklyUsageDay[] {
+  const byDay = new Map(rows.map(row => [row.periodStart, row.used]))
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(now - (6 - index) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+    return { periodStart: day, used: byDay.get(day) ?? 0 }
+  })
+}
+
+function dayLetter(isoDate: string): string {
+  const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay()
+
+  return ['S', 'M', 'T', 'W', 'T', 'F', 'S'][day] ?? ''
+}
+
 export function UsageSettings() {
   const account = useStore($account)
   const [usage, setUsage] = useState<null | UsageSnapshot>(null)
   const [state, setState] = useState<'error' | 'loading' | 'ready'>('loading')
+  const [week, setWeek] = useState<null | WeeklyUsageDay[]>(null)
+  const [refreshingPlan, setRefreshingPlan] = useState(false)
 
   const load = () => {
     setState('loading')
@@ -30,26 +65,114 @@ export function UsageSettings() {
       setUsage(result)
       setState(result ? 'ready' : 'error')
     })
+    void fetchWeeklyUsage().then(rows => {
+      setWeek(rows ? fillWeek(rows) : null)
+    })
   }
 
   useEffect(() => {
     load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   const pct = usage && usage.dailyLimit > 0 ? Math.min(100, Math.round((usage.used / usage.dailyLimit) * 100)) : 0
   const planName = usage ? planLabel(usage.plan) : planLabel(account.plan)
+  const trialTiming = getTrialTiming(account)
+
+  const planDetail =
+    trialTiming && !trialTiming.expired
+      ? `${trialCountdownLabel(trialTiming.daysRemaining)} · ${new Date(trialTiming.end).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+      : account.plan === 'free'
+        ? 'No active plan — upgrade for the full study engine.'
+        : account.periodEnd
+          ? `Renews ${new Date(account.periodEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}`
+          : account.planStatus || 'Active'
+
+  const weekTotal = week ? week.reduce((sum, day) => sum + day.used, 0) : 0
+  const weekMax = week ? Math.max(1, ...week.map(day => day.used)) : 1
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-6 py-8">
       <div className="flex flex-col gap-1">
-        <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70">Usage</span>
-        <h2 className="text-lg font-semibold text-foreground">Today&apos;s allowance</h2>
+        <span className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground/70">
+          Account &amp; usage
+        </span>
+        <h2 className="text-lg font-semibold text-foreground">Your account</h2>
         <p className="text-sm text-muted-foreground">
-          Your {planName} plan includes a daily amount of AI work. It resets every day at midnight (UTC).
+          Your plan, this week&apos;s AI work, and today&apos;s allowance — all in one place.
         </p>
       </div>
 
+      {/* Account status */}
+      <div className="flex flex-col gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-foreground">
+              {account.bypass ? 'Offline mode — not signed in' : account.email || 'Signed in'}
+            </div>
+            <div className="pt-0.5 text-xs text-muted-foreground">{account.bypass ? 'Local development' : planDetail}</div>
+          </div>
+          <span className="shrink-0 rounded-full bg-(--theme-primary)/15 px-2.5 py-1 text-[11px] font-semibold text-(--theme-primary)">
+            {trialTiming && !trialTiming.expired ? `${planLabel(account.plan)} trial` : `${planLabel(account.plan)} plan`}
+          </span>
+        </div>
+        {!account.bypass && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={() => void window.hermesDesktop?.openExternal?.(BILLING_URL)} size="sm" variant="secondary">
+              {account.plan === 'free' ? 'Choose a plan' : 'Manage subscription'}
+            </Button>
+            <Button
+              disabled={refreshingPlan}
+              onClick={() => {
+                setRefreshingPlan(true)
+                void refreshEntitlement().finally(() => {
+                  setRefreshingPlan(false)
+                  load()
+                })
+              }}
+              size="sm"
+              variant="outline"
+            >
+              {refreshingPlan ? 'Checking…' : 'Refresh plan'}
+            </Button>
+            <Button onClick={() => void signOut()} size="sm" variant="ghost">
+              Sign out
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* This week */}
+      <div className="flex flex-col gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-5">
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm font-medium text-foreground">This week</span>
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {week ? `${formatTokens(weekTotal)} tokens over 7 days` : 'Not available yet'}
+          </span>
+        </div>
+        {week ? (
+          <div aria-label="AI usage for the last 7 days" className="flex items-end gap-2" role="img">
+            {week.map(day => (
+              <div className="flex flex-1 flex-col items-center gap-1" key={day.periodStart}>
+                <div className="flex h-16 w-full items-end overflow-hidden rounded-md bg-(--ui-bg-tertiary)">
+                  <div
+                    className="w-full rounded-md bg-(--theme-primary)/80 transition-[height] duration-500"
+                    style={{ height: `${Math.max(day.used > 0 ? 6 : 0, Math.round((day.used / weekMax) * 100))}%` }}
+                    title={`${day.periodStart}: ${formatTokens(day.used)} tokens`}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground/70">{dayLetter(day.periodStart)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Weekly usage appears after your first AI request while signed in.
+          </p>
+        )}
+      </div>
+
+      {/* Today */}
       {state === 'ready' && usage ? (
         <div className="flex flex-col gap-4 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-5">
           <div className="flex items-baseline justify-between">
@@ -66,7 +189,8 @@ export function UsageSettings() {
           </div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
-              <span className="font-semibold text-foreground">{formatTokens(usage.remaining)}</span> left today
+              <span className="font-semibold text-foreground">{formatTokens(usage.remaining)}</span> left today · resets
+              at midnight (UTC)
             </span>
             <span className="rounded-full bg-(--theme-primary)/15 px-2 py-0.5 font-semibold text-(--theme-primary)">
               {planName}
@@ -80,8 +204,8 @@ export function UsageSettings() {
       ) : (
         <div className="flex flex-col items-start gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-5">
           <p className="text-sm text-muted-foreground">
-            Usage isn&apos;t available yet — this needs you to be signed in with an active plan and the metering
-            service running.
+            Today&apos;s allowance isn&apos;t available yet — this needs you to be signed in with an active plan and the
+            metering service reachable.
           </p>
           <Button onClick={load} size="sm" variant="secondary">
             Try again

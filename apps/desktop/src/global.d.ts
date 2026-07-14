@@ -24,6 +24,9 @@ declare global {
       // Keepalive: mark a pool profile backend as recently used so the idle
       // reaper spares it while its chat is active.
       touchBackend: (profile?: string | null) => Promise<{ ok: boolean }>
+      // Student build: hand the metering-proxy device key to main, which points
+      // the agent backend at the Nemesis LLM proxy and restarts it if needed.
+      nemesisLlmSync?: (deviceKey: string) => Promise<{ ok: boolean; changed?: boolean; error?: string }>
       getGatewayWsUrl: (profile?: null | string) => Promise<string>
       // Open (or focus) a standalone OS window for a single chat session so
       // the user can work with multiple chats side by side. Returns ok:false

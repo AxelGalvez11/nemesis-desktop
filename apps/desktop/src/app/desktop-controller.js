@@ -18,6 +18,7 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 import { isFocusWithin } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
+import { adoptOAuthSession, consumeOAuthState } from '@/nemesis-account';
 import { useSkinCommand } from '@/themes/use-skin-command';
 import { formatRefValue } from '../components/assistant-ui/directive-text';
 import { getSessionMessages, triggerCronJob } from '../hermes';
@@ -256,6 +257,29 @@ export function DesktopController() {
     // it into the composer — the user reviews/edits, then sends; the agent (or
     // the shared command handler) creates the job. Signal readiness so a link
     // that arrived during boot is flushed exactly once.
+    // nemesis://auth/callback?refresh_token=… — Google/Apple sign-in finishing in
+    // the browser hands the session back here. Only the refresh token is used and
+    // it's exchanged with Supabase before anything is trusted (adoptOAuthSession).
+    useEffect(() => {
+        const unsubscribe = window.hermesDesktop?.onDeepLink?.(payload => {
+            if (!payload || payload.kind !== 'auth') {
+                return;
+            }
+            const refreshToken = payload.params?.refresh_token;
+            if (typeof refreshToken !== 'string' || !refreshToken) {
+                return;
+            }
+            // Reject links this app didn't initiate (state must match the one-shot
+            // nonce minted when the student clicked Continue with Google/Apple).
+            if (!consumeOAuthState(payload.params?.state)) {
+                return;
+            }
+            void adoptOAuthSession(refreshToken).catch(() => {
+                // Expired or forged link: the sign-in gate stays up; the student can retry.
+            });
+        });
+        return () => unsubscribe?.();
+    }, []);
     useEffect(() => {
         const unsubscribe = window.hermesDesktop?.onDeepLink?.(payload => {
             if (!payload || payload.kind !== 'blueprint' || !payload.name) {
@@ -788,7 +812,7 @@ export function DesktopController() {
     // (incl. a snapshotted cwd) independent of the session, so switching sessions
     // never rebuilds or closes them; toggling the pane never rebuilds the shells.
     const mainOverlays = _jsx(PersistentTerminal, { onAddSelectionToChat: composer.addTerminalSelectionAttachment });
-    const overlays = (_jsxs(_Fragment, { children: [_jsx(RemoteDisplayBanner, {}), !isSecondaryWindow() && _jsx(DesktopInstallOverlay, {}), !isSecondaryWindow() && _jsx(NemesisAccountGate, {}), !isSecondaryWindow() && _jsx(NemesisConsentGate, {}), !isSecondaryWindow() && _jsx(NemesisUpdateBanner, {}), !isSecondaryWindow() && (_jsx(DesktopOnboardingOverlay, { enabled: gatewayState === 'open', onCompleted: () => {
+    const overlays = (_jsxs(_Fragment, { children: [_jsx(RemoteDisplayBanner, {}), !isSecondaryWindow() && _jsx(DesktopInstallOverlay, {}), !isSecondaryWindow() && _jsx(NemesisAccountGate, {}), !isSecondaryWindow() && _jsx(NemesisConsentGate, {}), !isSecondaryWindow() && _jsx(NemesisUpdateBanner, {}), !isSecondaryWindow() && !NEMESIS_STUDENT_BUILD && (_jsx(DesktopOnboardingOverlay, { enabled: gatewayState === 'open', onCompleted: () => {
                     void refreshHermesConfig();
                     void refreshCurrentModel();
                     void queryClient.invalidateQueries({ queryKey: ['model-options'] });

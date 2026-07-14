@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 import { codiconIcon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
-import { NEMESIS_STUDENT_BUILD, STUDENT_SETTINGS_KEEP } from '@/nemesis'
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
@@ -14,6 +13,7 @@ import {
   Download,
   Globe,
   Info,
+  Keyboard,
   KeyRound,
   Link,
   RefreshCw,
@@ -22,6 +22,8 @@ import {
   Wrench,
   Zap
 } from '@/lib/icons'
+import { NEMESIS_STUDENT_BUILD, STUDENT_SETTINGS_KEEP } from '@/nemesis'
+import { toggleKeybindPanel } from '@/store/keybinds'
 import { notifyError } from '@/store/notifications'
 
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
@@ -32,9 +34,8 @@ import { SKILLS_ROUTE } from '../routes'
 
 import { AboutSettings } from './about-settings'
 import { AppearanceSettings } from './appearance-settings'
-import { ConnectionsSettings } from './connections-settings'
-import { UsageSettings } from './usage-settings'
 import { ConfigSettings } from './config-settings'
+import { ConnectionsSettings } from './connections-settings'
 import { SECTIONS } from './constants'
 import { GatewaySettings } from './gateway-settings'
 import { KEYS_VIEWS, KeysSettings, type KeysView } from './keys-settings'
@@ -42,6 +43,7 @@ import { NotificationsSettings } from './notifications-settings'
 import { PROVIDER_VIEWS, ProvidersSettings, type ProviderView } from './providers-settings'
 import { SessionsSettings } from './sessions-settings'
 import type { SettingsPageProps, SettingsView as SettingsViewId } from './types'
+import { UsageSettings } from './usage-settings'
 
 const SETTINGS_VIEWS_ALL: readonly SettingsViewId[] = [
   'usage',
@@ -83,6 +85,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     SETTINGS_VIEWS,
     (NEMESIS_STUDENT_BUILD ? 'config:appearance' : 'config:model') as SettingsViewId
   )
+
   // Providers subnav (Accounts vs API keys) lives in its own param so each
   // sub-view is deep-linkable and survives a refresh.
   const [providerView, setProviderView] = useRouteEnumParam<ProviderView>('pview', PROVIDER_VIEWS, 'accounts')
@@ -146,7 +149,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       active: activeView === 'usage',
       icon: Activity,
       id: 'usage',
-      label: 'Usage',
+      label: 'Account & usage',
       onSelect: () => setActiveView('usage')
     },
     {
@@ -237,6 +240,15 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       id: 'sessions',
       label: t.settings.nav.archivedChats,
       onSelect: () => setActiveView('sessions')
+    },
+    {
+      // Opens the shortcuts panel (a dialog) rather than switching the settings
+      // view — the panel is the single source of truth for every hotkey.
+      active: false,
+      icon: Keyboard,
+      id: 'keybinds',
+      label: 'Keyboard shortcuts',
+      onSelect: () => toggleKeybindPanel()
     },
     {
       active: activeView === 'about',

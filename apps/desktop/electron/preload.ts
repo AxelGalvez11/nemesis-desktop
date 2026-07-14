@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   getConnection: profile => ipcRenderer.invoke('hermes:connection', profile),
   revalidateConnection: () => ipcRenderer.invoke('hermes:connection:revalidate'),
   touchBackend: profile => ipcRenderer.invoke('hermes:backend:touch', profile),
+  // Student build: hand the metering-proxy device key to main so the agent
+  // backend gets pointed at the Nemesis LLM proxy (zero-setup model access).
+  nemesisLlmSync: deviceKey => ipcRenderer.invoke('nemesis:llm:sync', { deviceKey }),
   getGatewayWsUrl: profile => ipcRenderer.invoke('hermes:gateway:ws-url', profile),
   openSessionWindow: (sessionId, opts) => ipcRenderer.invoke('hermes:window:openSession', sessionId, opts),
   openNewSessionWindow: () => ipcRenderer.invoke('hermes:window:openNewSession'),

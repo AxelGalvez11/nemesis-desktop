@@ -934,7 +934,7 @@ function NewSectionDialog({
               onCreate(name)
             }
           }}
-          placeholder="Section name (e.g. Pharmacology)"
+          placeholder="Section name (e.g. Microeconomics)"
           value={name}
         />
         {normalized && unavailable && (

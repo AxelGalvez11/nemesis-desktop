@@ -216,15 +216,16 @@ export function loadState(): StudyState {
       }
     }
   } catch {
-    // corrupted blob → fall through to a fresh seeded state
+    // corrupted blob → fall through to a fresh empty state
   }
 
-  const decks = seedDecks()
-
+  // Fresh installs start EMPTY (owner decision, beta.5): no demo decks — the
+  // page's empty state points at Create/Import, and the agent can build decks
+  // from the student's own material.
   return {
     version: 1,
-    decks,
-    sections: normalizeSections([], decks),
+    decks: [],
+    sections: normalizeSections([], []),
     schedule: {},
     reviews: [],
     settings: migrateFlipSetting(undefined)
@@ -1029,88 +1030,3 @@ export function freshId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${idCounter.toString(36)}`
 }
 
-/** Demo decks across two courses so the page (and its grouping) teaches itself on first open.
- *  Application-level pharm cards, not "what is X" filler. */
-function seedDecks(): StudyDeck[] {
-  const card = (front: string, back: string, tags: string[]): StudyCard => ({ id: freshId('card'), front, back, tags })
-
-  const cardio: StudyDeck = {
-    id: freshId('deck'),
-    name: 'Cardio pharm essentials',
-    course: 'Pharmacology',
-    createdAt: new Date().toISOString(),
-    cards: [
-      card(
-        'A patient on lisinopril develops a persistent dry cough. What is the mechanism, and what class do you switch to?',
-        'ACE inhibition lets bradykinin accumulate in the airways → cough. Switch to an ARB (e.g. losartan): blocks AT1 directly, spares bradykinin degradation.',
-        ['ace-inhibitors', 'adverse-effects']
-      ),
-      card(
-        'Why are ACE inhibitors contraindicated in pregnancy?',
-        'Fetal renal toxicity (oligohydramnios, renal dysgenesis) — all RAAS blockers are contraindicated.',
-        ['ace-inhibitors', 'contraindications']
-      ),
-      card(
-        'What two labs do you check after starting an ACE inhibitor, and why?',
-        'Potassium (hyperkalemia risk) and serum creatinine (efferent-arteriole dilation can drop GFR, especially with renal artery stenosis).',
-        ['ace-inhibitors', 'monitoring']
-      ),
-      card(
-        'Furosemide vs hydrochlorothiazide: site of action and the classic electrolyte signature of each.',
-        'Furosemide — thick ascending limb (Na-K-2Cl); potent, causes hypokalemia + hypocalcemia. HCTZ — distal tubule (Na-Cl); milder, hypokalemia + HYPERcalcemia.',
-        ['diuretics']
-      ),
-      card(
-        'A heart-failure patient on spironolactone and lisinopril has K⁺ 6.1. Which drug interaction explains it?',
-        'Both raise potassium: aldosterone antagonism (spironolactone) + reduced aldosterone via ACE inhibition. Additive hyperkalemia — hold/adjust and recheck.',
-        ['heart-failure', 'interactions']
-      ),
-      card(
-        'Metoprolol is preferred over propranolol in an asthmatic patient who needs a beta blocker. Why?',
-        'Metoprolol is β1-selective at usual doses — less β2 bronchoconstriction. Propranolol is non-selective and can trigger bronchospasm.',
-        ['beta-blockers']
-      ),
-      card(
-        'Which statin adverse effect do you screen for when a patient reports new diffuse muscle pain, and with what lab?',
-        'Myopathy/rhabdomyolysis — check creatine kinase (CK). Risk rises with interacting CYP3A4 inhibitors (e.g. clarithromycin) and high-intensity dosing.',
-        ['statins', 'monitoring']
-      ),
-      card(
-        'Warfarin patient starts TMP-SMX for a UTI. What happens to the INR and why?',
-        'INR rises — TMP-SMX inhibits CYP2C9 (warfarin metabolism) and displaces protein binding. Bleeding risk: monitor INR closely or pick another agent.',
-        ['anticoagulants', 'interactions']
-      )
-    ]
-  }
-
-  const antimicrobials: StudyDeck = {
-    id: freshId('deck'),
-    name: 'Antimicrobial pearls',
-    course: 'Infectious disease',
-    createdAt: new Date().toISOString(),
-    cards: [
-      card(
-        'Why is vancomycin trough (or AUC) monitoring required, and what toxicity does it guard against?',
-        'Narrow therapeutic window — nephrotoxicity (and, classically, ototoxicity). AUC/MIC ≥ 400 targets efficacy while limiting kidney injury.',
-        ['vancomycin', 'monitoring']
-      ),
-      card(
-        'A patient on ciprofloxacin should avoid taking it with what common products, and why?',
-        'Di/trivalent cations — antacids, calcium, iron, dairy — chelate fluoroquinolones and slash absorption. Separate doses by 2-6 hours.',
-        ['fluoroquinolones', 'interactions']
-      ),
-      card(
-        'Which antibiotic class carries a disulfiram-like reaction with alcohol, and name the prototype.',
-        'Nitroimidazoles — metronidazole. Alcohol → flushing, nausea, tachycardia. Counsel to avoid alcohol during and 3 days after.',
-        ['metronidazole', 'counseling']
-      ),
-      card(
-        'Cell-wall synthesis inhibitor vs protein-synthesis inhibitor: which bucket do beta-lactams vs macrolides fall in?',
-        'Beta-lactams (penicillins, cephalosporins) inhibit cell-wall synthesis. Macrolides (azithromycin) bind the 50S ribosome to block protein synthesis.',
-        ['mechanisms']
-      )
-    ]
-  }
-
-  return [cardio, antimicrobials]
-}

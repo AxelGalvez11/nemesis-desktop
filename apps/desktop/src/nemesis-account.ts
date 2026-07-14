@@ -251,6 +251,19 @@ async function refreshIfNeeded(session: StoredSession): Promise<StoredSession> {
   return merged
 }
 
+/** Best-effort: point the local agent backend at the Nemesis LLM proxy with this
+ *  device's metering key. Idempotent — main only rewrites env + restarts the
+ *  backend when something actually changed — so it's safe on every sign-in and
+ *  entitlement refresh. Failures are silent; the next refresh retries. */
+async function syncBackendLlm(): Promise<void> {
+  try {
+    const key = $deviceKey.get() ?? (await mintDeviceKey())
+    await window.hermesDesktop?.nemesisLlmSync?.(key)
+  } catch {
+    // Offline, signed out, or the proxy is unreachable — retried on the next cycle.
+  }
+}
+
 async function applySession(session: StoredSession): Promise<void> {
   const entitlement = await fetchPlan(session)
 
@@ -274,6 +287,10 @@ async function applySession(session: StoredSession): Promise<void> {
     trialEnd,
     userId: session.userId
   })
+
+  // Zero-setup model access: every verified sign-in (re)wires the agent backend
+  // to the metering proxy. Fire-and-forget so account state never waits on it.
+  void syncBackendLlm()
 }
 
 function applyUnavailableSession(session: StoredSession, previous?: AccountState): void {
@@ -351,6 +368,57 @@ export async function signIn(email: string, password: string): Promise<void> {
   await applySession(session)
 }
 
+/** Adopt a session delivered by the nemesis:// OAuth deep link (Google/Apple
+ *  sign-in finishes in the browser). Only the refresh token is trusted from the
+ *  URL: it's exchanged with Supabase for a fresh, server-validated session, so a
+ *  forged link can't inject a fabricated identity. */
+export async function adoptOAuthSession(refreshToken: string): Promise<void> {
+  const session = await tokenRequest({ refresh_token: refreshToken }, 'refresh_token')
+  saveSession(session)
+
+  try {
+    window.localStorage.removeItem(BYPASS_KEY)
+  } catch {
+    // ignore
+  }
+
+  await applySession(session)
+}
+
+const OAUTH_STATE_KEY = 'nemesis.oauth.state'
+
+/** Browser URL that starts Google/Apple OAuth for the DESKTOP app: the account
+ *  site finishes the provider flow, then hands the session back through the
+ *  nemesis:// deep link. A one-shot random `state` rides the whole round trip so
+ *  the deep-link handler only accepts sign-ins THIS app started (a malicious
+ *  local page can't sign the student into an attacker's account). */
+export function desktopOAuthStartUrl(provider: 'apple' | 'google'): string {
+  const state = crypto.randomUUID()
+
+  try {
+    window.localStorage.setItem(OAUTH_STATE_KEY, state)
+  } catch {
+    // Best-effort: without storage the state check below fails closed.
+  }
+
+  return `${NEMESIS_ACCOUNT_SITE}/auth/desktop?provider=${provider}&state=${state}`
+}
+
+/** One-shot check that a returning OAuth deep link carries the state we issued.
+ *  Consumes the stored value either way. */
+export function consumeOAuthState(state: string | undefined): boolean {
+  let stored: null | string = null
+
+  try {
+    stored = window.localStorage.getItem(OAUTH_STATE_KEY)
+    window.localStorage.removeItem(OAUTH_STATE_KEY)
+  } catch {
+    return false
+  }
+
+  return Boolean(state) && Boolean(stored) && state === stored
+}
+
 export async function signOut(): Promise<void> {
   const stored = loadSession()
 
@@ -361,6 +429,17 @@ export async function signOut(): Promise<void> {
       method: 'POST'
     }).catch(() => {})
   }
+
+  // Drop the metering device key with the session: a different student signing
+  // in on this Mac must mint their OWN key, or their usage would be billed to
+  // the previous account.
+  try {
+    window.localStorage.removeItem(DEVICE_KEY_STORE)
+  } catch {
+    // ignore
+  }
+
+  $deviceKey.set(null)
 
   saveSession(null)
 
@@ -444,6 +523,7 @@ export interface LlmMessage {
  *  small frequent calls like the recorder's live copilot. Throws on failure. */
 export async function llmComplete(messages: LlmMessage[], opts: { maxTokens?: number } = {}): Promise<string> {
   const key = $deviceKey.get() ?? (await mintDeviceKey())
+
   const response = await fetch(`${LLM_PROXY_URL}/v1/chat/completions`, {
     body: JSON.stringify({
       max_tokens: opts.maxTokens ?? 320,
@@ -459,14 +539,17 @@ export async function llmComplete(messages: LlmMessage[], opts: { maxTokens?: nu
     },
     method: 'POST'
   })
+
   const data = (await response.json().catch(() => ({}))) as {
     choices?: { message?: { content?: string } }[]
     error?: string | { message?: string }
   }
+
   if (!response.ok) {
     const detail = typeof data.error === 'string' ? data.error : data.error?.message
     throw new Error(detail || `model call failed (${response.status})`)
   }
+
   return data.choices?.[0]?.message?.content ?? ''
 }
 
@@ -559,6 +642,47 @@ export async function fetchUsage(): Promise<null | UsageSnapshot> {
       remaining: typeof data.remaining === 'number' ? data.remaining : Math.max(0, data.daily_limit - data.used),
       used: data.used
     }
+  } catch {
+    return null
+  }
+}
+
+export interface WeeklyUsageDay {
+  /** YYYY-MM-DD (UTC day, matching the proxy's counters). */
+  periodStart: string
+  used: number
+}
+
+/** The signed-in student's own daily token counters for the last 7 days, read
+ *  straight from the metering table (RLS `auth.uid() = user_id` scopes it to
+ *  their rows). Null when signed out or unreachable — the UI shows "not
+ *  available", never an error. */
+export async function fetchWeeklyUsage(): Promise<null | WeeklyUsageDay[]> {
+  const stored = loadSession()
+
+  if (!stored) {
+    return null
+  }
+
+  try {
+    const session = await refreshIfNeeded(stored)
+    const since = new Date(Date.now() - 6 * DAY_MS).toISOString().slice(0, 10)
+
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/usage_counters?select=period_start,used` +
+        `&counter_key=eq.nemesis_llm_tokens&period_start=gte.${since}&order=period_start.asc`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` } }
+    )
+
+    if (!response.ok) {
+      return null
+    }
+
+    const rows = (await response.json()) as { period_start?: string; used?: number }[]
+
+    return rows
+      .filter(row => typeof row.period_start === 'string' && typeof row.used === 'number')
+      .map(row => ({ periodStart: (row.period_start as string).slice(0, 10), used: row.used as number }))
   } catch {
     return null
   }
