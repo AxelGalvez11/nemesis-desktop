@@ -28,13 +28,18 @@ from tools.budget_config import (
 
 
 class TestModuleConstants:
-    """Verify documented default values haven't drifted."""
+    """Verify documented default values haven't drifted.
+
+    Student build (Nemesis): metered plans get tight tool-output budgets —
+    24K chars per result / 48K per turn (upstream ships 100K/200K). Oversized
+    results persist to disk with a preview instead of flooding the context.
+    """
 
     def test_default_result_size(self):
-        assert DEFAULT_RESULT_SIZE_CHARS == 100_000
+        assert DEFAULT_RESULT_SIZE_CHARS == 24_000
 
     def test_default_turn_budget(self):
-        assert DEFAULT_TURN_BUDGET_CHARS == 200_000
+        assert DEFAULT_TURN_BUDGET_CHARS == 48_000
 
     def test_default_preview_size(self):
         assert DEFAULT_PREVIEW_SIZE_CHARS == 1_500
@@ -152,14 +157,16 @@ class TestResolveThreshold:
 
     @patch("tools.registry.registry")
     def test_falls_back_to_registry(self, mock_registry):
-        """When not pinned and not in overrides, delegate to registry."""
+        """When not pinned and not in overrides, delegate to registry —
+        capped at the (student-tight) default so a tool's registered 77K
+        can't re-inflate a metered budget."""
         mock_registry.get_max_result_size.return_value = 77_777
         cfg = BudgetConfig()
         result = cfg.resolve_threshold("some_tool")
         mock_registry.get_max_result_size.assert_called_once_with(
             "some_tool", default=DEFAULT_RESULT_SIZE_CHARS
         )
-        assert result == 77_777
+        assert result == min(77_777, DEFAULT_RESULT_SIZE_CHARS)
 
     @patch("tools.registry.registry")
     def test_registry_receives_custom_default(self, mock_registry):
@@ -196,10 +203,11 @@ class TestResolveThreshold:
 
     @patch("tools.registry.registry")
     def test_default_budget_unchanged_for_100k_tool(self, mock_registry):
-        """Default budget keeps 100K registry tools at 100K (no behavior change)."""
+        """Registry tools that register 100K are capped at the student default —
+        web/terminal dumps were the 1.5M-token-day culprit (2026-07-14)."""
         mock_registry.get_max_result_size.return_value = 100_000
-        cfg = BudgetConfig()  # default_result_size == 100_000
-        assert cfg.resolve_threshold("web_search") == 100_000
+        cfg = BudgetConfig()
+        assert cfg.resolve_threshold("web_search") == DEFAULT_RESULT_SIZE_CHARS
 
 
 # ---------------------------------------------------------------------------
@@ -230,16 +238,15 @@ class TestBudgetForContextWindow:
         assert cfg.turn_budget == DEFAULT_TURN_BUDGET_CHARS
 
     def test_small_model_scaled_down(self):
-        """A 65K-token model gets a budget proportional to its window.
+        """A 65K-token model's proportional budget clamps at the defaults.
 
         window_chars = 65_536*4 = 262_144; per_result = 15% = 39_321;
-        per_turn = 30% = 78_643. Both below the 100K/200K defaults.
+        per_turn = 30% = 78_643. Both ABOVE the student 24K/48K defaults,
+        so the clamp keeps the tighter numbers (scaling never raises the cap).
         """
         cfg = budget_for_context_window(65_536)
-        assert cfg.default_result_size < DEFAULT_RESULT_SIZE_CHARS
-        assert cfg.turn_budget < DEFAULT_TURN_BUDGET_CHARS
-        assert cfg.default_result_size == int(65_536 * 4 * 0.15)
-        assert cfg.turn_budget == int(65_536 * 4 * 0.30)
+        assert cfg.default_result_size == min(int(65_536 * 4 * 0.15), DEFAULT_RESULT_SIZE_CHARS)
+        assert cfg.turn_budget == min(int(65_536 * 4 * 0.30), DEFAULT_TURN_BUDGET_CHARS)
 
     def test_tiny_model_floored(self):
         """A tiny window can't drop below the floor (usable preview survives)."""

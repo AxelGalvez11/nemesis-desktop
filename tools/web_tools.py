@@ -597,7 +597,7 @@ def _ensure_web_plugins_loaded() -> None:
         logger.warning("Web plugin discovery failed (non-fatal): %s", exc)
 
 
-def web_search_tool(query: str, limit: int = 5) -> str:
+def web_search_tool(query: str, limit: int = 6) -> str:
     """
     Search the web for information using available search API backend.
 

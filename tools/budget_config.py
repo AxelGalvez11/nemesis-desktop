@@ -3,6 +3,7 @@
 Per-tool resolution: pinned > config overrides > registry > default.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict
 
@@ -12,10 +13,29 @@ PINNED_THRESHOLDS: Dict[str, float] = {
     "read_file": float("inf"),
 }
 
-# Defaults matching the current hardcoded values in tool_result_storage.py.
-# Kept here as the single source of truth; tool_result_storage.py imports these.
-DEFAULT_RESULT_SIZE_CHARS: int = 100_000
-DEFAULT_TURN_BUDGET_CHARS: int = 200_000
+
+def _env_int(name: str, fallback: int) -> int:
+    """Env-tunable budget knob (positive int) with a code fallback."""
+    raw = os.getenv(name, "").strip()
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return fallback
+
+
+# Student-build defaults (Nemesis). Upstream hermes ships 100K/200K chars —
+# right for a power user on their own API key, ruinous on a METERED student
+# plan: 100K chars ≈ 25K tokens injected by ONE tool result, and every later
+# step re-sends it (a single inbox-dump session burned a full 1.5M-token daily
+# budget, 2026-07-14). Oversized results are NOT lost — they persist to disk
+# with an inline preview and the agent reads slices via read_file on demand.
+# Env knobs allow raising a given install without a release.
+DEFAULT_RESULT_SIZE_CHARS: int = _env_int("NEMESIS_TOOL_RESULT_CHARS", 24_000)
+DEFAULT_TURN_BUDGET_CHARS: int = _env_int("NEMESIS_TOOL_TURN_CHARS", 48_000)
 DEFAULT_PREVIEW_SIZE_CHARS: int = 1_500
 
 
