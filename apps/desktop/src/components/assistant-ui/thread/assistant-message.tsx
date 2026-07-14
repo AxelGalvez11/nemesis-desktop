@@ -76,6 +76,16 @@ export const AssistantMessage: FC<{
     s.message.status?.type === 'running' ? '' : messageContentText(s.message.content)
   )
 
+  // Daily-allowance stop (student build): the metering proxy's 429 carries a
+  // stable "Daily token budget reached" message — render it as a calm,
+  // designed card instead of the raw red API error (owner ask, 2026-07-14).
+  const isBudgetError = useAuiState(
+    s =>
+      NEMESIS_STUDENT_BUILD &&
+      s.message.status?.type === 'incomplete' &&
+      /daily token budget/i.test(String(s.message.status.error ?? ''))
+  )
+
   const previewTargets = useMemo(() => {
     // The cheap pre-test must also admit `#preview/<path>` tokens (deliverable
     // files carry a bare encoded path — no protocol), or extractPreviewTargets
@@ -127,22 +137,48 @@ export const AssistantMessage: FC<{
             turn streams, so this never renders (or re-renders) mid-stream. */}
         <MessageSources text={completedText} />
         <MessagePrimitive.Error>
-          <ErrorPrimitive.Root
-            className="mt-1.5 flex items-start gap-1.5 text-[0.78rem] leading-5 text-[color-mix(in_srgb,var(--dt-destructive)_78%,var(--ui-text-secondary))]"
-            role="alert"
-          >
-            <ErrorPrimitive.Message className="min-w-0 flex-1" />
-            {onDismissError && (
-              <TooltipIconButton
-                className="-my-0.5 shrink-0 text-current opacity-70 hover:opacity-100"
-                onClick={() => onDismissError(messageId)}
-                side="top"
-                tooltip={t.assistant.thread.dismissError}
-              >
-                <XIcon className="size-3.5" />
-              </TooltipIconButton>
-            )}
-          </ErrorPrimitive.Root>
+          {isBudgetError ? (
+            <div
+              className="mt-2 flex items-start gap-3 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4"
+              role="alert"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">Today&apos;s AI allowance is used up</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  It resets at midnight UTC. Everything already saved — notes, decks, files — stays available; only
+                  new AI work pauses until then. Heavy agent sessions use more: see Settings → Account &amp; usage,
+                  or upgrade your plan for a bigger daily allowance.
+                </p>
+              </div>
+              {onDismissError && (
+                <TooltipIconButton
+                  className="-my-0.5 shrink-0 text-muted-foreground opacity-70 hover:opacity-100"
+                  onClick={() => onDismissError(messageId)}
+                  side="top"
+                  tooltip={t.assistant.thread.dismissError}
+                >
+                  <XIcon className="size-3.5" />
+                </TooltipIconButton>
+              )}
+            </div>
+          ) : (
+            <ErrorPrimitive.Root
+              className="mt-1.5 flex items-start gap-1.5 text-[0.78rem] leading-5 text-[color-mix(in_srgb,var(--dt-destructive)_78%,var(--ui-text-secondary))]"
+              role="alert"
+            >
+              <ErrorPrimitive.Message className="min-w-0 flex-1" />
+              {onDismissError && (
+                <TooltipIconButton
+                  className="-my-0.5 shrink-0 text-current opacity-70 hover:opacity-100"
+                  onClick={() => onDismissError(messageId)}
+                  side="top"
+                  tooltip={t.assistant.thread.dismissError}
+                >
+                  <XIcon className="size-3.5" />
+                </TooltipIconButton>
+              )}
+            </ErrorPrimitive.Root>
+          )}
         </MessagePrimitive.Error>
       </div>
       {hasVisibleText && (

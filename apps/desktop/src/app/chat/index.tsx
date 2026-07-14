@@ -12,6 +12,7 @@ import { useLocation } from 'react-router-dom'
 
 import { Thread } from '@/components/assistant-ui/thread'
 import { Backdrop } from '@/components/Backdrop'
+import { NemesisBudgetNotice } from '@/components/nemesis-budget-notice'
 import { PromptOverlays } from '@/components/prompt-overlays'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -491,6 +492,9 @@ export function ChatView({
             </div>
           )}
           {showChatBar && <ScrollToBottomButton />}
+          {/* Ambient daily-allowance strip (student build): warns at 80% used,
+              before the hard budget stop ever appears in a reply. */}
+          {showChatBar && <NemesisBudgetNotice />}
           <ChatDropOverlay kind={dragKind} />
           <ChatSwapOverlay profile={gatewaySwapTarget} />
         </div>
