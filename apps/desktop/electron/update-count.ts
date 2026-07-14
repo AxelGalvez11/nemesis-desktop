@@ -27,4 +27,20 @@ function resolveBehindCount({ countStr, currentSha, targetSha, isShallow, hasMer
   return Number.parseInt(countStr, 10) || 0
 }
 
-export { resolveBehindCount, shouldCountCommits }
+// Decide whether the quit-for-update backend runtime sync is warranted from a
+// checkUpdates() result. The student build has NO backend-update UI (the app
+// binary updates via electron-updater, but nothing ever moved the runtime
+// checkout in ~/.nemesis/hermes-agent — backends froze at their install-day
+// code forever). The app-update quit is the one moment the backend is torn
+// down anyway, so that's when the runtime sync piggybacks. Only a supported,
+// error-free check that is genuinely behind qualifies; anything ambiguous
+// (unsupported install, fetch failure, up to date) returns null = don't sync.
+function backendSyncBranchFrom(status) {
+  if (!status || status.supported !== true || status.error) {
+    return null
+  }
+
+  return Number(status.behind) > 0 ? status.branch || 'main' : null
+}
+
+export { backendSyncBranchFrom, resolveBehindCount, shouldCountCommits }

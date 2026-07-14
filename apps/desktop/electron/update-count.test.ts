@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolveBehindCount, shouldCountCommits } from './update-count'
+import { backendSyncBranchFrom, resolveBehindCount, shouldCountCommits } from './update-count'
 
 // FAIL-BEFORE: pre-fix the function did `Number.parseInt(countStr) || 0`
 // unconditionally, so a shallow checkout with no merge-base surfaced the bogus
@@ -124,4 +124,31 @@ test('skipped-count path resolves via SHA compare, never via empty countStr', ()
     }),
     0
   )
+})
+
+// backendSyncBranchFrom gates the quit-for-update backend runtime sync.
+// FAIL-BEFORE: nothing ever updated the runtime checkout on student installs —
+// the app updated via electron-updater while ~/.nemesis/hermes-agent froze at
+// install-day code (owner's was stuck at beta.3-era while the app was beta.10).
+test('backendSyncBranchFrom returns the branch only for a clean behind>0 check', () => {
+  assert.equal(backendSyncBranchFrom({ supported: true, behind: 3, branch: 'main' }), 'main')
+  assert.equal(
+    backendSyncBranchFrom({ supported: true, behind: 1, branch: 'codex/nemesis-beta-v0.1' }),
+    'codex/nemesis-beta-v0.1'
+  )
+  // Missing branch falls back to main (matches DEFAULT_UPDATE_BRANCH).
+  assert.equal(backendSyncBranchFrom({ supported: true, behind: 2 }), 'main')
+})
+
+test('backendSyncBranchFrom refuses ambiguous or up-to-date checks', () => {
+  assert.equal(backendSyncBranchFrom(null), null)
+  assert.equal(backendSyncBranchFrom(undefined), null)
+  // Up to date — nothing to sync.
+  assert.equal(backendSyncBranchFrom({ supported: true, behind: 0, branch: 'main' }), null)
+  // Not a git checkout (e.g. pip install) — unsupported.
+  assert.equal(backendSyncBranchFrom({ supported: false, reason: 'not-a-git-checkout' }), null)
+  // Fetch failed (offline) — never sync on a stale/unknown picture.
+  assert.equal(backendSyncBranchFrom({ supported: true, error: 'fetch-failed', behind: 1 }), null)
+  // NaN/absent behind — no.
+  assert.equal(backendSyncBranchFrom({ supported: true, branch: 'main' }), null)
 })

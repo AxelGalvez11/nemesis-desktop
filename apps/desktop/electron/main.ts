@@ -117,7 +117,7 @@ import {
   SESSION_WINDOW_MIN_WIDTH
 } from './session-windows'
 import { nativeOverlayWidth as computeNativeOverlayWidth, macTitleBarOverlayHeight } from './titlebar-overlay-width'
-import { resolveBehindCount, shouldCountCommits } from './update-count'
+import { backendSyncBranchFrom, resolveBehindCount, shouldCountCommits } from './update-count'
 import { readLiveUpdateMarker, writeUpdateMarker } from './update-marker'
 import { runRebuildWithRetry } from './update-rebuild'
 import {
@@ -8817,6 +8817,100 @@ const AUTO_UPDATE_RECHECK_MS = 4 * 60 * 60 * 1000
 // working). 'unavailable' = unpackaged build or updater never armed.
 let autoUpdaterState: 'downloaded' | 'error' | 'unavailable' | 'working' = 'unavailable'
 
+// --- Backend runtime sync on quit-for-update --------------------------------
+// The student build has NO backend-update UI: the app binary updates via
+// electron-updater, but nothing ever moved the runtime checkout in
+// HERMES_HOME/hermes-agent — existing installs froze at their install-day
+// backend forever (app/backend version skew). The app-update quit is the one
+// moment the backend is guaranteed to be torn down anyway, so the runtime
+// sync piggybacks on it: a DETACHED `hermes update` + update marker, exactly
+// like the bootstrap recovery hand-off. The relaunched app's
+// waitForUpdateToFinish() gate parks local backend spawn until it completes,
+// and the backend's own startup then re-seeds bundled skills (skills_sync).
+//
+// The quit hooks fire synchronously — no time to git-fetch there — so the
+// plan is computed in the background when the app update finishes
+// downloading (minutes earlier) and merely consumed at quit.
+let backendSyncBranch: string | null = null
+
+async function planBackendRuntimeSync() {
+  try {
+    const status = await checkUpdates()
+
+    backendSyncBranch = backendSyncBranchFrom(status)
+
+    if (backendSyncBranch) {
+      rememberLog(
+        `[auto-update] backend runtime is ${(status as any).behind} behind origin/${backendSyncBranch}; will sync on quit-for-update`
+      )
+    }
+  } catch (error) {
+    backendSyncBranch = null
+    rememberLog(`[auto-update] backend sync plan failed: ${error?.message || error}`)
+  }
+}
+
+function spawnDetachedBackendSync() {
+  if (!backendSyncBranch) {
+    return
+  }
+
+  const branch = backendSyncBranch
+
+  // One-shot: the install IPC and before-quit-for-update can BOTH fire on the
+  // same quit; the second call must find the plan consumed.
+  backendSyncBranch = null
+
+  try {
+    const updateRoot = resolveUpdateRoot()
+    const venvBin = path.join(updateRoot, 'venv', IS_WINDOWS ? 'Scripts' : 'bin')
+    const venvHermes = path.join(venvBin, IS_WINDOWS ? 'hermes.exe' : 'hermes')
+
+    if (!fileExists(venvHermes)) {
+      return
+    }
+
+    // Kill OUR backends before spawning, mirroring the ordering guarantee the
+    // other detached-updater call sites get from releaseBackendLockForUpdate
+    // (which we can't await in a synchronous quit hook). Without this, the
+    // updater's Windows concurrent-instance guard sees our still-live
+    // hermes.exe and aborts the sync invisibly (stdio is ignored). The kill
+    // signal lands well inside the updater's Python cold-start; on Windows
+    // stopBackendChild force-kills the tree outright.
+    stopBackendChild(hermesProcess)
+    hermesProcess = null
+    stopAllPoolBackends()
+
+    const child = spawn(venvHermes, ['update', '--yes', '--branch', branch], {
+      cwd: updateRoot,
+      env: {
+        ...process.env,
+        HERMES_HOME,
+        PATH: pathWithHermesManagedNode(venvBin)
+      },
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    })
+
+    // Swallow spawn-level errors: an unhandled 'error' event on a
+    // ChildProcess throws, and we're mid-quit — log-only is all we can do.
+    child.on('error', error => {
+      rememberLog(`[auto-update] backend sync child error: ${error?.message || error}`)
+    })
+
+    child.unref()
+
+    if (Number.isInteger(child.pid)) {
+      writeUpdateMarker(HERMES_HOME, child.pid)
+    }
+
+    rememberLog(`[auto-update] spawned detached backend runtime sync (origin/${branch}, pid ${child.pid})`)
+  } catch (error) {
+    rememberLog(`[auto-update] backend sync spawn failed: ${error?.message || error}`)
+  }
+}
+
 function startAutoUpdater() {
   if (!IS_PACKAGED) {
     return
@@ -8838,6 +8932,7 @@ function startAutoUpdater() {
       // flag here AND in before-quit-for-update below; quitAndInstall runs on
       // the next tick so this handler resolves back to the renderer first.
       isAppQuitting = true
+      spawnDetachedBackendSync()
       setImmediate(() => appUpdater.quitAndInstall())
     }
 
@@ -8854,6 +8949,9 @@ function startAutoUpdater() {
     // "Restart now" on its own within seconds.
     autoUpdaterState = 'downloaded'
     rememberLog(`[auto-update] downloaded ${info?.version || 'update'}`)
+    // A new app version usually means new backend commits too — find out now,
+    // while there's network time to spare, so the quit hook can act instantly.
+    void planBackendRuntimeSync()
   })
 
   const check = () => {
@@ -8863,7 +8961,15 @@ function startAutoUpdater() {
   }
 
   // First check after boot settles; then a slow recheck for long-running apps.
-  setTimeout(check, 20_000)
+  // The backend sync plan is armed here too (not just on update-downloaded):
+  // a user can click "Restart now" seconds after the download finishes, before
+  // the on-download plan's git round trip resolves — the boot-time plan is
+  // already settled by then. Staleness is harmless: the plan only carries the
+  // branch name, and the detached sync pulls whatever is newest at quit time.
+  setTimeout(() => {
+    check()
+    void planBackendRuntimeSync()
+  }, 20_000)
   setInterval(check, AUTO_UPDATE_RECHECK_MS)
 }
 
@@ -8948,6 +9054,10 @@ function configureSpellChecker() {
 // alive, window hidden, no ShipIt ever spawned).
 nativeAutoUpdater.on('before-quit-for-update', () => {
   isAppQuitting = true
+  // Covers the autoInstallOnAppQuit path (user quit naturally with an update
+  // downloaded — the install IPC never ran). One-shot inside, so a Restart-now
+  // quit that already spawned the sync is a no-op here.
+  spawnDetachedBackendSync()
 })
 
 app.on('before-quit', () => {
