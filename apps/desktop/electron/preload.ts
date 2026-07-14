@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
 
     return () => ipcRenderer.removeListener('nemesis:asr:progress', listener)
   },
+  // Silent auto-updater state, so the update banner cooperates instead of
+  // telling users to download manually while a download is already running.
+  nemesisUpdaterStatus: () => ipcRenderer.invoke('nemesis:updater:status'),
+  nemesisUpdaterInstall: () => ipcRenderer.invoke('nemesis:updater:install'),
   getGatewayWsUrl: profile => ipcRenderer.invoke('hermes:gateway:ws-url', profile),
   openSessionWindow: (sessionId, opts) => ipcRenderer.invoke('hermes:window:openSession', sessionId, opts),
   openNewSessionWindow: () => ipcRenderer.invoke('hermes:window:openNewSession'),

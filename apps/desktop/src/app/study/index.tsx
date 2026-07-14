@@ -4,8 +4,8 @@
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
 import {
   IconCards,
-  IconChevronDown,
   IconChecklist,
+  IconChevronDown,
   IconDots,
   IconFileImport,
   IconFolderPlus,
@@ -15,12 +15,14 @@ import {
   IconPlayerPause,
   IconPlus,
   IconSettings,
-  IconSitemap
+  IconSitemap,
+  IconTrash
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Dialog,
   DialogContent,
@@ -75,6 +77,7 @@ import {
   DEFAULT_STUDY_SETTINGS,
   deleteCard,
   deleteDeck,
+  deleteSection,
   freshId,
   getSettings,
   gradeCard,
@@ -231,10 +234,12 @@ export function StudyView() {
   const [takingTest, setTakingTest] = useState<null | TestFile>(null)
 
   const now = useMemo(() => new Date(), [state, reviewing])
+
   const queue = useMemo(
     () => (reviewing ? buildQueue(state, reviewDeckId, now) : []),
     [state, reviewDeckId, reviewing, now]
   )
+
   const current: QueueItem | undefined = queue[0]
 
   const remainingCounts = useMemo(
@@ -243,11 +248,14 @@ export function StudyView() {
   )
 
   const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state])
+
   const todayCounts = useMemo(
     () => countQueueCategories(todayQueue, state),
     [state, todayQueue]
   )
+
   const scheduledDue = todayCounts.learning + todayCounts.review
+
   const estimatedReviewMinutes =
     todayQueue.length > 0 ? Math.max(1, Math.ceil((todayQueue.length * 20) / 60)) : 0
 
@@ -300,6 +308,7 @@ export function StudyView() {
 
     const reconcile = async () => {
       lastRun = Date.now()
+
       const [candidates, mindmapFiles, testFiles] = await Promise.all([
         scanAllDeckFiles(),
         scanMindmapFiles(),
@@ -723,6 +732,7 @@ export function StudyView() {
           onBrowse={setBrowseDeckId}
           onCreateDeck={setNewDeckSection}
           onDeleteDeck={removeDeck}
+          onDeleteSection={course => update(deleteSection(state, course))}
           onMatch={startMatch}
           onMoveDeck={moveDeck}
           onOpenMindmap={setViewingMindmap}
@@ -1165,6 +1175,7 @@ function DeckBrowser({
   onBrowse,
   onCreateDeck,
   onDeleteDeck,
+  onDeleteSection,
   onMatch,
   onMoveDeck,
   onOpenMindmap,
@@ -1182,6 +1193,7 @@ function DeckBrowser({
   onBrowse: (deckId: string) => void
   onCreateDeck: (section: string) => void
   onDeleteDeck: (deckId: string) => void
+  onDeleteSection: (course: string) => void
   onMatch: (deckId: string) => void
   onMoveDeck: (deckId: string, section: string) => void
   onOpenMindmap: (file: MindmapFile) => void
@@ -1195,9 +1207,11 @@ function DeckBrowser({
   view: DeckViewMode
 }) {
   const [deleteDeckTarget, setDeleteDeckTarget] = useState<StudyDeck | null>(null)
+  const [deleteSectionTarget, setDeleteSectionTarget] = useState<null | string>(null)
 
   const { curvesByDeck, now } = useMemo(() => {
     const calculationTime = new Date()
+
     const curves = new Map(
       state.decks.map(deck => [
         deck.id,
@@ -1216,6 +1230,7 @@ function DeckBrowser({
   }, [state])
 
   const deckGroups = groupDecks(state, now)
+
   const extrasByCourse = useMemo(
     () => groupExtras(state.sections, mindmaps, tests),
     [mindmaps, state.sections, tests]
@@ -1306,12 +1321,23 @@ function DeckBrowser({
                   <span className="truncate">{group.course}</span>
                 </button>
               </h2>
-              <span className="shrink-0 text-[0.6875rem] tabular-nums text-muted-foreground">
+              <span className="flex shrink-0 items-center gap-2 text-[0.6875rem] tabular-nums text-muted-foreground">
                 {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} ·{' '}
                 {group.stats.total} cards
                 {groupMindmaps.length > 0 &&
                   ` · ${groupMindmaps.length} mind map${groupMindmaps.length === 1 ? '' : 's'}`}
                 {groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`}
+                {group.course.toLocaleLowerCase() !== 'other' && (
+                  <button
+                    aria-label={`Delete section ${group.course}`}
+                    className="rounded-sm p-0.5 text-muted-foreground/70 outline-none hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50"
+                    onClick={() => setDeleteSectionTarget(group.course)}
+                    title="Delete section"
+                    type="button"
+                  >
+                    <IconTrash size={13} />
+                  </button>
+                )}
               </span>
             </div>
 
@@ -1425,6 +1451,21 @@ function DeckBrowser({
           setDeleteDeckTarget(null)
         }}
       />
+
+      <ConfirmDialog
+        confirmLabel="Delete section"
+        description="The decks inside are kept — they move back to the ungrouped list."
+        destructive
+        dismissOnConfirm
+        onClose={() => setDeleteSectionTarget(null)}
+        onConfirm={() => {
+          if (deleteSectionTarget) {
+            onDeleteSection(deleteSectionTarget)
+          }
+        }}
+        open={deleteSectionTarget !== null}
+        title={`Delete "${deleteSectionTarget ?? ''}"?`}
+      />
     </div>
   )
 }
@@ -1527,23 +1568,28 @@ function RetentionSparkline({ curve, now }: { curve: RetentionPoint[]; now: Date
   }
 
   const finalDay = curve.at(-1)?.day ?? 1
+
   const coordinates = curve.map(point => {
     const x = 2 + (point.day / Math.max(1, finalDay)) * 96
     const y = 4 + (1 - point.retention) * 30
 
     return [x, y] as const
   })
+
   const points = coordinates.map(([x, y]) => `${x},${y}`).join(' ')
   const first = curve[0]
   const last = curve.at(-1) ?? first
   const safeIndex = Math.min(activeIndex, curve.length - 1)
   const activePoint = curve[safeIndex]
   const [activeX, activeY] = coordinates[safeIndex]
+
   const activeDate = new Date(now.getTime() + activePoint.day * RETENTION_DAY_MS).toLocaleDateString(undefined, {
     day: 'numeric',
     month: 'short'
   })
+
   const activeLabel = `${activeDate} · estimated recall ${Math.round(activePoint.retention * 100)}%`
+
   const tooltipTransform =
     activeX < 22
       ? 'translate(0, calc(-100% - 8px))'
@@ -1904,11 +1950,13 @@ function Heatmap({ state }: { state: StudyState }) {
   const firstDayOffset = cells[0] ? new Date(`${cells[0].date}T00:00:00.000Z`).getUTCDay() : 0
   const weeks = Math.ceil((firstDayOffset + cells.length) / 7)
   const daysIntoWeek = new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 1
+
   const reviewsThisWeek = cells
     .slice(-daysIntoWeek)
     .reduce((sum, cell) => sum + cell.count, 0)
 
   const monthLabels: { col: number; label: string }[] = []
+
   if (cells[0]) {
     monthLabels.push({ col: 0, label: MONTHS[Number(cells[0].date.slice(5, 7)) - 1] })
 
@@ -2060,6 +2108,7 @@ function CardBrowser({
 
   const matchableCount = deck.cards.filter(card => !hasClozeMarker(card.front)).length
   const needle = query.trim().toLocaleLowerCase()
+
   const visibleCards = needle
     ? deck.cards.filter(card =>
         `${card.front}\n${card.back}\n${card.tags.join('\n')}`.toLocaleLowerCase().includes(needle)
@@ -2417,6 +2466,7 @@ function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => voi
   const [matchCards] = useState<StudyCard[]>(() =>
     deck ? deck.cards.filter(card => !hasClozeMarker(card.front)) : []
   )
+
   const size = Math.min(6, matchCards.length)
   const [tiles, setTiles] = useState<MatchTile[]>(() => buildMatchTiles(matchCards, size))
   const [selected, setSelected] = useState<null | string>(null)

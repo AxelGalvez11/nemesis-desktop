@@ -1,8 +1,9 @@
-// New-release notice for the student build. Students run signed DMGs (the git
-// self-updater is disabled), so this floating card is what tells them a newer
-// build exists. Detection only: the button opens the download page in their
-// browser — nothing installs itself. Quiet by design: any network failure or
-// rate limit simply means no banner this session.
+// New-release notice for the student build. Since beta.6 the app updates ITSELF
+// (electron-updater downloads in the background), so this card's job is to
+// narrate that: "downloading…" → "Restart now". The manual download link only
+// appears when the silent updater is unavailable or errored (beta.8 lesson: the
+// old always-download button raced the background download and users installed
+// by hand for nothing). Quiet by design: any network failure means no banner.
 import { type FC, useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -23,32 +24,64 @@ function readDismissedTag(): null | string {
   }
 }
 
+type UpdaterStatus = 'downloaded' | 'error' | 'unavailable' | 'working'
+
 export const NemesisUpdateBanner: FC = () => {
   const [latestTag, setLatestTag] = useState<null | string>(null)
+  const [updater, setUpdater] = useState<UpdaterStatus>('unavailable')
 
+  // While the banner is visible, keep an eye on the silent updater so the card
+  // flips from "downloading…" to "Restart now" the moment the download lands.
   useEffect(() => {
-    if (!NEMESIS_STUDENT_BUILD) return
-    // Dev servers report no packaged version and would spam the GitHub API on
-    // every reload; opt in with the debug flag when testing the banner itself.
-    if (import.meta.env.DEV && window.localStorage.getItem('nemesis.update.debug') !== '1') return
+    if (!latestTag) {return}
 
     let cancelled = false
+
+    const poll = async () => {
+      const status = await window.hermesDesktop?.nemesisUpdaterStatus?.().catch(() => 'unavailable' as const)
+
+      if (!cancelled && status) {setUpdater(status)}
+    }
+
+    void poll()
+    const timer = setInterval(() => void poll(), 4000)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [latestTag])
+
+  useEffect(() => {
+    if (!NEMESIS_STUDENT_BUILD) {return}
+
+    // Dev servers report no packaged version and would spam the GitHub API on
+    // every reload; opt in with the debug flag when testing the banner itself.
+    if (import.meta.env.DEV && window.localStorage.getItem('nemesis.update.debug') !== '1') {return}
+
+    let cancelled = false
+
     void (async () => {
       const info = await window.hermesDesktop?.getVersion?.().catch(() => null)
       const current = info?.appVersion
-      if (!current) return
+
+      if (!current) {return}
       const latest = await fetchLatestReleaseTag()
-      if (cancelled || !latest) return
-      if (!isNewerVersion(latest, current)) return
-      if (readDismissedTag() === latest) return
+
+      if (cancelled || !latest) {return}
+
+      if (!isNewerVersion(latest, current)) {return}
+
+      if (readDismissedTag() === latest) {return}
       setLatestTag(latest)
     })()
+
     return () => {
       cancelled = true
     }
   }, [])
 
-  if (!latestTag) return null
+  if (!latestTag) {return null}
 
   const dismiss = () => {
     try {
@@ -56,6 +89,7 @@ export const NemesisUpdateBanner: FC = () => {
     } catch {
       // Storage unavailable: the banner just reappears next launch.
     }
+
     setLatestTag(null)
   }
 
@@ -67,16 +101,34 @@ export const NemesisUpdateBanner: FC = () => {
     }
   }
 
+  const restart = () => {
+    void window.hermesDesktop?.nemesisUpdaterInstall?.().catch(() => {})
+  }
+
   return (
     <div className="fixed right-4 bottom-4 z-[80] w-80 rounded-xl border border-border bg-background p-4 shadow-lg">
-      <p className="text-sm font-semibold">Nemesis {normalizeVersion(latestTag)} is available</p>
+      <p className="text-sm font-semibold">
+        {updater === 'downloaded'
+          ? `Nemesis ${normalizeVersion(latestTag)} is ready`
+          : `Nemesis ${normalizeVersion(latestTag)} is available`}
+      </p>
       <p className="mt-1 text-xs text-muted-foreground">
-        Download the new version and drag it into Applications. Your notes, decks, and settings stay put.
+        {updater === 'downloaded'
+          ? 'The update is downloaded. Restart to use it now — or it installs itself when you quit.'
+          : updater === 'working'
+            ? 'Downloading in the background — you can keep working. Your notes, decks, and settings stay put.'
+            : 'Download the new version and drag it into Applications. Your notes, decks, and settings stay put.'}
       </p>
       <div className="mt-3 flex items-center gap-2">
-        <Button onClick={download} size="sm">
-          Download update
-        </Button>
+        {updater === 'downloaded' ? (
+          <Button onClick={restart} size="sm">
+            Restart now
+          </Button>
+        ) : updater === 'working' ? null : (
+          <Button onClick={download} size="sm">
+            Download update
+          </Button>
+        )}
         <Button onClick={dismiss} size="sm" variant="ghost">
           Later
         </Button>

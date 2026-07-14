@@ -325,6 +325,19 @@ export function addSection(state, name) {
     }
     return { ...state, sections: [...state.sections, section] };
 }
+/** Remove a section (owner ask, beta.9). Decks filed under it are NOT deleted —
+ *  they drop back to the ungrouped bucket by clearing their course tag. */
+export function deleteSection(state, name) {
+    const target = name.trim().toLocaleLowerCase();
+    if (!state.sections.some(existing => existing.toLocaleLowerCase() === target)) {
+        return state;
+    }
+    return {
+        ...state,
+        decks: state.decks.map(deck => (deck.course ?? '').toLocaleLowerCase() === target ? { ...deck, course: undefined } : deck),
+        sections: state.sections.filter(existing => existing.toLocaleLowerCase() !== target)
+    };
+}
 export function assignDeckSection(state, deckId, section) {
     const course = section.trim() || undefined;
     return {

@@ -11,6 +11,7 @@ import {
   deckStats,
   DEFAULT_STUDY_SETTINGS,
   deleteCard,
+  deleteSection,
   getSettings,
   gradeCard,
   LEECH_TAG,
@@ -815,5 +816,31 @@ describe('renameDeck', () => {
 
     expect(after.decks[0].name).toBe('Cardio essentials')
     expect(after.decks[0].sourceFile).toBe('Cardio essentials.tsv')
+  })
+})
+
+// deleteSection (beta.9): removing a course grouping must never delete the decks
+// inside it — they fall back to the ungrouped bucket.
+describe('deleteSection', () => {
+  const base = (): StudyState => ({
+    ...loadState(),
+    decks: [
+      { cards: [], course: 'Microeconomics', createdAt: 0, id: 'd1', name: 'Supply & demand' },
+      { cards: [], course: 'Pharmacology', createdAt: 0, id: 'd2', name: 'Beta blockers' }
+    ] as unknown as StudyDeck[],
+    sections: ['Microeconomics', 'Pharmacology']
+  })
+
+  it('removes the section and ungroups its decks, leaving others alone', () => {
+    const next = deleteSection(base(), 'Microeconomics')
+
+    expect(next.sections).toEqual(['Pharmacology'])
+    expect(next.decks.find(deck => deck.id === 'd1')?.course).toBeUndefined()
+    expect(next.decks.find(deck => deck.id === 'd2')?.course).toBe('Pharmacology')
+  })
+
+  it('matches case-insensitively and returns state untouched for unknown names', () => {
+    expect(deleteSection(base(), 'MICROECONOMICS').sections).toEqual(['Pharmacology'])
+    expect(deleteSection(base(), 'Astrophysics')).toEqual(base())
   })
 })

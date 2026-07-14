@@ -33,6 +33,9 @@ declare global {
       onNemesisAsrProgress?: (
         callback: (progress: { pct?: number; phase: 'downloading' | 'preparing' | 'transcribing' }) => void
       ) => () => void
+      // Silent auto-updater state ('unavailable' when unpackaged or not armed).
+      nemesisUpdaterStatus?: () => Promise<'downloaded' | 'error' | 'unavailable' | 'working'>
+      nemesisUpdaterInstall?: () => Promise<string>
       getGatewayWsUrl: (profile?: null | string) => Promise<string>
       // Open (or focus) a standalone OS window for a single chat session so
       // the user can work with multiple chats side by side. Returns ok:false

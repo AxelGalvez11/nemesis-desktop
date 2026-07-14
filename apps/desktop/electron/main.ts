@@ -94,6 +94,7 @@ import {
   TEXT_PREVIEW_SOURCE_MAX_BYTES
 } from './hardening'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
+import { registerNemesisAsr } from './nemesis-asr'
 import {
   APP_ID,
   APP_NAME,
@@ -104,7 +105,6 @@ import {
   PRIMARY_PROTOCOL,
   upsertEnvVars
 } from './nemesis-identity'
-import { registerNemesisAsr } from './nemesis-asr'
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
 import { registerSchoolBrowserIpc } from './school-browser'
 import { installSchoolView, registerSchoolViewIpc } from './school-view'
@@ -906,6 +906,7 @@ function planDesktopLogRotation(size) {
   if (size < DESKTOP_LOG_MAX_BYTES) {
     return []
   }
+
   const backups = n => Array.from({ length: n }, (_, i) => desktopLogBackupPath(i + 1))
 
   // Pathological boot-loop log: reclaim live + every backup outright.
@@ -973,6 +974,7 @@ function flushDesktopLogBufferSync() {
   if (!desktopLogBuffer) {
     return
   }
+
   const chunk = desktopLogBuffer
   desktopLogBuffer = ''
 
@@ -989,6 +991,7 @@ function flushDesktopLogBufferAsync() {
   if (!desktopLogBuffer) {
     return desktopLogFlushPromise
   }
+
   const chunk = desktopLogBuffer
   desktopLogBuffer = ''
 
@@ -1009,6 +1012,7 @@ function scheduleDesktopLogFlush() {
   if (desktopLogFlushTimer) {
     return
   }
+
   desktopLogFlushTimer = setTimeout(() => {
     desktopLogFlushTimer = null
     void flushDesktopLogBufferAsync()
@@ -1021,6 +1025,7 @@ function rememberLog(chunk) {
   if (!text) {
     return
   }
+
   const lines = text.split(/\r?\n/).map(line => `[hermes] ${line}`)
   hermesLog.push(...lines)
 
@@ -1219,11 +1224,13 @@ function broadcastBootProgress() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   webContents.send('hermes:boot-progress', bootProgressState)
 }
 
@@ -1303,11 +1310,13 @@ function broadcastBootstrapEvent(ev) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   webContents.send('hermes:bootstrap:event', ev)
 }
 
@@ -1562,6 +1571,7 @@ function backendSupportsServe(backend) {
   if (!backend || !backend.command) {
     return true
   }
+
   const key = `${backend.command}::${backend.root || ''}`
 
   if (_serveSupportCache.has(key)) {
@@ -1839,6 +1849,7 @@ function findGitBash() {
   // first so users who installed via install.ps1 are detected before we
   // start probing system-wide locations.
   const localAppData = process.env.LOCALAPPDATA || ''
+
   const candidates = [
     path.join(HERMES_HOME, 'git', 'bin', 'bash.exe'),
     path.join(HERMES_HOME, 'git', 'usr', 'bin', 'bash.exe')
@@ -1954,6 +1965,7 @@ function resolveGitBinary() {
   }
 
   const localAppData = process.env.LOCALAPPDATA || ''
+
   const candidates = [
     path.join(HERMES_HOME, 'git', 'cmd', 'git.exe'),
     path.join(HERMES_HOME, 'git', 'bin', 'git.exe')
@@ -2365,6 +2377,7 @@ function isShimLocked(shimPath) {
   if (!IS_WINDOWS) {
     return false
   }
+
   let fd
 
   try {
@@ -2502,6 +2515,7 @@ async function releaseBackendLock(updateRoot, tag) {
     for (const pid of stragglers) {
       forceKillProcessTree(pid)
     }
+
     await new Promise(r => setTimeout(r, 300))
   }
 
@@ -2800,6 +2814,7 @@ function runningAppBundle() {
   if (!IS_MAC) {
     return null
   }
+
   let dir = path.dirname(app.getPath('exe')) // .../Contents/MacOS
 
   for (let i = 0; i < 2; i++) {
@@ -3226,6 +3241,7 @@ function resolveRendererIndex() {
   if (found) {
     return found
   }
+
   // Nothing on disk. A packaged build with no renderer bundle blank-pages with
   // a bare ERR_FILE_NOT_FOUND and no clue why (see #39484). Surface the cause
   // and the fix before Electron loads the missing file.
@@ -3274,6 +3290,7 @@ function resolveHermesCwd() {
     if (!candidate) {
       continue
     }
+
     const resolved = path.resolve(String(candidate))
 
     if (isPackagedInstallPath(resolved)) {
@@ -3403,6 +3420,7 @@ function createActiveBackend(backendArgs) {
 
 function resolveHermesBackend(backendArgs) {
   const allowExternalRuntime = !IS_PACKAGED || process.env.HERMES_DESKTOP_ALLOW_EXTERNAL_RUNTIME === '1'
+
   // 1. Explicit override -- HERMES_DESKTOP_HERMES_ROOT points at a developer
   //    checkout. Honour it as-is (no bootstrap; the user is driving).
   const overrideRoot =
@@ -3802,6 +3820,7 @@ function fetchJson(url, token, options: any = {}) {
     if (body) {
       req.write(body)
     }
+
     req.end()
   })
 }
@@ -3891,6 +3910,7 @@ function fetchPublicJson(url, options: any = {}) {
     if (body) {
       req.write(body)
     }
+
     req.end()
   })
 }
@@ -4008,6 +4028,7 @@ function cacheTitle(key, title) {
   if (titleCache.size >= TITLE_CACHE_LIMIT) {
     titleCache.delete(titleCache.keys().next().value)
   }
+
   titleCache.set(key, title)
 }
 
@@ -4062,6 +4083,7 @@ function fetchHtmlTitleWithCurl(rawUrl: string): Promise<string> {
       if (bytes >= TITLE_BYTE_BUDGET) {
         return
       }
+
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       const remaining = TITLE_BYTE_BUDGET - bytes
       const next = buffer.length > remaining ? buffer.subarray(0, remaining) : buffer
@@ -4074,6 +4096,7 @@ function fetchHtmlTitleWithCurl(rawUrl: string): Promise<string> {
       if (!chunks.length) {
         return resolve('')
       }
+
       resolve(parseHtmlTitle(Buffer.concat(chunks).toString('utf8')))
     })
   })
@@ -4083,6 +4106,7 @@ function getLinkTitleSession() {
   if (linkTitleSession || !app.isReady()) {
     return linkTitleSession
   }
+
   linkTitleSession = session.fromPartition('hermes:link-titles', { cache: false })
   linkTitleSession.webRequest.onBeforeRequest((details, callback) => {
     callback({ cancel: RENDER_TITLE_BLOCKED_RESOURCES.has(details.resourceType) })
@@ -4125,6 +4149,7 @@ function runRenderTitleJob(rawUrl) {
       if (settled) {
         return
       }
+
       settled = true
 
       if (hardTimer) {
@@ -4134,6 +4159,7 @@ function runRenderTitleJob(rawUrl) {
       if (graceTimer) {
         clearTimeout(graceTimer)
       }
+
       const value = (title || '').replace(/\s+/g, ' ').trim()
 
       try {
@@ -4159,6 +4185,7 @@ function runRenderTitleJob(rawUrl) {
       if (graceTimer) {
         clearTimeout(graceTimer)
       }
+
       graceTimer = setTimeout(finishWithTitle, RENDER_TITLE_GRACE_MS)
     }
 
@@ -4240,6 +4267,7 @@ async function resourceBufferFromUrl(rawUrl) {
     if (!match) {
       throw new Error('Invalid data URL')
     }
+
     const mimeType = match[1] || 'application/octet-stream'
     const encoded = match[3] || ''
     const buffer = match[2] ? Buffer.from(encoded, 'base64') : Buffer.from(decodeURIComponent(encoded), 'utf8')
@@ -4288,6 +4316,7 @@ async function copyImageFromUrl(rawUrl) {
   if (image.isEmpty()) {
     throw new Error('Could not read image')
   }
+
   clipboard.writeImage(image)
 }
 
@@ -4303,6 +4332,7 @@ async function saveImageFromUrl(rawUrl) {
   if (result.canceled || !result.filePath) {
     return false
   }
+
   await fs.promises.writeFile(result.filePath, buffer)
 
   return true
@@ -4437,11 +4467,13 @@ function sendPreviewFileChanged(payload) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   webContents.send('hermes:preview-file-changed', payload)
 }
 
@@ -4462,12 +4494,14 @@ async function watchPreviewFile(rawUrl) {
     if (timer) {
       clearTimeout(timer)
     }
+
     timer = setTimeout(() => {
       timer = null
 
       if (!fileExists(filePath)) {
         return
       }
+
       sendPreviewFileChanged({ id, path: filePath, url: pathToFileURL(filePath).toString() })
     }, PREVIEW_WATCH_DEBOUNCE_MS)
   })
@@ -4477,6 +4511,7 @@ async function watchPreviewFile(rawUrl) {
       if (timer) {
         clearTimeout(timer)
       }
+
       watcher.close()
     }
   })
@@ -4561,11 +4596,13 @@ function sendBackendExit(payload) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   webContents.send('hermes:backend-exit', payload)
 }
 
@@ -4573,11 +4610,13 @@ function sendClosePreviewRequested() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   webContents.send('hermes:close-preview-requested')
 }
 
@@ -4588,11 +4627,13 @@ function sendPowerResume() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   webContents.send('hermes:power-resume')
 }
 
@@ -4602,6 +4643,7 @@ function registerPowerResumeListeners() {
   if (powerResumeRegistered) {
     return
   }
+
   powerResumeRegistered = true
 
   try {
@@ -4623,16 +4665,19 @@ function sendOpenUpdatesRequested() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   webContents.send('hermes:open-updates')
 
   if (!mainWindow.isVisible()) {
     mainWindow.show()
   }
+
   mainWindow.focus()
 }
 
@@ -4640,11 +4685,13 @@ function sendWindowStateChanged(nextIsFullscreen?: boolean) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
+
   const { webContents } = mainWindow
 
   if (!webContents || webContents.isDestroyed()) {
     return
   }
+
   const state = getWindowState()
 
   if (typeof nextIsFullscreen === 'boolean') {
@@ -4792,6 +4839,7 @@ function installDevToolsShortcut(window) {
     if (!isInspectShortcut) {
       return
     }
+
     event.preventDefault()
     toggleDevTools(window)
   })
@@ -4821,6 +4869,7 @@ function setAndPersistZoomLevel(window, zoomLevel) {
   if (!window || window.isDestroyed()) {
     return
   }
+
   const next = clampZoomLevel(zoomLevel)
   window.webContents.setZoomLevel(next)
   // Keep any open settings UI in sync, including changes made via the
@@ -4840,6 +4889,7 @@ function restorePersistedZoomLevel(window) {
   if (!window || window.isDestroyed()) {
     return
   }
+
   window.webContents
     .executeJavaScript(
       `(() => { try { return localStorage.getItem(${JSON.stringify(ZOOM_STORAGE_KEY)}) } catch { return null } })()`
@@ -4848,6 +4898,7 @@ function restorePersistedZoomLevel(window) {
       if (stored == null || !window || window.isDestroyed()) {
         return
       }
+
       const level = clampZoomLevel(Number(stored))
       window.webContents.setZoomLevel(level)
     })
@@ -4924,6 +4975,7 @@ function installContextMenu(window) {
       if (template.length) {
         template.push({ type: 'separator' })
       }
+
       template.push(
         {
           label: 'Open Link',
@@ -5099,6 +5151,7 @@ function getOauthSession() {
   if (oauthSession || !app.isReady()) {
     return oauthSession
   }
+
   oauthSession = session.fromPartition(OAUTH_SESSION_PARTITION)
 
   return oauthSession
@@ -5114,6 +5167,7 @@ async function hasOauthSessionCookie(baseUrl) {
   if (!sess) {
     return false
   }
+
   const parsed = new URL(baseUrl)
 
   try {
@@ -5146,6 +5200,7 @@ async function hasLiveOauthSession(baseUrl) {
   if (!sess) {
     return false
   }
+
   const parsed = new URL(baseUrl)
 
   try {
@@ -5214,6 +5269,7 @@ function openOauthLoginWindow(baseUrl) {
       if (settled) {
         return
       }
+
       settled = true
 
       if (pollTimer) {
@@ -5352,6 +5408,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
         if (timedOut) {
           return
         }
+
         clearTimeout(timer)
         const text = Buffer.concat(chunks).toString('utf8')
         const statusCode = res.statusCode || 500
@@ -5390,6 +5447,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
       if (timedOut) {
         return
       }
+
       clearTimeout(timer)
       reject(error)
     })
@@ -5397,6 +5455,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
     if (body) {
       request.write(body)
     }
+
     request.end()
   })
 }
@@ -5492,6 +5551,7 @@ function sanitizeConnectionProfiles(raw: Record<string, any>) {
     const cleaned: { mode: 'remote' | 'local'; url?: string; authMode?: string; token?: object } = {
       mode: entry.mode === 'remote' ? 'remote' : 'local'
     }
+
     const url = String(entry.url || '').trim()
 
     if (url) {
@@ -6109,6 +6169,7 @@ function touchPoolBackend(profile) {
   if (!key) {
     return
   }
+
   const entry = backendPool.get(key)
 
   if (entry) {
@@ -6124,6 +6185,7 @@ function evictLruPoolBackends(keep) {
   if (backendPool.size <= keep) {
     return
   }
+
   const now = Date.now()
 
   const evictable = [...backendPool.entries()]
@@ -6136,6 +6198,7 @@ function evictLruPoolBackends(keep) {
     if (removable <= 0) {
       break
     }
+
     rememberLog(`Evicting idle profile backend "${profile}" (LRU cap ${POOL_MAX_BACKENDS})`)
     stopPoolBackend(profile)
     removable -= 1
@@ -6146,6 +6209,7 @@ function startPoolIdleReaper() {
   if (poolIdleReaper) {
     return
   }
+
   poolIdleReaper = setInterval(() => {
     const now = Date.now()
 
@@ -6298,6 +6362,7 @@ function stopPoolBackend(profile) {
   if (!entry) {
     return
   }
+
   backendPool.delete(profile)
   stopBackendChild(entry.process)
 }
@@ -6308,6 +6373,7 @@ async function teardownPoolBackendAndWait(profile) {
   if (!entry) {
     return
   }
+
   backendPool.delete(profile)
 
   stopBackendChild(entry.process)
@@ -6659,6 +6725,7 @@ function focusWindow(win) {
   if (!win.isVisible()) {
     win.show()
   }
+
   win.focus()
 }
 
@@ -7174,6 +7241,7 @@ ipcMain.on('hermes:zoom:set-percent', (event, percent) => {
   if (!window || window.isDestroyed()) {
     return
   }
+
   setAndPersistZoomLevel(window, percentToZoomLevel(Number(percent)))
 })
 
@@ -7645,6 +7713,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
   if (!Notification.isSupported()) {
     return false
   }
+
   // Action buttons render only on signed macOS builds; elsewhere they're dropped
   // and the body click still works.
   const actions = Array.isArray(payload?.actions) ? payload.actions : []
@@ -7660,6 +7729,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       return
     }
+
     focusWindow(mainWindow)
 
     if (payload?.sessionId) {
@@ -7670,6 +7740,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       return
     }
+
     const action = actions[index]
 
     if (action?.id) {
@@ -8434,6 +8505,7 @@ async function getUninstallSummary() {
       if (settled) {
         return
       }
+
       settled = true
       resolve(value)
     }
@@ -8619,6 +8691,7 @@ function handleDeepLink(url) {
   if (!url || typeof url !== 'string') {
     return
   }
+
   let parsed
 
   try {
@@ -8648,6 +8721,7 @@ function handleDeepLink(url) {
     if (mainWindow.isMinimized()) {
       mainWindow.restore()
     }
+
     mainWindow.focus()
     mainWindow.webContents.send('hermes:deep-link', payload)
     rememberLog(`[deeplink] delivered ${kind}/${name}`)
@@ -8706,6 +8780,7 @@ if (!_gotSingleInstanceLock) {
       if (mainWindow.isMinimized()) {
         mainWindow.restore()
       }
+
       mainWindow.focus()
     }
   })
@@ -8728,6 +8803,13 @@ app.on('open-url', (event, url) => {
 // which electron-updater orders correctly.
 const AUTO_UPDATE_RECHECK_MS = 4 * 60 * 60 * 1000
 
+// Surfaced to the renderer so the update banner reflects the SILENT updater
+// instead of racing it with a "download it yourself" button (beta.8 lesson:
+// the banner appears seconds after launch, the ~150MB background download
+// takes minutes — users clicked the manual link while the updater was already
+// working). 'unavailable' = unpackaged build or updater never armed.
+let autoUpdaterState: 'downloaded' | 'error' | 'unavailable' | 'working' = 'unavailable'
+
 function startAutoUpdater() {
   if (!IS_PACKAGED) {
     return
@@ -8738,12 +8820,24 @@ function startAutoUpdater() {
   appUpdater.autoDownload = true
   appUpdater.autoInstallOnAppQuit = true
   appUpdater.logger = null
+  autoUpdaterState = 'working'
+
+  ipcMain.handle('nemesis:updater:status', () => autoUpdaterState)
+  ipcMain.handle('nemesis:updater:install', () => {
+    if (autoUpdaterState === 'downloaded') {
+      appUpdater.quitAndInstall()
+    }
+
+    return autoUpdaterState
+  })
 
   appUpdater.on('error', error => {
+    autoUpdaterState = 'error'
     rememberLog(`[auto-update] ${error?.message || error}`)
   })
 
   appUpdater.on('update-downloaded', info => {
+    autoUpdaterState = 'downloaded'
     rememberLog(`[auto-update] downloaded ${info?.version || 'update'}`)
 
     if (!mainWindow || mainWindow.isDestroyed()) {
