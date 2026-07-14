@@ -1,5 +1,5 @@
 // App-managed agent browser ("school browser"): a persistent Chromium the agent
-// drives over CDP (config.yaml browser.cdp_url → http://127.0.0.1:9333) and the
+// drives over CDP (config.yaml browser.cdp_url → http://127.0.0.1:9444) and the
 // renderer mirrors live in the chat right rail. All CDP traffic (target list,
 // screencast frames, forwarded input) relays through THIS module over IPC — the
 // renderer cannot talk to the CDP endpoints itself (no CORS on /json/*), and the
@@ -15,9 +15,9 @@ import path from 'node:path'
 
 import { ipcMain } from 'electron'
 
-const PORT = 9333
+const PORT = 9444
 const ORIGIN = `http://127.0.0.1:${PORT}`
-const PROFILE_DIR = path.join(os.homedir(), '.hermes', 'browser_auth', 'school-profile')
+let profileDir = path.join(os.homedir(), '.nemesis', 'browser_auth', 'school-profile')
 const START_URL = 'https://www.google.com'
 const HTTP_TIMEOUT_MS = 2_500
 const SPAWN_WAIT_MS = 12_000
@@ -180,7 +180,7 @@ async function ensureBrowser(): Promise<{ ok: boolean; reason?: string }> {
   }
 
   try {
-    fs.mkdirSync(PROFILE_DIR, { recursive: true })
+    fs.mkdirSync(profileDir, { recursive: true })
     const child = spawn(
       bin,
       [
@@ -192,7 +192,7 @@ async function ensureBrowser(): Promise<{ ok: boolean; reason?: string }> {
         // against this same profile.
         '--headless=new',
         `--remote-debugging-port=${PORT}`,
-        `--user-data-dir=${PROFILE_DIR}`,
+        `--user-data-dir=${profileDir}`,
         '--no-first-run',
         '--no-default-browser-check',
         '--window-size=1000,1400',
@@ -436,7 +436,10 @@ async function execCommand(sender: Electron.WebContents, payload: ForwardPayload
   return sessionCommand(session, method, params)
 }
 
-export function registerSchoolBrowserIpc() {
+export function registerSchoolBrowserIpc(nemesisHome?: string) {
+  if (nemesisHome) {
+    profileDir = path.join(nemesisHome, 'browser_auth', 'school-profile')
+  }
   ipcMain.handle('hermes:schoolBrowser:ensure', () => ensureBrowser())
   ipcMain.handle('hermes:schoolBrowser:list', () => listTabs())
   ipcMain.handle('hermes:schoolBrowser:attach', (event, targetId) => attachMirror(event.sender, String(targetId)))

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hermes",
-  "version": "0.0.1",
-  "identifier": "com.nousresearch.hermes.setup",
+  "productName": "Nemesis",
+  "version": "0.1.0-beta.2",
+  "identifier": "com.enternemesis.desktop.setup",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:5175",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Hermes",
+        "title": "Nemesis",
         "width": 880,
         "height": 620,
         "minWidth": 720,
@@ -33,16 +33,15 @@
   },
   "bundle": {
     "active": true,
-    "category": "DeveloperTool",
-    "shortDescription": "Hermes",
-    "longDescription": "Installs Hermes Agent on your machine. Drives scripts/install.ps1 (Windows) and scripts/install.sh (macOS/Linux).",
-    "publisher": "Nous Research",
-    "copyright": "Copyright © 2026 Nous Research",
-    "targets": [
-      "app",
-      "dmg",
-      "appimage"
-    ],
+    "category": "Education",
+    "shortDescription": "Nemesis",
+    "longDescription": "Installs the standalone Nemesis desktop study agent and its local runtime.",
+    "publisher": "Nemesis",
+    "copyright": "Copyright © 2026 Nemesis",
+    "targets": "all",
+    "resources": {
+      "../../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

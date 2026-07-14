@@ -361,6 +361,9 @@ terminal:
 # Browser Tool Configuration
 # =============================================================================
 browser:
+  # Nemesis's separate app-managed school browser. Port 9444 avoids claiming
+  # the legacy/default debugging port used by other agent installations.
+  cdp_url: "http://127.0.0.1:9444"
   # Inactivity timeout in seconds - browser sessions are automatically closed
   # after this period of no activity between agent loops (default: 120 = 2 minutes)
   inactivity_timeout: 120

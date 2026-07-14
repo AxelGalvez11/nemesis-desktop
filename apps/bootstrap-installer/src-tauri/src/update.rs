@@ -1,6 +1,6 @@
 //! Update orchestration.
 //!
-//! Driven when the installer is launched as `Hermes-Setup.exe --update` (see
+//! Driven when the installer is launched as `Nemesis-Setup.exe --update` (see
 //! `AppMode` in lib.rs). The desktop app hands off to us — it exits, then we:
 //!
 //!   1. wait for the old Hermes desktop process to fully exit (so both the
@@ -164,8 +164,8 @@ async fn run_update(app: AppHandle) -> Result<()> {
 
     let hermes = resolve_hermes(&install_root).ok_or_else(|| {
         let msg = format!(
-            "Could not find the hermes CLI under {}. Is Hermes installed? \
-             Re-run the installer to repair the install.",
+            "Could not find the Nemesis runtime under {}. \
+             Re-run Nemesis Setup to repair the installation.",
             install_root.display()
         );
         emit(
@@ -292,7 +292,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
             emit_stage(&app, "update", StageState::Succeeded, Some(update_ms), None);
         }
         Some(code) if code == UPDATE_EXIT_CONCURRENT => {
-            let msg = "Hermes is still running. Close all Hermes windows and try \
+            let msg = "Nemesis is still running. Close all Nemesis windows and try \
                        the update again."
                 .to_string();
             emit_stage(
@@ -313,7 +313,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
         }
         other => {
             let msg = format!(
-                "hermes update failed (exit {:?}). See {} for details.",
+                "Nemesis runtime update failed (exit {:?}). See {} for details.",
                 other,
                 crate::paths::hermes_home()
                     .join("logs")
@@ -459,7 +459,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
                 &app,
                 None,
                 LogStream::Stderr,
-                &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+                &format!("[update] could not auto-launch desktop: {err}. Launch Nemesis manually."),
             );
         }
     } else if let Err(err) =
@@ -472,7 +472,7 @@ async fn run_update(app: AppHandle) -> Result<()> {
             &app,
             None,
             LogStream::Stdout,
-            &format!("[update] could not auto-launch desktop: {err}. Launch Hermes manually."),
+            &format!("[update] could not auto-launch desktop: {err}. Launch Nemesis manually."),
         );
     }
 
@@ -486,7 +486,7 @@ pub(crate) async fn wait_for_install_locks_free(install_root: &Path, app: &AppHa
     let lock_targets = install_lock_probe_paths(install_root);
     let deadline = Instant::now() + DESKTOP_EXIT_WAIT;
 
-    emit_log(app, Some(stage), LogStream::Stdout, "[handoff] waiting for Hermes to exit…");
+    emit_log(app, Some(stage), LogStream::Stdout, "[handoff] waiting for Nemesis to exit…");
 
     loop {
         let locked = locked_paths(&lock_targets);
@@ -507,11 +507,11 @@ pub(crate) async fn wait_for_install_locks_free(install_root: &Path, app: &AppHa
                 Some(stage),
                 LogStream::Stdout,
                 &format!(
-                    "[handoff] Hermes still holding install files ({}); force-killing stragglers…",
+                    "[handoff] Nemesis still holding install files ({}); closing stragglers…",
                     format_locked_paths(&locked)
                 ),
             );
-            force_kill_other_hermes();
+            force_kill_install_processes(install_root);
             tokio::time::sleep(Duration::from_millis(800)).await;
             let locked_after_kill = locked_paths(&lock_targets);
             if locked_after_kill.is_empty() {
@@ -553,8 +553,8 @@ fn desktop_app_payload_paths(install_root: &Path) -> Vec<PathBuf> {
         ]
     } else if cfg!(target_os = "macos") {
         vec![
-            release.join("mac").join("Hermes.app").join("Contents").join("Resources").join("app.asar"),
-            release.join("mac-arm64").join("Hermes.app").join("Contents").join("Resources").join("app.asar"),
+            release.join("mac").join("Nemesis.app").join("Contents").join("Resources").join("app.asar"),
+            release.join("mac-arm64").join("Nemesis.app").join("Contents").join("Resources").join("app.asar"),
         ]
     } else {
         vec![release.join("linux-unpacked").join("resources").join("app.asar")]
@@ -569,37 +569,23 @@ fn format_locked_paths(paths: &[PathBuf]) -> String {
     paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
 }
 
-/// Force-kill any `hermes.exe` other than this process. Windows-only; a no-op
-/// elsewhere (POSIX has no mandatory-lock contention). We can't selectively
-/// target "the backend" by PID here — the desktop already exited and we never
-/// knew its children — so we kill the whole `hermes.exe` image tree via
-/// taskkill, excluding our own PID.
-///
-/// Safe w.r.t. our own update child: this runs inside the install-lock wait,
-/// which completes BEFORE we spawn `venv\Scripts\hermes.exe update`. And a
-/// desktop the user relaunches mid-update will NOT have spawned a backend —
-/// `startHermes()` in the desktop gates local-backend startup on our
-/// update-in-progress marker and parks until we finish (#50238). So the only
-/// hermes.exe images here are stragglers from the old desktop — exactly what
-/// we want gone. (`/FI PID ne <self>` also spares this Tauri process, though it
-/// isn't named hermes.exe.)
-fn force_kill_other_hermes() {
+/// Force-kill stale processes whose executable lives inside this Nemesis
+/// install only. Image-name taskkill is intentionally forbidden: a separate
+/// upstream app can have its own unrelated hermes.exe running concurrently.
+fn force_kill_install_processes(install_root: &Path) {
     if !cfg!(target_os = "windows") {
         return;
     }
     #[cfg(target_os = "windows")]
     {
-        let my_pid = std::process::id();
-        // /FI excludes our own PID; /T kills the tree; /F forces.
-        let _ = std::process::Command::new("taskkill")
-            .args([
-                "/F",
-                "/T",
-                "/IM",
-                "hermes.exe",
-                "/FI",
-                &format!("PID ne {my_pid}"),
-            ])
+        let escaped_root = install_root.to_string_lossy().replace('\'', "''");
+        let script = format!(
+            "$root=[IO.Path]::GetFullPath('{escaped_root}').TrimEnd('\\')+'\\'; \
+             Get-CimInstance Win32_Process | Where-Object {{ $_.ProcessId -ne $PID -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[StringComparison]::OrdinalIgnoreCase) }} | \
+             ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"
+        );
+        let _ = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -810,7 +796,7 @@ async fn install_macos_app_update(
 
     let rebuilt_app = crate::bootstrap::resolve_hermes_desktop_app(install_root).ok_or_else(|| {
         anyhow!(
-            "desktop rebuild succeeded but no Hermes.app was found under {}",
+            "desktop rebuild succeeded but no Nemesis.app was found under {}",
             install_root.join("apps").join("desktop").join("release").display()
         )
     })?;
@@ -1056,7 +1042,12 @@ mod tests {
             "venv shim remains part of the update lock probe"
         );
         assert!(
-            probes.iter().any(|p| p.ends_with(Path::new("resources/app.asar"))),
+            probes.iter().any(|p| {
+                p.to_string_lossy()
+                    .replace('\\', "/")
+                    .to_ascii_lowercase()
+                    .ends_with("/resources/app.asar")
+            }),
             "packaged app.asar must be probed so repair/re-clone waits for the old desktop to exit"
         );
     }
@@ -1167,8 +1158,8 @@ mod tests {
     #[test]
     fn parses_only_app_targets() {
         assert_eq!(
-            target_app_from_args(["--update", "--target-app", "/Applications/Hermes.app"]),
-            Some(PathBuf::from("/Applications/Hermes.app"))
+            target_app_from_args(["--update", "--target-app", "/Applications/Nemesis.app"]),
+            Some(PathBuf::from("/Applications/Nemesis.app"))
         );
         assert_eq!(target_app_from_args(["--target-app", "/tmp/not-an-app"]), None);
     }
@@ -1195,9 +1186,9 @@ mod tests {
     #[tokio::test]
     async fn swap_installs_new_bundle_and_cleans_up() {
         let base = unique_tmp_dir("ok");
-        let target = base.join("Hermes.app");
-        let tmp = base.join("Hermes.app.hermes-update-new");
-        let old = base.join("Hermes.app.hermes-update-old");
+        let target = base.join("Nemesis.app");
+        let tmp = base.join("Nemesis.app.hermes-update-new");
+        let old = base.join("Nemesis.app.hermes-update-old");
         write_marker(&target, "OLD");
         write_marker(&tmp, "NEW");
 
@@ -1225,9 +1216,9 @@ mod tests {
         //  - `old` is a NON-EMPTY dir  -> rename(target, old) fails
         //  - `tmp` does not exist       -> rename(tmp, target) fails
         let base = unique_tmp_dir("fail");
-        let target = base.join("Hermes.app");
-        let tmp = base.join("Hermes.app.hermes-update-new"); // intentionally absent
-        let old = base.join("Hermes.app.hermes-update-old");
+        let target = base.join("Nemesis.app");
+        let tmp = base.join("Nemesis.app.hermes-update-new"); // intentionally absent
+        let old = base.join("Nemesis.app.hermes-update-old");
         write_marker(&target, "OLD");
         write_marker(&old, "OCCUPIED"); // non-empty => rename(target,old) fails
 
@@ -1248,9 +1239,9 @@ mod tests {
         // Move-aside succeeds but installing the staged bundle fails (tmp
         // absent). The original must be rolled back from `old` to `target`.
         let base = unique_tmp_dir("rollback");
-        let target = base.join("Hermes.app");
-        let tmp = base.join("Hermes.app.hermes-update-new"); // absent
-        let old = base.join("Hermes.app.hermes-update-old");
+        let target = base.join("Nemesis.app");
+        let tmp = base.join("Nemesis.app.hermes-update-new"); // absent
+        let old = base.join("Nemesis.app.hermes-update-old");
         write_marker(&target, "OLD");
 
         let result = swap_in_new_bundle(&tmp, &target, &old).await;

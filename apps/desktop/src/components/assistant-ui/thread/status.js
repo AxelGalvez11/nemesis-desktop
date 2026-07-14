@@ -80,5 +80,5 @@ export const StreamStallIndicator = () => {
     if (!active) {
         return null;
     }
-    return (_jsxs(StatusRow, { className: "mt-1.5", "data-slot": "aui_stream-stall", label: compacting ? COMPACTION_LABEL : 'Hermes is thinking', children: [_jsx("span", { "aria-hidden": "true", className: "dither inline-block size-3 rounded-[2px] text-midground/80 animate-pulse" }), compacting && _jsx(CompactionHint, {}), _jsx(ActivityTimerText, { seconds: elapsed })] }));
+    return (_jsxs(StatusRow, { className: "mt-1.5", "data-slot": "aui_stream-stall", label: compacting ? COMPACTION_LABEL : 'Nemesis is thinking', children: [_jsx("span", { "aria-hidden": "true", className: "dither inline-block size-3 rounded-[2px] text-midground/80 animate-pulse" }), compacting && _jsx(CompactionHint, {}), _jsx(ActivityTimerText, { seconds: elapsed })] }));
 };

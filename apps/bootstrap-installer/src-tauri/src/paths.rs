@@ -1,12 +1,12 @@
 //! Filesystem paths + logging setup.
 //!
 //! Mirrors `hermes_constants.get_hermes_home()` from the Python CLI:
-//!   Windows: %LOCALAPPDATA%\hermes
-//!   macOS:   ~/.hermes
-//!   Linux:   ~/.hermes  (override via $HERMES_HOME)
+//!   Windows: %LOCALAPPDATA%\nemesis
+//!   macOS:   ~/.nemesis
+//!   Linux:   ~/.nemesis  (override via $NEMESIS_HOME)
 //!
 //! NOTE (macOS): Python's get_hermes_home(), scripts/install.sh, and the
-//! Electron desktop's resolveHermesHome() ALL use ~/.hermes on macOS — there
+//! Electron desktop's resolveHermesHome() ALL use ~/.nemesis on macOS — there
 //! is no ~/Library/Application Support branch anywhere else. An earlier
 //! version of this file used Application Support, which drifted from every
 //! other component: the installer wrote the install to one dir and the
@@ -21,9 +21,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing_appender::non_blocking::WorkerGuard;
 
-/// Returns the canonical Hermes home directory, respecting $HERMES_HOME if set.
+/// Returns Nemesis's private runtime home. A global HERMES_HOME may belong to
+/// a separately installed upstream app, so the standalone installer never
+/// reads it. The child installer/runtime receives this path as HERMES_HOME only
+/// after the Nemesis-owned location has been resolved.
 pub fn hermes_home() -> PathBuf {
-    if let Ok(override_path) = std::env::var("HERMES_HOME") {
+    if let Ok(override_path) = std::env::var("NEMESIS_HOME") {
         if !override_path.trim().is_empty() {
             return PathBuf::from(override_path);
         }
@@ -31,21 +34,21 @@ pub fn hermes_home() -> PathBuf {
 
     #[cfg(target_os = "windows")]
     {
-        // %LOCALAPPDATA%\hermes — matches scripts/install.ps1's $HermesHome.
+        // %LOCALAPPDATA%\nemesis — matches scripts/install.ps1's $HermesHome.
         if let Some(local_app_data) = dirs::data_local_dir() {
-            return local_app_data.join("hermes");
+            return local_app_data.join("nemesis");
         }
     }
 
-    // macOS + Linux + fallback: ~/.hermes (matches Python get_hermes_home(),
-    // install.sh, and the Electron desktop's resolveHermesHome()).
+    // macOS + Linux + fallback: ~/.nemesis. HERMES_HOME is passed to the
+    // embedded runtime so Python continues to honor its compatibility API.
     if let Some(home) = dirs::home_dir() {
-        return home.join(".hermes");
+        return home.join(".nemesis");
     }
 
     // Last resort — current dir, almost certainly wrong but at least
     // doesn't panic.
-    PathBuf::from(".hermes")
+    PathBuf::from(".nemesis")
 }
 
 pub fn log_dir() -> PathBuf {
@@ -66,15 +69,15 @@ pub fn bootstrap_cache_dir() -> PathBuf {
 /// HERMES_HOME so it survives repo checkout deletion (unlike anything under
 /// hermes-agent/).
 ///
-/// On Windows this is `%LOCALAPPDATA%\hermes\hermes-setup.exe`; on other
+/// On Windows this is `%LOCALAPPDATA%\nemesis\nemesis-setup.exe`; on other
 /// platforms the extension differs but the directory is the same.
-pub fn installer_dest() -> PathBuf {
+pub fn installer_dest(runtime_home: &Path) -> PathBuf {
     let name = if cfg!(target_os = "windows") {
-        "hermes-setup.exe"
+        "nemesis-setup.exe"
     } else {
-        "hermes-setup"
+        "nemesis-setup"
     };
-    hermes_home().join(name)
+    runtime_home.join(name)
 }
 
 /// Marker the updater writes for the duration of an in-app update and removes
@@ -98,9 +101,15 @@ pub fn update_in_progress_marker() -> PathBuf {
 /// that path), where copying onto ourselves would be a Windows sharing
 /// violation. Best-effort: a failure here must not fail the install, so the
 /// caller logs and continues.
-pub fn copy_self_to_hermes_home() -> std::io::Result<()> {
+pub fn copy_self_to_hermes_home(runtime_home: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    let src = std::env::var_os("APPIMAGE")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .unwrap_or(std::env::current_exe()?);
+    #[cfg(not(target_os = "linux"))]
     let src = std::env::current_exe()?;
-    let dest = installer_dest();
+    let dest = installer_dest(runtime_home);
 
     // Skip if we're already running from the destination (update re-invocation
     // or a prior copy). canonicalize both so symlinks / 8.3 short paths / case
@@ -118,6 +127,13 @@ pub fn copy_self_to_hermes_home() -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::copy(&src, &dest)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&dest)?.permissions();
+        permissions.set_mode(permissions.mode() | 0o111);
+        std::fs::set_permissions(&dest, permissions)?;
+    }
     repair_macos_installer_helper(&dest);
     tracing::info!(?src, ?dest, "copied installer to HERMES_HOME");
     Ok(())

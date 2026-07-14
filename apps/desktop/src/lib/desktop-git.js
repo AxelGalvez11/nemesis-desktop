@@ -2,7 +2,7 @@ import { desktopFsProfile, isDesktopFsRemoteMode } from './desktop-fs';
 function desktopApi(path, body) {
     const desktop = window.hermesDesktop;
     if (!desktop) {
-        throw new Error('Hermes Desktop bridge is unavailable');
+        throw new Error('Nemesis Desktop bridge is unavailable');
     }
     return desktop.api(body ? { body, method: 'POST', path, profile: desktopFsProfile() } : { path, profile: desktopFsProfile() });
 }

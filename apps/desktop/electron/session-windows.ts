@@ -21,14 +21,14 @@ const SESSION_WINDOW_MIN_HEIGHT = 620
 // blurred/occluded windows. A streaming chat app must keep painting in the
 // background, so every chat window opts out. The preload path is injected
 // because it depends on the Electron entry's __dirname.
-function chatWindowWebPreferences(preloadPath: string) {
+function chatWindowWebPreferences(preloadPath: string, devTools = true) {
   return {
     preload: preloadPath,
     contextIsolation: true,
     webviewTag: true,
     sandbox: true,
     nodeIntegration: false,
-    devTools: true,
+    devTools,
     backgroundThrottling: false,
     // Enables Chromium's built-in PDF viewer so the Library can show PDFs inline
     // via an <iframe src="file://…pdf">. Off by default in Electron.

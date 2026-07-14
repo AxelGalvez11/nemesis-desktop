@@ -196,3 +196,7 @@ test('chatWindowWebPreferences passes the preload path through and keeps the har
   assert.equal(prefs.sandbox, true)
   assert.equal(prefs.nodeIntegration, false)
 })
+
+test('chatWindowWebPreferences can disable DevTools in packaged builds', () => {
+  assert.equal(chatWindowWebPreferences('/some/preload.cjs', false).devTools, false)
+})

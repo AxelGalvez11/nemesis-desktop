@@ -11,7 +11,7 @@ import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $desktopVersion, $updateApply, $updateChecking, $updateStatus, checkUpdates, openUpdatesWindow, refreshDesktopVersion, startActiveUpdate } from '@/store/updates';
 import { ListRow, SectionHeading, SettingsContent } from './primitives';
 import { UninstallSection } from './uninstall-section';
-const RELEASE_NOTES_URL = 'https://github.com/NousResearch/hermes-agent/releases';
+const RELEASE_NOTES_URL = 'https://github.com/AxelGalvez11/nemesis-desktop/releases';
 function relativeTime(ms, a) {
     if (!ms) {
         return a.never;

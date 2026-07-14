@@ -72,7 +72,7 @@ export function useGatewayRequest() {
     const requestGateway = useCallback(async (method, params = {}, timeoutMs, signal) => {
         const gateway = gatewayRef.current;
         if (!gateway) {
-            throw new Error('Hermes gateway unavailable');
+            throw new Error('Nemesis local service unavailable');
         }
         try {
             return await gateway.request(method, params, timeoutMs, signal);

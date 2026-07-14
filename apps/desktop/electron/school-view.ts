@@ -14,20 +14,16 @@
 //   - The app window itself is also a CDP target (file:// URL) → the tool
 //     steers away from file:// targets, and wireCommonWindowHandlers()
 //     restores the app shell if anything ever navigates it.
-import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
 import { app, BrowserWindow, ipcMain, session, WebContentsView } from 'electron'
 
-const PORT = 9333
+const PORT = 9444
 const PARTITION = 'persist:school'
 const START_URL = 'https://www.google.com'
 const DOWNLOAD_DIR = path.join(os.homedir(), 'Downloads')
-// Legacy headless-Chrome profile dir — only used to kill a stale instance
-// that would otherwise still own port 9333 when native mode boots.
-const LEGACY_PROFILE_MARKER = 'browser_auth/school-profile'
 
 type SchoolViewMode = 'mirror' | 'native'
 
@@ -61,6 +57,13 @@ interface PanelRect {
  *  or missing key = native (the student-build default); {"mode":"mirror"}
  *  flips back to the headless-Chrome screencast path wholesale. */
 function readMode(): SchoolViewMode {
+  // Never expose the packaged app renderer through Chromium's unauthenticated
+  // remote-debugging port. Production uses the separate app-managed browser
+  // process in school-browser.ts, which keeps account tokens out of CDP.
+  if (app.isPackaged || process.env.HERMES_DESKTOP_IS_PACKAGED) {
+    return 'mirror'
+  }
+
   try {
     const raw = fs.readFileSync(path.join(app.getPath('userData'), 'school-browser.json'), 'utf8')
     const parsed = JSON.parse(raw) as { mode?: unknown }
@@ -77,18 +80,9 @@ function readMode(): SchoolViewMode {
 
 export const SCHOOL_VIEW_MODE: SchoolViewMode = readMode()
 
-// Pre-ready side effects: free the port, then claim it. Both are inert in
-// mirror mode. pkill -f matches the legacy Chrome's --user-data-dir argument;
-// nothing else on the machine carries that path in its argv.
+// Pre-ready side effect for development-only native mode. Packaged builds stay
+// in mirror mode and never expose the Electron renderer over CDP.
 if (SCHOOL_VIEW_MODE === 'native') {
-  if (process.platform === 'darwin' || process.platform === 'linux') {
-    try {
-      spawnSync('pkill', ['-f', LEGACY_PROFILE_MARKER], { timeout: 3_000 })
-    } catch {
-      // Best effort — if the legacy browser isn't running, nothing to do.
-    }
-  }
-
   app.commandLine.appendSwitch('remote-debugging-port', String(PORT))
 }
 

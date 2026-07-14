@@ -100,7 +100,7 @@ function shouldPreserveConfiguredOnFallback(runtime, state) {
     return runtime.source === 'fallback' && state.configured === true && !state.requested;
 }
 function notifyReady(provider) {
-    notify({ kind: 'success', title: 'Hermes is ready', message: `${provider} connected.` });
+    notify({ kind: 'success', title: 'Nemesis is ready', message: `${provider} connected.` });
 }
 // Human-friendly labels for tools auto-routed through the Nous Tool Gateway,
 // mirroring hermes_cli/nous_subscription._GATEWAY_TOOL_LABELS so the GUI and
@@ -237,8 +237,8 @@ ignoreRuntimeGate = false) {
 function providerResolutionFailure(reason) {
     const detail = reason?.trim();
     return detail
-        ? `Connected, but Hermes still cannot resolve a usable provider. ${detail}`
-        : 'Connected, but Hermes still cannot resolve a usable provider.';
+        ? `Connected, but Nemesis still cannot resolve a usable provider. ${detail}`
+        : 'Connected, but Nemesis still cannot resolve a usable provider.';
 }
 async function refreshProviders() {
     if (providersRefreshPromise) {
@@ -381,7 +381,7 @@ export async function refreshOnboarding(ctx) {
             id: 'runtime-not-ready',
             kind: 'error',
             title: 'Runtime not ready',
-            message: 'Hermes Desktop could not verify the running backend on startup. Some features may be unavailable until the gateway is reachable.'
+            message: 'Nemesis could not verify its local service on startup. Some features may be unavailable until it is reachable.'
         });
         return false;
     }
@@ -541,7 +541,7 @@ export async function recheckExternalSignin(ctx) {
         status: 'error',
         provider,
         message: reason?.trim() ||
-            `Hermes still cannot reach ${provider.name}. Run \`${provider.cli_command}\` in a terminal first.`
+            `Nemesis still cannot reach ${provider.name}. Run \`${provider.cli_command}\` in a terminal first.`
     }));
 }
 export async function saveOnboardingApiKey(envKey, value, label, ctx, 
@@ -634,7 +634,7 @@ export async function saveOnboardingLocalEndpoint(baseUrl, apiKey, ctx) {
         const runtime = await checkRuntime(ctx);
         if (!runtime.ready) {
             const detail = (runtime.reason ?? '').trim();
-            return { ok: false, message: detail || `Saved, but Hermes still cannot reach ${url}.` };
+            return { ok: false, message: detail || `Saved, but Nemesis still cannot reach ${url}.` };
         }
         notifyReady('Local / custom endpoint');
         completeDesktopOnboarding();

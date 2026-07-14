@@ -31,11 +31,51 @@ function defaultNemesisHome(platform: NodeJS.Platform, home: string, localAppDat
   return path.join(home, '.nemesis')
 }
 
+function defaultLegacyHermesHome(platform: NodeJS.Platform, home: string, localAppData?: string) {
+  if (platform === 'win32' && localAppData) {
+    return path.win32.join(localAppData, 'hermes')
+  }
+
+  return path.join(home, '.hermes')
+}
+
+// Nemesis betas before the .nemesis switch kept the agent runtime at the legacy
+// Hermes default. On disk, "our own earlier beta" and "an independently
+// installed Hermes agent" are indistinguishable, so this only DETECTS the
+// situation — the caller must ask the user before moving anything.
+function detectLegacyHomeMigration(options: {
+  exists: (candidate: string) => boolean
+  home: string
+  localAppData?: string
+  nemesisHome: string
+  platform: NodeJS.Platform
+}): null | { legacyHome: string; nemesisHome: string } {
+  const { exists, home, localAppData, nemesisHome, platform } = options
+
+  if (exists(nemesisHome)) {
+    return null
+  }
+
+  const legacyHome = defaultLegacyHermesHome(platform, home, localAppData)
+
+  if (legacyHome === nemesisHome || !exists(legacyHome)) {
+    return null
+  }
+
+  const joiner = platform === 'win32' ? path.win32 : path
+  const looksLikeAgentHome =
+    exists(joiner.join(legacyHome, 'hermes-agent')) || exists(joiner.join(legacyHome, 'config.yaml'))
+
+  return looksLikeAgentHome ? { legacyHome, nemesisHome } : null
+}
+
 export {
   APP_ID,
   APP_NAME,
   DEEP_LINK_PROTOCOLS,
+  defaultLegacyHermesHome,
   defaultNemesisHome,
+  detectLegacyHomeMigration,
   extractNemesisDeepLink,
   LEGACY_PROTOCOL,
   PRIMARY_PROTOCOL

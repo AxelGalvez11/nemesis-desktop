@@ -170,8 +170,8 @@ export async function initialize(): Promise<void> {
   const fake = fakeMode()
   if (fake) {
     unlisten = () => {}
-    $logPath.set('~/.hermes/logs/bootstrap-installer.log')
-    $hermesHome.set('~/.hermes')
+    $logPath.set('~/.nemesis/logs/bootstrap-installer.log')
+    $hermesHome.set('~/.nemesis')
     $mode.set(fake === 'update' ? 'update' : 'install')
     // Update auto-runs (it's a hand-off); install/failure wait for the welcome click.
     if (fake === 'update') void runFakeBoot('update')
@@ -355,7 +355,7 @@ const FAKE_INSTALL_STAGES: FakeStage[] = [
   { name: 'system-packages', title: 'System packages' },
   { name: 'uv', title: 'uv' },
   { name: 'python', title: 'Python environment' },
-  { name: 'repo', title: 'Hermes repository' },
+  { name: 'repo', title: 'Nemesis runtime' },
   { name: 'dependencies', title: 'Python dependencies' },
   { name: 'node', title: 'Node runtime' },
   { name: 'desktop', title: 'Desktop app' }

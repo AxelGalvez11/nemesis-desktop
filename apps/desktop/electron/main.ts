@@ -65,8 +65,6 @@ import {
 import { installEmbedReferer } from './embed-referer'
 import { readDirForIpc } from './fs-read-dir'
 import { probeGatewayWebSocket } from './gateway-ws-probe'
-import { registerSchoolBrowserIpc } from './school-browser'
-import { installSchoolView, registerSchoolViewIpc } from './school-view'
 import { scanGitRepos } from './git-repo-scan'
 import {
   fileDiffVsHead,
@@ -95,7 +93,18 @@ import {
   TEXT_PREVIEW_SOURCE_MAX_BYTES
 } from './hardening'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
+import {
+  APP_ID,
+  APP_NAME,
+  DEEP_LINK_PROTOCOLS,
+  defaultNemesisHome,
+  detectLegacyHomeMigration,
+  extractNemesisDeepLink,
+  PRIMARY_PROTOCOL
+} from './nemesis-identity'
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
+import { registerSchoolBrowserIpc } from './school-browser'
+import { installSchoolView, registerSchoolViewIpc } from './school-view'
 import {
   buildSessionWindowUrl,
   chatWindowWebPreferences,
@@ -125,7 +134,6 @@ import {
   MIN_HEIGHT as WINDOW_MIN_HEIGHT,
   MIN_WIDTH as WINDOW_MIN_WIDTH
 } from './window-state'
-import { readWindowsUserEnvVar } from './windows-user-env'
 import { isPackagedInstallPath as isPackagedInstallPathUnderRoots } from './workspace-cwd'
 import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 
@@ -280,61 +288,89 @@ if (INSTALL_STAMP) {
   )
 }
 
-// HERMES_HOME — the user-facing root for everything Hermes-related. Mirrors
-// scripts/install.ps1's $HermesHome and scripts/install.sh's $HERMES_HOME.
+// The embedded Hermes runtime still consumes HERMES_HOME internally, but the
+// Nemesis desktop owns a separate default root so it never mixes beta data
+// with a user's independent Hermes installation.
 //
 // Defaults:
-//   Windows: %LOCALAPPDATA%\hermes (matches install.ps1)
-//   macOS / Linux: ~/.hermes (matches install.sh)
-//
-// Special case for Windows: if the user has a legacy ~/.hermes directory
-// (e.g., from a prior pip install or a manual setup) AND no
-// %LOCALAPPDATA%\hermes yet, prefer the legacy path so we don't orphan their
-// existing config / sessions / .env. New installs go to %LOCALAPPDATA%.
+//   Windows: %LOCALAPPDATA%\nemesis
+//   macOS / Linux: ~/.nemesis
 //
 // HERMES_DESKTOP_USER_DATA_DIR (used by test:desktop:fresh) puts the sandbox
 // HERMES_HOME beneath the throwaway userData dir so a fresh-install run never
-// touches the user's real ~/.hermes / %LOCALAPPDATA%\hermes.
+// touches the user's real ~/.nemesis / %LOCALAPPDATA%\nemesis.
 function resolveHermesHome() {
-  if (process.env.HERMES_HOME) {
+  if (USER_DATA_OVERRIDE) {
+    return path.join(path.resolve(USER_DATA_OVERRIDE), 'nemesis-home')
+  }
+
+  if (process.env.NEMESIS_HOME) {
+    return normalizeHermesHomeRoot(process.env.NEMESIS_HOME)
+  }
+
+  // Development can still point the embedded runtime at an explicit upstream
+  // home. Packaged builds deliberately ignore global HERMES_HOME/registry state
+  // so installing Nemesis never adopts or mutates an independent agent install.
+  if (!IS_PACKAGED && process.env.HERMES_HOME) {
     return normalizeHermesHomeRoot(process.env.HERMES_HOME)
   }
 
-  if (USER_DATA_OVERRIDE) {
-    return path.join(path.resolve(USER_DATA_OVERRIDE), 'hermes-home')
-  }
-
-  if (IS_WINDOWS) {
-    // A GUI app launched from Explorer inherits the environment block captured
-    // at login, so a HERMES_HOME set via `setx` AFTER login is invisible in
-    // process.env even though the CLI (a fresh shell) sees it. Without this the
-    // backend silently falls back to %LOCALAPPDATA%\hermes and reports "No
-    // inference provider configured" despite a valid configured home (#45471).
-    // Consult the live User-scoped registry value before the default below.
-    const fromRegistry = readWindowsUserEnvVar('HERMES_HOME')
-
-    if (fromRegistry) {
-      return normalizeHermesHomeRoot(fromRegistry)
-    }
-  }
-
-  if (IS_WINDOWS && process.env.LOCALAPPDATA) {
-    const localappdata = path.join(process.env.LOCALAPPDATA, 'hermes')
-    const legacy = path.join(app.getPath('home'), '.hermes')
-
-    // Migrate transparently to LOCALAPPDATA, but honour an existing legacy
-    // ~/.hermes setup (no LOCALAPPDATA install yet) so users don't lose state.
-    if (!directoryExists(localappdata) && directoryExists(legacy)) {
-      return legacy
-    }
-
-    return localappdata
-  }
-
-  return path.join(app.getPath('home'), '.hermes')
+  return defaultNemesisHome(process.platform, app.getPath('home'), process.env.LOCALAPPDATA)
 }
 
 const HERMES_HOME = resolveHermesHome()
+
+// One-time move offer for installs whose agent runtime still lives at the
+// legacy Hermes default (any Nemesis beta before the .nemesis switch). Nothing
+// moves without the user's explicit choice: an independent Hermes install
+// looks identical to our own earlier beta on disk, so only the user can tell
+// them apart. "Start fresh" leaves the legacy folder untouched. Study material
+// is unaffected either way — notes, decks, and recordings live under
+// ~/Documents, not the runtime home.
+function maybeOfferLegacyHomeMigration() {
+  if (!IS_PACKAGED || USER_DATA_OVERRIDE || process.env.NEMESIS_HOME) {
+    return
+  }
+
+  const migration = detectLegacyHomeMigration({
+    exists: candidate => fs.existsSync(candidate),
+    home: app.getPath('home'),
+    localAppData: process.env.LOCALAPPDATA,
+    nemesisHome: HERMES_HOME,
+    platform: process.platform
+  })
+
+  if (!migration) {
+    return
+  }
+
+  const choice = dialog.showMessageBoxSync({
+    buttons: ['Move it here', 'Start fresh'],
+    cancelId: 1,
+    defaultId: 0,
+    detail:
+      `Move it here: the folder is renamed to ${migration.nemesisHome}, keeping your chat history, agent memory, and school connections. Choose this only if that folder belongs to Nemesis.\n\n` +
+      `Start fresh: the old folder is left untouched and Nemesis sets up clean.\n\n` +
+      'Your notes, decks, and recordings live in Documents and are safe either way.',
+    message: `Nemesis found an earlier agent setup at ${migration.legacyHome}. Nemesis now keeps its runtime at ${migration.nemesisHome}.`,
+    title: 'Move your data?',
+    type: 'question'
+  })
+
+  if (choice !== 0) {
+    return
+  }
+
+  try {
+    fs.renameSync(migration.legacyHome, migration.nemesisHome)
+  } catch (error) {
+    dialog.showErrorBox(
+      'Move failed',
+      `Nemesis could not move the folder (${error instanceof Error ? error.message : String(error)}). ` +
+        `Continuing with a fresh setup — your old data is untouched at ${migration.legacyHome}.`
+    )
+  }
+}
 
 function hermesManagedNodePathEntries() {
   // NOTE: keep this ordering in sync with iter_hermes_node_dirs() in
@@ -425,7 +461,6 @@ const BOOT_FAKE_STEP_MS = (() => {
   return Math.max(120, raw)
 })()
 
-const APP_NAME = 'Hermes'
 const TITLEBAR_HEIGHT = 34
 const MACOS_TRAFFIC_LIGHTS_HEIGHT = 14
 
@@ -718,22 +753,19 @@ app.setName(APP_NAME)
 // Windows toast notifications silently no-op unless an AppUserModelID is set:
 // `new Notification().show()` returns without error and nothing appears. The
 // AUMID must match the installed Start Menu shortcut's AUMID, which
-// electron-builder derives from the build `appId` (com.nousresearch.hermes) —
+// electron-builder derives from the build `appId` —
 // keep this string in sync with package.json `build.appId`. macOS/Linux don't
 // need this, so gate it on Windows. (Fixes: desktop approval/turn notifications
 // never firing on Windows.)
 if (IS_WINDOWS) {
-  app.setAppUserModelId('com.nousresearch.hermes')
+  app.setAppUserModelId(APP_ID)
 }
 
-// Seed the native About panel with the live Hermes version. This is refreshed
-// on every open via the explicit "About" menu handler (refreshAboutPanel), so
-// an in-place `hermes update` mid-session is reflected without an app restart;
-// the seed here just covers the first open and any non-menu invocation path.
+// Seed the native About panel with the Nemesis application version.
 app.setAboutPanelOptions({
   applicationName: APP_NAME,
-  applicationVersion: resolveHermesVersion(),
-  copyright: 'Copyright © 2026 Nous Research'
+  applicationVersion: app.getVersion(),
+  copyright: 'Copyright © 2026 Nemesis'
 })
 
 // Custom scheme for streaming local media (video/audio) into the renderer.
@@ -853,7 +885,7 @@ let nativeThemeListenerInstalled = false
 let bootProgressState = {
   error: null,
   fakeMode: BOOT_FAKE_MODE,
-  message: 'Waiting to start Hermes backend',
+  message: 'Waiting to start Nemesis local service',
   phase: 'idle',
   progress: 0,
   running: false,
@@ -1371,7 +1403,7 @@ async function waitForUpdateToFinish() {
   while (marker && Date.now() < deadline) {
     await advanceBootProgress(
       'backend.update-wait',
-      'An update is finishing — Hermes will start automatically when it completes…',
+      'An update is finishing — Nemesis will start automatically when it completes…',
       12
     )
     await new Promise(r => setTimeout(r, UPDATE_WAIT_POLL_MS))
@@ -1483,14 +1515,14 @@ function unwrapWindowsVenvHermesCommand(command, backendArgs) {
     })
   ) {
     rememberLog(
-      `Ignoring venv Hermes at ${python}: runtime import probe failed (broken/partial venv); falling through to bootstrap.`
+      `Ignoring the runtime at ${python}: import probe failed (broken/partial environment); falling through to bootstrap.`
     )
 
     return null
   }
 
   return {
-    label: `existing Hermes Python at ${python}`,
+    label: `existing Nemesis runtime at ${python}`,
     command: python,
     args: ['-m', 'hermes_cli.main', ...backendArgs],
     bootstrap: false,
@@ -1796,16 +1828,14 @@ function findGitBash() {
     return findOnPath('bash')
   }
 
-  // install.ps1 drops PortableGit at %LOCALAPPDATA%\hermes\git\... — checked
+  // install.ps1 drops PortableGit inside Nemesis's private runtime home — checked
   // first so users who installed via install.ps1 are detected before we
   // start probing system-wide locations.
   const localAppData = process.env.LOCALAPPDATA || ''
-  const candidates = []
-
-  if (localAppData) {
-    candidates.push(path.join(localAppData, 'hermes', 'git', 'bin', 'bash.exe'))
-    candidates.push(path.join(localAppData, 'hermes', 'git', 'usr', 'bin', 'bash.exe'))
-  }
+  const candidates = [
+    path.join(HERMES_HOME, 'git', 'bin', 'bash.exe'),
+    path.join(HERMES_HOME, 'git', 'usr', 'bin', 'bash.exe')
+  ]
 
   // Standard Git for Windows install locations.
   candidates.push(path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Git', 'bin', 'bash.exe'))
@@ -1899,7 +1929,7 @@ function makeDashboardReadyFile() {
 }
 
 // resolveGitBinary — locate git.exe on Windows. A fresh installer-driven
-// install only has PortableGit under %LOCALAPPDATA%\hermes\git (never on
+// install only has PortableGit under Nemesis's private runtime home (never on
 // PATH), so a bare spawn('git') ENOENTs and self-update checks fail with
 // "Couldn't check for updates". Mirror findGitBash: PortableGit first, then
 // standard Git-for-Windows locations, then PATH. Cached after first probe.
@@ -1917,12 +1947,10 @@ function resolveGitBinary() {
   }
 
   const localAppData = process.env.LOCALAPPDATA || ''
-  const candidates = []
-
-  if (localAppData) {
-    candidates.push(path.join(localAppData, 'hermes', 'git', 'cmd', 'git.exe'))
-    candidates.push(path.join(localAppData, 'hermes', 'git', 'bin', 'git.exe'))
-  }
+  const candidates = [
+    path.join(HERMES_HOME, 'git', 'cmd', 'git.exe'),
+    path.join(HERMES_HOME, 'git', 'bin', 'git.exe')
+  ]
 
   candidates.push(path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Git', 'cmd', 'git.exe'))
   candidates.push(path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Git', 'cmd', 'git.exe'))
@@ -2272,14 +2300,14 @@ let isQuittingForHandoff = false
 let isAppQuitting = false
 
 // Resolve the staged updater binary. The Tauri installer copies itself to
-// HERMES_HOME/hermes-setup.exe on a successful install (see
+// HERMES_HOME/nemesis-setup.exe on a successful install (see
 // apps/bootstrap-installer paths::copy_self_to_hermes_home). That binary owns
 // ALL repo mutation — running `hermes update` + rebuilding the desktop — so
 // the desktop never touches its own bits while running. Returns null when the
 // updater isn't staged (e.g. a dev/source run that never went through the
 // installer); callers degrade gracefully.
 function resolveUpdaterBinary() {
-  const name = IS_WINDOWS ? 'hermes-setup.exe' : 'hermes-setup'
+  const name = IS_WINDOWS ? 'nemesis-setup.exe' : 'nemesis-setup'
   const candidate = path.join(HERMES_HOME, name)
 
   return fileExists(candidate) ? candidate : null
@@ -2515,17 +2543,19 @@ async function applyUpdates(opts = {}) {
     }
 
     if (!updater) {
-      // No staged updater binary — this is a CLI-installed user (they ran
-      // `hermes desktop`, never the Tauri installer that self-copies
-      // hermes-setup.exe into HERMES_HOME). They DO have a working `hermes`
-      // on PATH / in the venv, so the correct path is the one-liner in their
-      // native medium. We show the EXACT command, branch-pinned to the
+      // No staged updater binary — this is a direct Electron/CLI install that
+      // never copied nemesis-setup.exe into the private runtime home. Nemesis
+      // does not add its embedded CLI to User PATH, so show the exact venv
+      // command instead of a non-existent global `hermes` command. The user
+      // can close the app and run it in PowerShell. Keep it branch-pinned to the
       // checkout they're on — bare `hermes update` defaults to main and would
       // silently switch a bb/gui (or any non-main) install off-branch. Mirror
       // the GUI button's contract: append --branch <current> for non-main
       // checkouts, keep it bare for main so the card stays clean.
       const updateRoot = resolveUpdateRoot()
-      let command = 'hermes update'
+      const windowsRuntime = path.join(VENV_ROOT, 'Scripts', 'hermes.exe')
+      const escapedWindowsRuntime = windowsRuntime.replaceAll("'", "''")
+      let command = IS_WINDOWS ? `& '${escapedWindowsRuntime}' update` : 'hermes update'
 
       try {
         const head = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: updateRoot })
@@ -2535,7 +2565,9 @@ async function applyUpdates(opts = {}) {
           const branch = await resolveHealedBranch(updateRoot, current)
 
           if (branch !== 'main') {
-            command = `hermes update --branch ${branch}`
+            command = IS_WINDOWS
+              ? `& '${escapedWindowsRuntime}' update --branch ${branch}`
+              : `hermes update --branch ${branch}`
           }
         }
       } catch {
@@ -2551,7 +2583,7 @@ async function applyUpdates(opts = {}) {
     emitUpdateProgress({
       stage: 'restart',
       message:
-        'Updating Hermes — this window will close and the updater will open. Don’t reopen Hermes yourself; it restarts automatically when the update finishes.',
+        'Updating Nemesis — this window will close and the updater will open. Don’t reopen Nemesis yourself; it restarts automatically when the update finishes.',
       percent: 100
     })
     repairMacUpdaterHelper(updater)
@@ -2581,8 +2613,8 @@ async function applyUpdates(opts = {}) {
       // user close the holder and retry. Restart our own backend so the app
       // keeps working after the failed attempt.
       const message =
-        'Update aborted: another process is holding the Hermes install open ' +
-        '(a second Hermes window or a terminal running hermes?). Close it and retry.'
+        'Update aborted: another process is holding the Nemesis runtime open ' +
+        '(a second Nemesis window or a terminal runtime process). Close it and retry.'
 
       emitUpdateProgress({ stage: 'error', message, percent: null })
       startHermes().catch(() => {})
@@ -2838,7 +2870,7 @@ async function applyUpdatesPosixInApp(opts: any) {
     // best effort
   }
 
-  emitUpdateProgress({ stage: 'update', message: 'Updating Hermes (git + dependencies)…', percent: 10 })
+  emitUpdateProgress({ stage: 'update', message: 'Updating Nemesis runtime…', percent: 10 })
 
   const updated = (await runStreamedUpdate(hermes, ['update', '--yes', ...branchArgs], {
     cwd: updateRoot,
@@ -2868,7 +2900,7 @@ async function applyUpdatesPosixInApp(opts: any) {
   if (rebuilt.code !== 0) {
     emitUpdateProgress({
       stage: 'error',
-      message: 'Backend updated, but the desktop rebuild failed. Restart Hermes to retry.',
+      message: 'Runtime updated, but the desktop rebuild failed. Restart Nemesis to retry.',
       error: rebuilt.error || 'rebuild-failed'
     })
 
@@ -2915,7 +2947,7 @@ async function applyUpdatesPosixInApp(opts: any) {
     const outcome = decideRelaunchOutcome({ underUnpacked, sandboxOk })
 
     if (outcome === 'relaunch') {
-      emitUpdateProgress({ stage: 'restart', message: 'Restarting Hermes…', percent: 100 })
+      emitUpdateProgress({ stage: 'restart', message: 'Restarting Nemesis…', percent: 100 })
       // Preserve launch context across the re-exec: replay the original args
       // (filtered of Electron internals) and the env/cwd that define which
       // backend/profile/root this instance talks to. Without this the
@@ -2953,7 +2985,7 @@ async function applyUpdatesPosixInApp(opts: any) {
           backendUpdated: true,
           guiUpdated: false,
           manualRestart: true,
-          message: 'Backend updated. Quit and reopen Hermes to load the new version.'
+          message: 'Runtime updated. Quit and reopen Nemesis to load the new version.'
         }
       }
     }
@@ -2963,7 +2995,7 @@ async function applyUpdatesPosixInApp(opts: any) {
         stage: 'guiSkew',
         message:
           'Backend updated, but the desktop app package was not changed. ' +
-          'Update or reinstall the Hermes desktop app to match.',
+          'Update or reinstall Nemesis Desktop to match.',
         percent: 100
       })
       rememberLog(
@@ -2989,13 +3021,13 @@ async function applyUpdatesPosixInApp(opts: any) {
       sandboxBlocked: true,
       message:
         'Backend updated. The rebuilt app can’t relaunch automatically ' +
-        '(sandbox helper needs root). Quit and reopen Hermes to finish.'
+        '(sandbox helper needs root). Quit and reopen Nemesis to finish.'
     }
   }
 
   const rebuiltApp = [
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Hermes.app'),
-    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Hermes.app')
+    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac-arm64', 'Nemesis.app'),
+    path.join(updateRoot, 'apps', 'desktop', 'release', 'mac', 'Nemesis.app')
   ].find(directoryExists)
 
   const targetApp = runningAppBundle()
@@ -3005,7 +3037,7 @@ async function applyUpdatesPosixInApp(opts: any) {
   if (!rebuiltApp || !targetApp) {
     emitUpdateProgress({
       stage: 'done',
-      message: 'Backend updated. Restart Hermes to load the new version.',
+      message: 'Runtime updated. Restart Nemesis to load the new version.',
       percent: 100
     })
 
@@ -3044,7 +3076,7 @@ fi
   } catch (err) {
     emitUpdateProgress({
       stage: 'done',
-      message: 'Backend + app updated. Restart Hermes to load the new version.',
+      message: 'Runtime and app updated. Restart Nemesis to load the new version.',
       percent: 100
     })
     rememberLog(`[updates] could not write swap script: ${err.message}; rebuilt app at ${rebuiltApp}`)
@@ -3348,7 +3380,7 @@ function createActiveBackend(backendArgs) {
 
   return {
     kind: 'python',
-    label: `Hermes at ${ACTIVE_HERMES_ROOT}`,
+    label: `Nemesis runtime at ${ACTIVE_HERMES_ROOT}`,
     command,
     args: ['-m', 'hermes_cli.main', ...backendArgs],
     env: buildDesktopBackendEnv({
@@ -3363,12 +3395,16 @@ function createActiveBackend(backendArgs) {
 }
 
 function resolveHermesBackend(backendArgs) {
+  const allowExternalRuntime = !IS_PACKAGED || process.env.HERMES_DESKTOP_ALLOW_EXTERNAL_RUNTIME === '1'
   // 1. Explicit override -- HERMES_DESKTOP_HERMES_ROOT points at a developer
   //    checkout. Honour it as-is (no bootstrap; the user is driving).
-  const overrideRoot = process.env.HERMES_DESKTOP_HERMES_ROOT && path.resolve(process.env.HERMES_DESKTOP_HERMES_ROOT)
+  const overrideRoot =
+    allowExternalRuntime &&
+    process.env.HERMES_DESKTOP_HERMES_ROOT &&
+    path.resolve(process.env.HERMES_DESKTOP_HERMES_ROOT)
 
   if (overrideRoot && isHermesSourceRoot(overrideRoot)) {
-    const backend = createPythonBackend(overrideRoot, `Hermes source at ${overrideRoot}`, backendArgs)
+    const backend = createPythonBackend(overrideRoot, `Nemesis runtime source at ${overrideRoot}`, backendArgs)
 
     if (backend) {
       return backend
@@ -3380,7 +3416,7 @@ function resolveHermesBackend(backendArgs) {
   //    installed `hermes` on PATH so local Python edits are actually exercised.
   //    (In dev with no checkout, SOURCE_REPO_ROOT won't pass isHermesSourceRoot.)
   if (!IS_PACKAGED && isHermesSourceRoot(SOURCE_REPO_ROOT)) {
-    const backend = createPythonBackend(SOURCE_REPO_ROOT, `Hermes source at ${SOURCE_REPO_ROOT}`, backendArgs)
+    const backend = createPythonBackend(SOURCE_REPO_ROOT, `Nemesis runtime source at ${SOURCE_REPO_ROOT}`, backendArgs)
 
     if (backend) {
       return backend
@@ -3402,7 +3438,7 @@ function resolveHermesBackend(backendArgs) {
   //    do NOT write a bootstrap marker; the user did this themselves and we
   //    don't want to take ownership of an install we didn't perform.
   //    HERMES_DESKTOP_IGNORE_EXISTING=1 forces the bootstrap path for testing.
-  if (process.env.HERMES_DESKTOP_IGNORE_EXISTING !== '1') {
+  if (allowExternalRuntime && process.env.HERMES_DESKTOP_IGNORE_EXISTING !== '1') {
     let hermesCommand = null
     const hermesOverride = process.env.HERMES_DESKTOP_HERMES
 
@@ -3414,7 +3450,7 @@ function resolveHermesBackend(backendArgs) {
       } else if (!isWindowsBinaryPathInWsl(hermesOverride, { isWsl: IS_WSL })) {
         hermesCommand = hermesOverride
       } else {
-        rememberLog(`Ignoring Windows Hermes override under WSL: ${hermesOverride}`)
+        rememberLog(`Ignoring Windows runtime override under WSL: ${hermesOverride}`)
       }
     } else {
       hermesCommand = findOnPath('hermes')
@@ -3422,7 +3458,7 @@ function resolveHermesBackend(backendArgs) {
 
     if (hermesCommand) {
       if (looksLikeDesktopAppBinary(hermesCommand)) {
-        rememberLog(`Ignoring desktop app executable on PATH while resolving Hermes CLI: ${hermesCommand}`)
+        rememberLog(`Ignoring desktop app executable on PATH while resolving the local runtime: ${hermesCommand}`)
         hermesCommand = null
       }
     }
@@ -3446,7 +3482,7 @@ function resolveHermesBackend(backendArgs) {
       if (verifyHermesCli(hermesCommand, { shell: shellForProbe })) {
         return (
           unwrapWindowsVenvHermesCommand(hermesCommand, backendArgs) || {
-            label: `existing Hermes CLI at ${hermesCommand}`,
+            label: `existing Nemesis runtime at ${hermesCommand}`,
             command: hermesCommand,
             args: backendArgs,
             bootstrap: false,
@@ -3458,7 +3494,7 @@ function resolveHermesBackend(backendArgs) {
       }
 
       rememberLog(
-        `Ignoring existing Hermes CLI at ${hermesCommand}: --version probe failed; falling through to bootstrap.`
+        `Ignoring existing runtime at ${hermesCommand}: --version probe failed; falling through to bootstrap.`
       )
     }
   }
@@ -3466,7 +3502,7 @@ function resolveHermesBackend(backendArgs) {
   // 5. Last-ditch: pip-installed hermes_cli module via system Python.
   //    Same rationale as #4 -- the user installed this; we use it but don't
   //    take ownership.
-  const python = findSystemPython()
+  const python = allowExternalRuntime ? findSystemPython() : null
 
   if (python) {
     // Same smoke-test rationale as step 4: a system Python in the
@@ -3504,7 +3540,7 @@ function resolveHermesBackend(backendArgs) {
   //    is a recoverable state the GUI can drive through.
   return {
     kind: 'bootstrap-needed',
-    label: 'Hermes Agent not installed yet; bootstrap required',
+    label: 'Nemesis runtime is not installed yet; bootstrap required',
     command: null,
     args: backendArgs,
     bootstrap: true,
@@ -3535,11 +3571,11 @@ async function ensureRuntime(backend) {
   // will rewire startup to spawn the window first and route bootstrap events
   // to a renderer-side install overlay.
   if (backend.kind === 'bootstrap-needed') {
-    rememberLog('[bootstrap] no Hermes install found; starting first-launch bootstrap')
+    rememberLog('[bootstrap] no Nemesis runtime found; starting first-launch bootstrap')
 
     if (await handOffWindowsBootstrapRecovery('bootstrap-needed')) {
       const handoffError: Error & { isBootstrapFailure?: boolean; bootstrapHandedOff?: boolean } = new Error(
-        'Hermes recovery was handed off to Hermes Setup. The desktop will restart when recovery completes.'
+        'Nemesis recovery was handed off to Nemesis Setup. The desktop will restart when recovery completes.'
       )
 
       handoffError.isBootstrapFailure = true
@@ -3596,7 +3632,7 @@ async function ensureRuntime(backend) {
     bootstrapAbortController = null
 
     if (bootstrapResult.cancelled) {
-      const cancelledError = new Error('Hermes install was cancelled.') as any
+      const cancelledError = new Error('Nemesis setup was cancelled.') as any
       cancelledError.isBootstrapFailure = true
       cancelledError.bootstrapCancelled = true
       bootstrapFailure = cancelledError
@@ -3605,7 +3641,7 @@ async function ensureRuntime(backend) {
 
     if (!bootstrapResult.ok) {
       const bootstrapError = new Error(
-        `Hermes bootstrap failed${bootstrapResult.failedStage ? ` at stage '${bootstrapResult.failedStage}'` : ''}: ` +
+        `Nemesis setup failed${bootstrapResult.failedStage ? ` at stage '${bootstrapResult.failedStage}'` : ''}: ` +
           `${bootstrapResult.error || 'unknown error'}. ` +
           `Check ${path.join(HERMES_HOME, 'logs', 'desktop.log')} for the full transcript.`
       ) as any
@@ -3634,7 +3670,7 @@ async function ensureRuntime(backend) {
   // attests they ran successfully).
   if (!isHermesSourceRoot(ACTIVE_HERMES_ROOT)) {
     throw new Error(
-      `Hermes install at ${ACTIVE_HERMES_ROOT} is missing or incomplete. ` +
+      `Nemesis runtime at ${ACTIVE_HERMES_ROOT} is missing or incomplete. ` +
         'Reinstall via the desktop installer or scripts/install.ps1.'
     )
   }
@@ -3647,10 +3683,10 @@ async function ensureRuntime(backend) {
   // here via an external `hermes` on PATH, this check still helps.
   if (IS_WINDOWS && !findGitBash()) {
     throw new Error(
-      'Git for Windows is required for Hermes on Windows (provides Git Bash, ' +
+      'Git for Windows is required for Nemesis on Windows (provides Git Bash, ' +
         "which the agent's terminal tool uses). Install it from " +
         'https://git-scm.com/download/win or run `winget install -e --id Git.Git`, ' +
-        'then relaunch Hermes.'
+        'then relaunch Nemesis.'
     )
   }
 
@@ -3665,15 +3701,15 @@ async function ensureRuntime(backend) {
     // install.ps1 succeeds. If we hit this, the user (or a deleted venv)
     // broke the invariant; tell them to re-run the install.
     throw new Error(
-      `Hermes venv missing at ${VENV_ROOT}. Re-run the desktop installer or ` + '`scripts/install.ps1` to rebuild it.'
+      `Nemesis runtime environment is missing at ${VENV_ROOT}. Re-run Nemesis Setup to rebuild it.`
     )
   }
 
   backend.command = getVenvPython(VENV_ROOT)
-  backend.label = `Hermes at ${ACTIVE_HERMES_ROOT} (venv: ${VENV_ROOT})`
+  backend.label = `Nemesis runtime at ${ACTIVE_HERMES_ROOT} (environment: ${VENV_ROOT})`
   updateBootProgress({
     phase: 'runtime.ready',
-    message: 'Hermes runtime is ready',
+    message: 'Nemesis runtime is ready',
     progress: 82,
     running: true,
     error: null
@@ -3690,7 +3726,7 @@ function fetchJson(url, token, options: any = {}) {
     const timeoutMs = resolveTimeoutMs(options.timeoutMs, DEFAULT_FETCH_TIMEOUT_MS)
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+      reject(new Error(`Unsupported Nemesis service URL protocol: ${parsed.protocol}`))
 
       return
     }
@@ -3735,7 +3771,7 @@ function fetchJson(url, token, options: any = {}) {
             reject(
               new Error(
                 `Expected JSON from ${url} but got HTML (status ${res.statusCode}). ` +
-                  'The endpoint is likely missing on the Hermes backend.'
+                  'The endpoint is likely missing on the Nemesis local service.'
               )
             )
 
@@ -3753,7 +3789,7 @@ function fetchJson(url, token, options: any = {}) {
 
     req.on('error', reject)
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+      req.destroy(new Error(`Timed out connecting to the Nemesis local service after ${timeoutMs}ms`))
     })
 
     if (body) {
@@ -3785,7 +3821,7 @@ function fetchPublicJson(url, options: any = {}) {
     const timeoutMs = resolveTimeoutMs(options.timeoutMs, DEFAULT_FETCH_TIMEOUT_MS)
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+      reject(new Error(`Unsupported Nemesis service URL protocol: ${parsed.protocol}`))
 
       return
     }
@@ -3824,7 +3860,7 @@ function fetchPublicJson(url, options: any = {}) {
             reject(
               new Error(
                 `Expected JSON from ${url} but got HTML (status ${res.statusCode}). ` +
-                  'The endpoint is likely missing on the Hermes backend.'
+                  'The endpoint is likely missing on the Nemesis local service.'
               )
             )
 
@@ -3842,7 +3878,7 @@ function fetchPublicJson(url, options: any = {}) {
 
     req.on('error', reject)
     req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+      req.destroy(new Error(`Timed out connecting to the Nemesis local service after ${timeoutMs}ms`))
     })
 
     if (body) {
@@ -4475,7 +4511,7 @@ async function waitForHermes(baseUrl, token) {
     }
   }
 
-  throw new Error(`Hermes backend did not become ready: ${lastError?.message || 'timeout'}`)
+  throw new Error(`Nemesis local service did not become ready: ${lastError?.message || 'timeout'}`)
 }
 
 function getWindowButtonPosition() {
@@ -4657,7 +4693,7 @@ function buildApplicationMenu() {
     submenu: [
       { role: 'reload' },
       { role: 'forceReload' },
-      { role: 'toggleDevTools' },
+      ...(IS_PACKAGED ? [] : [{ role: 'toggleDevTools' }]),
       { type: 'separator' },
       {
         label: 'Actual Size',
@@ -4704,10 +4740,10 @@ function buildApplicationMenu() {
 }
 
 function toggleDevTools(window) {
-  // DevTools is enabled in packaged builds so users can diagnose renderer
-  // issues without needing a dev build. Trade-off: tiny attack surface
-  // increase versus a much better support story when WS connection or
-  // CSP issues surface in the field.
+  if (IS_PACKAGED) {
+    return
+  }
+
   const { webContents } = window
 
   if (webContents.isDevToolsOpened()) {
@@ -4718,7 +4754,10 @@ function toggleDevTools(window) {
 }
 
 function installDevToolsShortcut(window) {
-  // F12 / Cmd+Opt+I works in both dev and packaged builds.
+  if (IS_PACKAGED) {
+    return
+  }
+
   window.webContents.on('before-input-event', (event, input) => {
     const key = input.key.toLowerCase()
 
@@ -5187,7 +5226,7 @@ function openOauthLoginWindow(baseUrl) {
       win = new BrowserWindow({
         width: 520,
         height: 720,
-        title: 'Sign in to Hermes gateway',
+        title: 'Sign in to Nemesis',
         autoHideMenuBar: true,
         webPreferences: {
           contextIsolation: true,
@@ -5251,7 +5290,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
     }
 
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      reject(new Error(`Unsupported Hermes backend URL protocol: ${parsed.protocol}`))
+      reject(new Error(`Unsupported Nemesis service URL protocol: ${parsed.protocol}`))
 
       return
     }
@@ -5280,7 +5319,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
         // already finished
       }
 
-      reject(new Error(`Timed out connecting to Hermes backend after ${timeoutMs}ms`))
+      reject(new Error(`Timed out connecting to the Nemesis service after ${timeoutMs}ms`))
     }, timeoutMs)
 
     request.on('response', res => {
@@ -5650,7 +5689,7 @@ async function buildRemoteConnection(rawUrl, authMode, token, source) {
     // the authoritative liveness check.
     if (!(await hasLiveOauthSession(baseUrl))) {
       const err = new Error(
-        'Remote Hermes gateway uses OAuth, but you are not signed in. ' +
+        'The remote Nemesis service uses OAuth, but you are not signed in. ' +
           'Open Settings → Gateway and click "Sign in", or switch back to Local.'
       ) as any
 
@@ -5685,7 +5724,7 @@ async function buildRemoteConnection(rawUrl, authMode, token, source) {
 
   if (!token) {
     throw new Error(
-      'Remote Hermes gateway is selected, but no session token is saved. ' +
+      'A remote Nemesis service is selected, but no session token is saved. ' +
         'Open Settings → Gateway and save a token, or switch back to Local.'
     )
   }
@@ -5729,7 +5768,7 @@ async function resolveRemoteBackend(profile) {
     if (!rawEnvToken) {
       throw new Error(
         'HERMES_DESKTOP_REMOTE_URL is set but HERMES_DESKTOP_REMOTE_TOKEN is not. ' +
-          'Both must be provided to connect to a remote Hermes backend.'
+          'Both must be provided to connect to a remote Nemesis service.'
       )
     }
 
@@ -6140,7 +6179,7 @@ async function spawnPoolBackend(profile, entry) {
   const webDist = resolveWebDist()
   const readyFile = backend.readyFile ? makeDashboardReadyFile() : null
 
-  rememberLog(`Starting Hermes backend for profile "${profile}" via ${backend.label}`)
+  rememberLog(`Starting Nemesis service for profile "${profile}" via ${backend.label}`)
 
   const child = spawn(
     backend.command,
@@ -6181,17 +6220,17 @@ async function spawnPoolBackend(profile, entry) {
   })
 
   child.once('error', error => {
-    rememberLog(`Hermes backend for profile "${profile}" failed to start: ${error.message}`)
+    rememberLog(`Nemesis service for profile "${profile}" failed to start: ${error.message}`)
     backendPool.delete(profile)
     rejectStart?.(error)
   })
   child.once('exit', (code, signal) => {
-    rememberLog(`Hermes backend for profile "${profile}" exited (${signal || code})`)
+    rememberLog(`Nemesis service for profile "${profile}" exited (${signal || code})`)
     backendPool.delete(profile)
 
     if (!ready) {
       rejectStart?.(
-        new Error(`Hermes backend for profile "${profile}" exited before it became ready (${signal || code}).`)
+        new Error(`Nemesis service for profile "${profile}" exited before it became ready (${signal || code}).`)
       )
     }
   })
@@ -6211,7 +6250,7 @@ async function spawnPoolBackend(profile, entry) {
 
   const authToken = await adoptServedDashboardToken(baseUrl, token, {
     childAlive: () => child.exitCode === null && !child.killed,
-    label: `Hermes backend for profile "${profile}"`,
+    label: `Nemesis service for profile "${profile}"`,
     rememberLog
   })
 
@@ -6334,17 +6373,17 @@ async function startHermes() {
   }
 
   connectionPromise = (async () => {
-    await advanceBootProgress('backend.resolve', 'Resolving Hermes backend', 8)
+    await advanceBootProgress('backend.resolve', 'Resolving Nemesis local service', 8)
     // Resolve for the desktop's primary profile so a per-profile remote
     // override on the active profile is honored (falls back to env / global).
     const remote = await resolveRemoteBackend(primaryProfileKey())
 
     if (remote) {
-      await advanceBootProgress('backend.remote', `Connecting to remote Hermes backend at ${remote.baseUrl}`, 24)
+      await advanceBootProgress('backend.remote', `Connecting to remote Nemesis service at ${remote.baseUrl}`, 24)
       await waitForHermes(remote.baseUrl, remote.token)
       updateBootProgress({
         phase: 'backend.ready',
-        message: 'Remote Hermes backend is ready',
+        message: 'Remote Nemesis service is ready',
         progress: 94,
         running: true,
         error: null
@@ -6384,7 +6423,7 @@ async function startHermes() {
       backendArgs.unshift('--profile', activeProfile)
     }
 
-    await advanceBootProgress('backend.runtime', 'Resolving Hermes runtime', 28)
+    await advanceBootProgress('backend.runtime', 'Resolving Nemesis runtime', 28)
     const backend = await ensureRuntime(resolveHermesBackend(backendArgs))
     // Route old runtimes (no `serve`) through the legacy `dashboard --no-open`.
     backend.args = getBackendArgsForRuntime(backend)
@@ -6392,8 +6431,8 @@ async function startHermes() {
     const webDist = resolveWebDist()
     const readyFile = backend.readyFile ? makeDashboardReadyFile() : null
 
-    await advanceBootProgress('backend.spawn', `Starting Hermes backend via ${backend.label}`, 84)
-    rememberLog(`Starting Hermes backend via ${backend.label}`)
+    await advanceBootProgress('backend.spawn', `Starting Nemesis local service via ${backend.label}`, 84)
+    rememberLog(`Starting Nemesis local service via ${backend.label}`)
 
     hermesProcess = spawn(
       backend.command,
@@ -6435,11 +6474,11 @@ async function startHermes() {
     })
 
     hermesProcess.once('error', error => {
-      rememberLog(`Hermes backend failed to start: ${error.message}`)
+      rememberLog(`Nemesis local service failed to start: ${error.message}`)
       updateBootProgress(
         {
           error: error.message,
-          message: `Hermes backend failed to start: ${error.message}`,
+          message: `Nemesis local service failed to start: ${error.message}`,
           phase: 'backend.error',
           running: false
         },
@@ -6451,13 +6490,13 @@ async function startHermes() {
       rejectBackendStart?.(error)
     })
     hermesProcess.once('exit', (code, signal) => {
-      rememberLog(`Hermes backend exited (${signal || code})`)
+      rememberLog(`Nemesis local service exited (${signal || code})`)
       hermesProcess = null
       connectionPromise = null
       sendBackendExit({ code, signal })
 
       if (!backendReady) {
-        const message = `Hermes backend exited before it became ready (${signal || code}).`
+        const message = `Nemesis local service exited before it became ready (${signal || code}).`
         updateBootProgress(
           {
             error: message,
@@ -6469,13 +6508,13 @@ async function startHermes() {
         )
         rejectBackendStart?.(
           new Error(
-            `Hermes backend exited before it became ready (${signal || code}). Log: ${DESKTOP_LOG_PATH}\n${recentHermesLog()}`
+            `Nemesis local service exited before it became ready (${signal || code}). Log: ${DESKTOP_LOG_PATH}\n${recentHermesLog()}`
           )
         )
       }
     })
 
-    await advanceBootProgress('backend.port', 'Waiting for Hermes backend to launch', 86)
+    await advanceBootProgress('backend.port', 'Waiting for Nemesis local service to launch', 86)
 
     // Discover the ephemeral port the child bound to
     const port = await Promise.race([
@@ -6488,7 +6527,7 @@ async function startHermes() {
     }
 
     const baseUrl = `http://127.0.0.1:${port}`
-    await advanceBootProgress('backend.wait', 'Waiting for Hermes backend to become ready', 90)
+    await advanceBootProgress('backend.wait', 'Waiting for Nemesis local service to become ready', 90)
     await Promise.race([waitForHermes(baseUrl, token), backendStartFailed])
     backendReady = true
     backendStartFailure = null
@@ -6501,7 +6540,7 @@ async function startHermes() {
 
     updateBootProgress({
       phase: 'backend.ready',
-      message: 'Hermes backend is ready. Finalizing desktop startup',
+      message: 'Nemesis local service is ready. Finalizing desktop startup',
       progress: 94,
       running: true,
       error: null
@@ -6612,7 +6651,7 @@ function spawnSecondaryWindow({
     height: SESSION_WINDOW_MIN_HEIGHT,
     minWidth: SESSION_WINDOW_MIN_WIDTH,
     minHeight: SESSION_WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     titleBarStyle: 'hidden',
     titleBarOverlay: getTitleBarOverlayOptions(),
     trafficLightPosition: IS_MAC ? WINDOW_BUTTON_POSITION : undefined,
@@ -6627,7 +6666,7 @@ function spawnSecondaryWindow({
     // themes/context.tsx, so the window appears already themed.
     show: false,
     backgroundColor: getWindowBackgroundColor(),
-    webPreferences: chatWindowWebPreferences(PRELOAD_PATH)
+    webPreferences: chatWindowWebPreferences(PRELOAD_PATH, !IS_PACKAGED)
   })
 
   if (IS_MAC) {
@@ -6725,7 +6764,7 @@ function spawnPetOverlayWindow(bounds) {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      devTools: true,
+      devTools: !IS_PACKAGED,
       // Keep the sprite animating + bubble updating while the main window is
       // minimized/blurred — the whole point of the overlay.
       backgroundThrottling: false
@@ -6815,7 +6854,7 @@ function createWindow() {
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
-    title: 'Hermes',
+    title: APP_NAME,
     // Frameless title bar on every platform so the renderer can paint the
     // "hide sidebar" button (and other left-side titlebar tools) flush with
     // the top edge — matching the macOS layout where the traffic lights sit
@@ -6837,7 +6876,7 @@ function createWindow() {
     // both keep `backgroundThrottling: false` — the chat transcript streams via
     // a requestAnimationFrame-gated flush that Chromium pauses for blurred
     // windows, stalling the live answer until refocus. See session-windows.ts.
-    webPreferences: chatWindowWebPreferences(PRELOAD_PATH)
+    webPreferences: chatWindowWebPreferences(PRELOAD_PATH, !IS_PACKAGED)
   })
 
   if (IS_MAC) {
@@ -7003,7 +7042,7 @@ ipcMain.handle('hermes:connection:revalidate', async () => {
     // Unreachable remote: drop the stale cache so the renderer's next reconnect
     // tick rebuilds a fresh, reachable descriptor. resetHermesConnection only
     // nulls connectionPromise for a remote (no child to SIGTERM).
-    rememberLog('Cached remote Hermes backend failed liveness probe; dropping stale connection.')
+    rememberLog('Cached remote Nemesis service failed its liveness probe; dropping the stale connection.')
     resetHermesConnection()
 
     return { ok: true, rebuilt: true }
@@ -7521,7 +7560,7 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
   const actions = Array.isArray(payload?.actions) ? payload.actions : []
 
   const notification = new Notification({
-    title: payload?.title || 'Hermes',
+    title: payload?.title || APP_NAME,
     body: payload?.body || '',
     silent: Boolean(payload?.silent),
     actions: actions.map(action => ({ type: 'button', text: String(action?.text || '') }))
@@ -7903,7 +7942,7 @@ function terminalShellEnv() {
   env.COLORTERM = 'truecolor'
   env.LC_CTYPE = env.LC_CTYPE || 'UTF-8'
   env.TERM = 'xterm-256color'
-  env.TERM_PROGRAM = 'Hermes'
+  env.TERM_PROGRAM = 'Nemesis'
   env.TERM_PROGRAM_VERSION = app.getVersion()
 
   // Let a hermes/--tui launched in this pane know it's embedded in the desktop
@@ -7939,7 +7978,7 @@ function disposeTerminalSession(id) {
 ipcMain.handle('hermes:fs:readDir', async (_event, dirPath) => readDirForIpc(dirPath))
 
 // App-managed agent browser (school-portal mirror) — see school-browser.ts.
-registerSchoolBrowserIpc()
+registerSchoolBrowserIpc(HERMES_HOME)
 
 // Native school browser (WebContentsView tabs) — see school-view.ts.
 registerSchoolViewIpc()
@@ -8236,46 +8275,20 @@ ipcMain.handle('hermes:updates:branch:set', async (_event, name) => {
   return { branch }
 })
 
-// Resolve the canonical Hermes version (the one `release.py` bumps in
-// hermes_cli/__init__.py + pyproject.toml) so the desktop About panel shows the
-// real Hermes version instead of the Electron app's own package.json version,
-// which historically drifted (stuck at 0.0.2). Falls back to app.getVersion()
-// when the source tree can't be read (e.g. a packaged build without the repo).
-function resolveHermesVersion() {
-  try {
-    const root = resolveUpdateRoot()
-    const initPath = path.join(root, 'hermes_cli', '__init__.py')
-
-    if (fileExists(initPath)) {
-      const raw = fs.readFileSync(initPath, 'utf8')
-      const match = raw.match(/__version__\s*=\s*["']([^"']+)["']/)
-
-      if (match) {
-        return match[1]
-      }
-    }
-  } catch {
-    // Fall through to the Electron app version below.
-  }
-
-  return app.getVersion()
-}
-
-// Re-resolve the live Hermes version and push it into the native About panel
-// just before showing it, so an in-place `hermes update` is reflected without
-// an app restart. macOS only — `showAboutPanel()` is a no-op elsewhere, and the
-// other platforms don't use this menu item.
+// Refresh the native About panel immediately before opening it. The standalone
+// app version is authoritative; the embedded Hermes runtime can move
+// independently without changing the version users installed.
 function showAboutPanelFresh() {
   app.setAboutPanelOptions({
     applicationName: APP_NAME,
-    applicationVersion: resolveHermesVersion(),
-    copyright: 'Copyright © 2026 Nous Research'
+    applicationVersion: app.getVersion(),
+    copyright: 'Copyright © 2026 Nemesis'
   })
   app.showAboutPanel()
 }
 
 ipcMain.handle('hermes:version', async () => ({
-  appVersion: resolveHermesVersion(),
+  appVersion: app.getVersion(),
   electronVersion: process.versions.electron,
   nodeVersion: process.versions.node,
   platform: process.platform,
@@ -8389,7 +8402,7 @@ async function runDesktopUninstall(mode) {
     return {
       ok: false,
       error: 'agent-missing',
-      message: `Can't run the uninstaller: no Hermes agent venv at ${VENV_ROOT}.`
+      message: `Can't run the uninstaller: no Nemesis runtime environment at ${VENV_ROOT}.`
     }
   }
 
@@ -8504,22 +8517,13 @@ ipcMain.handle('hermes:vscode-theme:fetch', async (_event, id) => fetchMarketpla
 ipcMain.handle('hermes:vscode-theme:search', async (_event, query) => searchMarketplaceThemes(String(query || ''), 20))
 
 // ---------------------------------------------------------------------------
-// hermes:// deep links (e.g. hermes://blueprint/morning-brief?time=08:00).
+// nemesis:// deep links (with hermes:// retained for compatibility).
 // A docs/dashboard "Send to App" button opens this URL; we route it into the
 // running app's chat composer. Three delivery paths: macOS 'open-url',
 // Win/Linux running-app 'second-instance' (argv), Win/Linux cold-start argv.
 // ---------------------------------------------------------------------------
-const HERMES_PROTOCOL = 'hermes'
 let _pendingDeepLink = null
 let _rendererReadyForDeepLink = false
-
-function _extractDeepLink(argv) {
-  if (!Array.isArray(argv)) {
-    return null
-  }
-
-  return argv.find(a => typeof a === 'string' && a.startsWith(`${HERMES_PROTOCOL}://`)) || null
-}
 
 function handleDeepLink(url) {
   if (!url || typeof url !== 'string') {
@@ -8535,7 +8539,7 @@ function handleDeepLink(url) {
     return
   }
 
-  // hermes://blueprint/<key>?slot=val  -> host="blueprint", path="/<key>"
+  // nemesis://blueprint/<key>?slot=val  -> host="blueprint", path="/<key>"
   const kind = parsed.hostname || ''
   const name = decodeURIComponent((parsed.pathname || '').replace(/^\//, ''))
   const params = {}
@@ -8571,7 +8575,7 @@ ipcMain.handle('hermes:deep-link-ready', () => {
     const queued = _pendingDeepLink
     _pendingDeepLink = null
     handleDeepLink(
-      `${HERMES_PROTOCOL}://${queued.kind}/${encodeURIComponent(queued.name)}` +
+      `${PRIMARY_PROTOCOL}://${queued.kind}/${encodeURIComponent(queued.name)}` +
         (Object.keys(queued.params).length ? '?' + new URLSearchParams(queued.params).toString() : '')
     )
   }
@@ -8580,21 +8584,23 @@ ipcMain.handle('hermes:deep-link-ready', () => {
 })
 
 function registerDeepLinkProtocol() {
-  try {
-    if (process.defaultApp && process.argv.length >= 2) {
-      // Dev: register with the electron exec path + entry script so the OS can
-      // relaunch us with the URL.
-      app.setAsDefaultProtocolClient(HERMES_PROTOCOL, process.execPath, [path.resolve(process.argv[1])])
-    } else {
-      app.setAsDefaultProtocolClient(HERMES_PROTOCOL)
+  for (const protocolName of DEEP_LINK_PROTOCOLS) {
+    try {
+      if (process.defaultApp && process.argv.length >= 2) {
+        // Dev: register with the electron exec path + entry script so the OS can
+        // relaunch us with the URL.
+        app.setAsDefaultProtocolClient(protocolName, process.execPath, [path.resolve(process.argv[1])])
+      } else {
+        app.setAsDefaultProtocolClient(protocolName)
+      }
+    } catch (err) {
+      rememberLog(`[deeplink] ${protocolName} protocol registration failed: ${err.message}`)
     }
-  } catch (err) {
-    rememberLog(`[deeplink] protocol registration failed: ${err.message}`)
   }
 }
 
 // Single-instance lock: deep links on a running app (Win/Linux) arrive as a
-// second-instance argv. Without the lock a second `hermes://` launch spawns a
+// second-instance argv. Without the lock a second deep-link launch spawns a
 // whole new app instead of routing into the running one.
 const _gotSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -8602,7 +8608,7 @@ if (!_gotSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', (_event, argv) => {
-    const url = _extractDeepLink(argv)
+    const url = extractNemesisDeepLink(argv)
 
     if (url) {
       handleDeepLink(url)
@@ -8623,6 +8629,8 @@ app.on('open-url', (event, url) => {
 })
 
 app.whenReady().then(() => {
+  maybeOfferLegacyHomeMigration()
+
   if (IS_MAC) {
     Menu.setApplicationMenu(buildApplicationMenu())
   } else {
@@ -8649,8 +8657,8 @@ app.whenReady().then(() => {
   registerPowerResumeListeners()
   createWindow()
 
-  // Win/Linux cold start: the launching hermes:// URL is in our own argv.
-  const _coldStartLink = _extractDeepLink(process.argv)
+  // Win/Linux cold start: the launching deep-link URL is in our own argv.
+  const _coldStartLink = extractNemesisDeepLink(process.argv)
 
   if (_coldStartLink) {
     handleDeepLink(_coldStartLink)

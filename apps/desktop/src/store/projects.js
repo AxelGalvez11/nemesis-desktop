@@ -173,7 +173,7 @@ async function gatewayRequest(method, params = {}) {
         gateway = await ensureActiveGatewayOpen();
     }
     if (!gateway) {
-        throw new Error('Hermes gateway is not connected');
+        throw new Error('Nemesis is not connected');
     }
     return gateway.request(method, params);
 }

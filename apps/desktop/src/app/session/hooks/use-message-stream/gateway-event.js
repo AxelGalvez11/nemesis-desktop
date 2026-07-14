@@ -477,7 +477,7 @@ export function useGatewayEventHandler(deps) {
             }
         }
         else if (event.type === 'error') {
-            const errorMessage = payload?.message || 'Hermes reported an error';
+            const errorMessage = payload?.message || 'Nemesis reported an error';
             const looksLikeProviderSetup = isProviderSetupErrorMessage(errorMessage);
             // A turn that errors out has also ended — drop any open blocking prompt
             // for this session so an approval/sudo/secret overlay can't linger past
@@ -510,7 +510,7 @@ export function useGatewayEventHandler(deps) {
                 notify({
                     id: `gateway-error:${errorMessage}`,
                     kind: 'error',
-                    title: 'Hermes error',
+                    title: 'Nemesis error',
                     message: errorMessage
                 });
             }

@@ -3,7 +3,7 @@ import { translateNow } from '@/i18n';
 const INITIAL_BOOT_STATE = {
     error: null,
     fakeMode: false,
-    message: translateNow('boot.steps.startingHermesDesktop'),
+    message: translateNow('boot.steps.startingNemesisDesktop'),
     phase: 'renderer.init',
     progress: 2,
     running: true,

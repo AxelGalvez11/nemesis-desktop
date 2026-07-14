@@ -103,7 +103,7 @@ pub fn run() {
     // Hermes is already installed, so users can re-run setup to repair a broken
     // install instead of the launcher fast path silently relaunching the app.
     let force_setup = force_setup_from_args(std::env::args().skip(1));
-    tracing::info!(?mode, force_setup, "Hermes installer starting");
+    tracing::info!(?mode, force_setup, "Nemesis installer starting");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -138,7 +138,7 @@ pub fn run() {
                             // before we exit (mirrors launch_hermes_desktop).
                             std::thread::sleep(std::time::Duration::from_millis(200));
                             tracing::info!(
-                                "hermes already installed — relaunched desktop; exiting installer"
+                                "Nemesis already installed — relaunched desktop; exiting installer"
                             );
                             app.handle().exit(0);
                             return Ok(());
@@ -182,7 +182,7 @@ pub fn run() {
             paths::open_log_dir,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Hermes Setup");
+        .expect("error while running Nemesis Setup");
 }
 
 #[cfg(test)]

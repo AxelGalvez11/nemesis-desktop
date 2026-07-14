@@ -64,7 +64,7 @@ export const en = {
             loadingSettings: 'Loading Nemesis settings',
             loadingSessions: 'Loading recent sessions',
             startingDesktopConnection: 'Starting desktop connection',
-            startingHermesDesktop: 'Starting Nemesis Desktop…'
+            startingNemesisDesktop: 'Starting Nemesis Desktop…'
         },
         errors: {
             backgroundExited: 'Nemesis background process exited.',
@@ -111,7 +111,7 @@ export const en = {
         backendOutOfDateTitle: 'Backend out of date',
         backendOutOfDateMessage: 'Your Nemesis backend is older than this desktop build and may not work correctly. Update to align them.',
         installMethodUnsupportedTitle: 'Unsupported install method',
-        updateHermes: 'Update Nemesis',
+        updateNemesis: 'Update Nemesis',
         updateReadyTitle: 'Update ready',
         updateReadyMessage: count => `${count} new change${count === 1 ? '' : 's'} available.`,
         seeWhatsNew: "See what's new",
@@ -1003,7 +1003,7 @@ export const en = {
         hermesActiveSessions: (version, count) => `Nemesis ${version} · Active sessions ${count}`,
         restartGateway: 'Restart gateway',
         gatewayRestartFailed: 'Gateway restart failed.',
-        updateHermes: 'Update Nemesis',
+        updateNemesis: 'Update Nemesis',
         actionRunning: 'running',
         actionDone: 'done',
         actionFailed: 'failed',

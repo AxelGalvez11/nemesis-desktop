@@ -1,8 +1,8 @@
 {
-  "name": "@hermes/bootstrap-installer",
+  "name": "@nemesis/bootstrap-installer",
   "private": true,
-  "version": "0.0.1",
-  "description": "Hermes Setup — signed installer that drives scripts/install.ps1 with a polished native UI.",
+  "version": "0.1.0-beta.2",
+  "description": "Nemesis Setup — native installer for the standalone Nemesis desktop app.",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5175",
