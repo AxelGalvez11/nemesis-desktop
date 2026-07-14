@@ -34,6 +34,13 @@ class FailoverReason(enum.Enum):
     # Upstream model rate-limited (aggregator 429) — fallback to a different
     # model, NOT credential rotation. The user's key is healthy.
     upstream_rate_limit = "upstream_rate_limit"
+    # Metered-plan daily allowance exhausted (Nemesis proxy 429 with code
+    # daily_token_budget_exhausted). Terminal until the UTC-midnight reset:
+    # retrying reproduces it, no locally configured fallback is funded by the
+    # plan, and falling back buries this message under a dead slot's auth
+    # noise (a budget 429 once surfaced to the user as "HTTP 401:
+    # Authentication Fails (governor)" from a stock fallback provider).
+    entitlement_budget = "entitlement_budget"
 
     # Server-side
     overloaded = "overloaded"            # 503/529 — provider overloaded, backoff
@@ -608,6 +615,18 @@ def classify_api_error(
         return ClassifiedError(**defaults)
 
     # ── 1. Provider-specific patterns (highest priority) ────────────
+
+    # Metered-plan daily budget (Nemesis LLM proxy). The proxy mints a unique
+    # error code, so this is the most specific pattern in the pipeline — it
+    # must run before the generic 429/rate-limit path ever sees the status.
+    # Not retryable (resets at UTC midnight), no credential rotation, no
+    # fallback: the surfaced message must stay the proxy's own budget text.
+    if "daily_token_budget_exhausted" in error_msg or "daily token budget reached" in error_msg:
+        return _result(
+            FailoverReason.entitlement_budget,
+            retryable=False,
+            should_fallback=False,
+        )
 
     # Provider content-policy / safety-filter block. The provider has made a
     # deterministic refusal decision about THIS prompt — retrying unchanged

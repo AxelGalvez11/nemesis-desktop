@@ -3705,6 +3705,34 @@ def run_conversation(
                 ) and not is_context_length_error
 
                 if is_client_error:
+                    # Metered-plan daily budget (Nemesis proxy 429) is terminal
+                    # until the UTC-midnight reset: retrying reproduces it and
+                    # the local fallback chain isn't funded by the plan —
+                    # falling back only buried this message under a dead slot's
+                    # auth noise ("HTTP 401: Authentication Fails (governor)",
+                    # owner report 2026-07-14). Surface the proxy's message
+                    # verbatim: the desktop renderer matches "daily token
+                    # budget" on it to swap in its calm allowance card.
+                    if classified.reason == FailoverReason.entitlement_budget:
+                        _budget_message = (classified.message or "").strip() or (
+                            "Daily token budget reached for your plan. It resets at midnight UTC."
+                        )
+                        agent._flush_status_buffer()
+                        agent._emit_status(f"❌ {_budget_message}")
+                        agent._vprint(
+                            f"{agent.log_prefix}❌ Daily plan budget exhausted (HTTP {status_code}); "
+                            f"aborting until the UTC reset.",
+                            force=True,
+                        )
+                        agent._persist_session(messages, conversation_history)
+                        return {
+                            "final_response": _budget_message,
+                            "messages": messages,
+                            "api_calls": api_call_count,
+                            "completed": False,
+                            "failed": True,
+                            "error": _budget_message,
+                        }
                     # Try fallback before aborting — a different provider may
                     # not have the same issue (rate limit, auth, etc.). Only
                     # announce the attempt when a fallback chain actually

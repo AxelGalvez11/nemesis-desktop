@@ -21,6 +21,7 @@ export const NemesisAccountGate = () => {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
     const [oauthStarted, setOauthStarted] = useState(null);
+    const [oauthSlow, setOauthSlow] = useState(false);
     const [refreshingPlan, setRefreshingPlan] = useState(false);
     const [dismissedTrialEnd, setDismissedTrialEnd] = useState(null);
     const trialTiming = getTrialTiming(account);
@@ -49,6 +50,18 @@ export const NemesisAccountGate = () => {
         const timeout = window.setTimeout(() => void refreshEntitlement(), Math.max(0, Math.min(millisecondsUntilExpiry + 250, 2_147_483_647)));
         return () => window.clearTimeout(timeout);
     }, [account.bypass, account.periodEnd, account.planStatus, account.status, account.trialEnd]);
+    // The browser handoff can silently die (the deep link back to the app needs
+    // a click in the browser, and people miss it). After 45s of waiting, swap in
+    // a hint that tells them exactly where to look instead of promising the
+    // window will update on its own forever.
+    useEffect(() => {
+        if (!oauthStarted) {
+            setOauthSlow(false);
+            return;
+        }
+        const timeout = window.setTimeout(() => setOauthSlow(true), 45_000);
+        return () => window.clearTimeout(timeout);
+    }, [oauthStarted]);
     if (!NEMESIS_STUDENT_BUILD) {
         return null;
     }
@@ -76,7 +89,9 @@ export const NemesisAccountGate = () => {
         return (_jsx("div", { className: "fixed inset-0 z-[1300] flex items-center justify-center bg-background/95 backdrop-blur-md p-4", children: _jsxs("div", { className: "w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg", children: [_jsxs("div", { className: "flex flex-col items-center gap-3 pb-5 text-center", children: [_jsx(BrandMark, { className: "size-12" }), _jsxs("div", { children: [_jsx("h2", { className: "text-lg font-semibold tracking-tight", children: "Sign in to Nemesis" }), _jsx("p", { className: "pt-1 text-xs text-muted-foreground", children: "Use your Nemesis account. Your plan stays in sync across the desktop and account portal." })] })] }), _jsxs("div", { className: "flex flex-col gap-2.5", children: [['google', 'apple'].map(provider => (_jsxs(Button, { onClick: () => {
                                     setOauthStarted(provider);
                                     void window.hermesDesktop?.openExternal?.(desktopOAuthStartUrl(provider));
-                                }, variant: "secondary", children: ["Continue with ", provider === 'google' ? 'Google' : 'Apple'] }, provider))), oauthStarted && (_jsx("p", { "aria-live": "polite", className: "text-center text-xs text-muted-foreground", children: "Finishing sign-in in your browser \u2014 this window updates automatically when you're done." })), _jsxs("div", { className: "flex items-center gap-3 py-1", children: [_jsx("div", { className: "h-px flex-1 bg-border" }), _jsx("span", { className: "text-[11px] uppercase tracking-wide text-muted-foreground/70", children: "or" }), _jsx("div", { className: "h-px flex-1 bg-border" })] }), _jsx(Input, { autoFocus: true, onChange: event => setEmail(event.target.value), placeholder: "Email", type: "email", value: email }), _jsx(Input, { onChange: event => setPassword(event.target.value), onKeyDown: event => {
+                                }, variant: "secondary", children: ["Continue with ", provider === 'google' ? 'Google' : 'Apple'] }, provider))), oauthStarted && (_jsx("p", { "aria-live": "polite", className: "text-center text-xs text-muted-foreground", children: oauthSlow
+                                    ? 'Still waiting on the browser. In that tab, press "Open Nemesis" (your browser may ask permission — choose Open), or sign in with your email and password below.'
+                                    : 'Finishing sign-in in your browser — this window updates automatically when you’re done.' })), _jsxs("div", { className: "flex items-center gap-3 py-1", children: [_jsx("div", { className: "h-px flex-1 bg-border" }), _jsx("span", { className: "text-[11px] uppercase tracking-wide text-muted-foreground/70", children: "or" }), _jsx("div", { className: "h-px flex-1 bg-border" })] }), _jsx(Input, { autoFocus: true, onChange: event => setEmail(event.target.value), placeholder: "Email", type: "email", value: email }), _jsx(Input, { onChange: event => setPassword(event.target.value), onKeyDown: event => {
                                     if (event.key === 'Enter') {
                                         void submit();
                                     }

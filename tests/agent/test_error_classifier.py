@@ -53,7 +53,7 @@ class TestFailoverReason:
     def test_enum_members_exist(self):
         expected = {
             "auth", "auth_permanent", "billing", "rate_limit",
-            "upstream_rate_limit",
+            "upstream_rate_limit", "entitlement_budget",
             "overloaded", "server_error", "timeout",
             "ssl_cert_verification",
             "context_overflow", "payload_too_large", "image_too_large",
@@ -336,6 +336,29 @@ class TestClassifyApiError:
         result = classify_api_error(e)
         assert result.reason == FailoverReason.rate_limit
         assert result.should_fallback is True
+
+    def test_429_nemesis_daily_budget_is_terminal(self):
+        """The Nemesis metering proxy's daily-budget 429 must never retry,
+        rotate, or fall back — the budget resets at UTC midnight, and falling
+        back buried the message under a dead fallback slot's auth error
+        ("HTTP 401: Authentication Fails (governor)", owner report 2026-07-14).
+        """
+        e = MockAPIError(
+            "Too Many Requests",
+            status_code=429,
+            body={
+                "error": {
+                    "code": "daily_token_budget_exhausted",
+                    "message": "Daily token budget reached for the plus plan. Upgrade or try again tomorrow.",
+                }
+            },
+        )
+        result = classify_api_error(e)
+        assert result.reason == FailoverReason.entitlement_budget
+        assert result.retryable is False
+        assert result.should_fallback is False
+        assert result.should_rotate_credential is False
+        assert "Daily token budget reached" in result.message
 
     def test_alibaba_rate_increased_too_quickly(self):
         """Alibaba/DashScope returns a unique throttling message.

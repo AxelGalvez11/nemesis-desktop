@@ -44,6 +44,7 @@ export const NemesisAccountGate: FC = () => {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
   const [oauthStarted, setOauthStarted] = useState<null | string>(null)
+  const [oauthSlow, setOauthSlow] = useState(false)
   const [refreshingPlan, setRefreshingPlan] = useState(false)
   const [dismissedTrialEnd, setDismissedTrialEnd] = useState<null | string>(null)
   const trialTiming = getTrialTiming(account)
@@ -84,6 +85,22 @@ export const NemesisAccountGate: FC = () => {
 
     return () => window.clearTimeout(timeout)
   }, [account.bypass, account.periodEnd, account.planStatus, account.status, account.trialEnd])
+
+  // The browser handoff can silently die (the deep link back to the app needs
+  // a click in the browser, and people miss it). After 45s of waiting, swap in
+  // a hint that tells them exactly where to look instead of promising the
+  // window will update on its own forever.
+  useEffect(() => {
+    if (!oauthStarted) {
+      setOauthSlow(false)
+
+      return
+    }
+
+    const timeout = window.setTimeout(() => setOauthSlow(true), 45_000)
+
+    return () => window.clearTimeout(timeout)
+  }, [oauthStarted])
 
   if (!NEMESIS_STUDENT_BUILD) {
     return null
@@ -140,7 +157,9 @@ export const NemesisAccountGate: FC = () => {
             ))}
             {oauthStarted && (
               <p aria-live="polite" className="text-center text-xs text-muted-foreground">
-                Finishing sign-in in your browser — this window updates automatically when you&apos;re done.
+                {oauthSlow
+                  ? 'Still waiting on the browser. In that tab, press "Open Nemesis" (your browser may ask permission — choose Open), or sign in with your email and password below.'
+                  : 'Finishing sign-in in your browser — this window updates automatically when you’re done.'}
               </p>
             )}
 
