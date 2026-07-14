@@ -151,9 +151,13 @@ describe('PaneShell composition', () => {
     setPaneOpen('files', true)
     setPaneWidthOverride('files', 320)
 
+    // trackForPane only reads a stored widthOverride for resizable panes (see
+    // pane-shell.tsx trackForPane) — every other override test in this file
+    // passes `resizable` too; this one was missing it, so it exercised the
+    // non-resizable branch and always fell back to the `width` prop.
     const rendered = render(
       <PaneShell>
-        <Pane id="files" side="left" width="240px">
+        <Pane id="files" resizable side="left" width="240px">
           files
         </Pane>
         <PaneMain>main</PaneMain>

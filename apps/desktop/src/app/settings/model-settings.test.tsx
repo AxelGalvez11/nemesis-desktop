@@ -1,5 +1,8 @@
+import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { queryClient } from '@/lib/query-client'
 
 // Radix Select calls scrollIntoView on its items when the content opens; jsdom
 // doesn't implement it (nor hasPointerCapture / releasePointerCapture), so stub
@@ -21,6 +24,7 @@ const setEnvVar = vi.fn()
 const getHermesConfigRecord = vi.fn()
 const saveHermesConfig = vi.fn()
 const startManualProviderOAuth = vi.fn()
+const setApiRequestProfile = vi.fn()
 
 vi.mock('@/hermes', () => ({
   getGlobalModelInfo: () => getGlobalModelInfo(),
@@ -32,7 +36,8 @@ vi.mock('@/hermes', () => ({
   saveMoaModels: (body: unknown) => saveMoaModels(body),
   setEnvVar: (key: string, value: string) => setEnvVar(key, value),
   getHermesConfigRecord: () => getHermesConfigRecord(),
-  saveHermesConfig: (config: unknown) => saveHermesConfig(config)
+  saveHermesConfig: (config: unknown) => saveHermesConfig(config),
+  setApiRequestProfile: (profile: null | string) => setApiRequestProfile(profile)
 }))
 
 vi.mock('@/store/onboarding', () => ({
@@ -67,12 +72,20 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  // Shared singleton client — ModelSettings reads/writes the config-record
+  // cache through it (useHermesConfigRecord / setHermesConfigCache), so drop
+  // cached data between tests to avoid one test's config leaking into another.
+  queryClient.clear()
 })
 
 async function renderModelSettings() {
   const { ModelSettings } = await import('./model-settings')
 
-  return render(<ModelSettings />)
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ModelSettings />
+    </QueryClientProvider>
+  )
 }
 
 describe('ModelSettings', () => {

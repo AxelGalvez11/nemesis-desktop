@@ -25,7 +25,13 @@ describe('collectArtifactsForSession', () => {
         vi.clearAllMocks();
         $connection.set(null);
     });
-    it('indexes plain https links from assistant text', () => {
+    // Student build: Artifacts = things the agent MADE (files, images). Plain web
+    // links are deliberately excluded — citations live in the chat's Sources rail
+    // instead, so they don't double-report here (see artifact-utils.ts's
+    // NEMESIS_STUDENT_BUILD guard in collectArtifactsForSession, and commit
+    // 7c7324cbdf8 "round-7": "Artifacts page (student): web links excluded —
+    // citations live in Sources, not Artifacts; Link filter chip hidden").
+    it('excludes plain https links from assistant text', () => {
         const artifacts = collectArtifactsForSession(makeSession(), [
             {
                 content: 'Reference: https://example.com/docs/getting-started',
@@ -33,14 +39,9 @@ describe('collectArtifactsForSession', () => {
                 timestamp: 2000
             }
         ]);
-        expect(artifacts).toHaveLength(1);
-        expect(artifacts[0]).toMatchObject({
-            href: 'https://example.com/docs/getting-started',
-            kind: 'link',
-            value: 'https://example.com/docs/getting-started'
-        });
+        expect(artifacts).toEqual([]);
     });
-    it('indexes http links present in tool JSON payloads', () => {
+    it('excludes http links present in tool JSON payloads', () => {
         const messages = [
             {
                 content: JSON.stringify({ source_url: 'https://example.com/changelog/latest' }),
@@ -49,12 +50,7 @@ describe('collectArtifactsForSession', () => {
             }
         ];
         const artifacts = collectArtifactsForSession(makeSession({ id: 'session-2' }), messages);
-        expect(artifacts).toHaveLength(1);
-        expect(artifacts[0]).toMatchObject({
-            href: 'https://example.com/changelog/latest',
-            kind: 'link',
-            value: 'https://example.com/changelog/latest'
-        });
+        expect(artifacts).toEqual([]);
     });
     it('resolves remote image artifact thumbnails through the desktop fs bridge', async () => {
         const api = vi.fn(async ({ path }) => {

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { HermesReadDirResult } from '@/global'
@@ -31,17 +31,18 @@ describe('RightSidebarPane', () => {
     delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
   })
 
-  it('renders the tree whenever the session has a working dir (repo or not) — no picker', async () => {
+  it('shows the "Not available" placeholder in the student build, even with a working dir — the dev tree never mounts', async () => {
+    // RightSidebarPane is the DEVELOPER workspace tree only (see index.tsx's
+    // NEMESIS_STUDENT_BUILD branch / round-17 fc9d59f5a34 "ONE right panel
+    // (Sources as pinned rail tab)"). The student build renders the terse
+    // empty state here unconditionally; Sources owns the pinned rail tab
+    // instead. This replaces the pre-round-17 "renders the tree" expectation.
     setCurrentCwd('/repo')
 
     render(<RightSidebarPane onActivateFile={vi.fn()} onActivateFolder={vi.fn()} />)
 
-    const refresh = await screen.findByRole('button', { name: 'Refresh tree' })
-
-    readDir.mockClear()
-    fireEvent.click(refresh)
-    await waitFor(() => expect(readDir).toHaveBeenCalledWith('/repo'))
-
+    expect(await screen.findByText('Not available')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Refresh tree' })).toBeNull()
     // The freeform folder picker is retired.
     expect(screen.queryByRole('button', { name: 'Open folder' })).toBeNull()
   })

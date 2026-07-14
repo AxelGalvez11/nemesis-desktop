@@ -21,8 +21,13 @@ describe('AttachmentList', () => {
     });
     it('renders empty list without error', () => {
         renderWithI18n(_jsx(AttachmentList, { attachments: [] }));
-        const container = screen.getByTestId?.('composer-attachments') ?? document.querySelector('[data-slot="composer-attachments"]');
-        expect(container).toBeDefined();
+        // The component wraps its (possibly empty) attachment pills in a
+        // `data-slot="composer-attachments"` div — this codebase's convention
+        // for hooking DOM assertions (there is no `data-testid` anywhere in
+        // src). `getByTestId` would throw before the `??` fallback ever ran;
+        // `queryByTestId` returns null instead, letting the real query resolve.
+        const container = screen.queryByTestId('composer-attachments') ?? document.querySelector('[data-slot="composer-attachments"]');
+        expect(container).not.toBeNull();
     });
     it('does not crash when attachments array contains undefined entries', () => {
         // Repro: session switch can leave stale/undefined entries in the

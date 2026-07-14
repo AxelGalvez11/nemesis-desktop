@@ -77,7 +77,11 @@ describe('preview store', () => {
     dismissPreviewTarget()
 
     expect($previewTarget.get()).toBeNull()
-    expect($paneOpen(PREVIEW_PANE_ID).get()).toBe(false)
+    // Student build: the right rail is a single-view switcher that always shows
+    // something (Sources by default) rather than collapsing — dismissing a preview
+    // switches the rail's active tab away from Preview, it doesn't close the pane.
+    // See preview.ts dismissPreviewTarget() / round-23 "ONE right panel" (9e08dfa3453).
+    expect($paneOpen(PREVIEW_PANE_ID).get()).toBe(true)
     expect(getSessionPreviewRecord('session-1')).toBeNull()
     expect($sessionPreviewRegistry.get()['session-1']?.[0]?.dismissedAt).toEqual(expect.any(Number))
 

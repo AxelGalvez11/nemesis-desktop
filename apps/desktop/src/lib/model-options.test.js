@@ -15,7 +15,9 @@ describe('requestModelOptions', () => {
             request: vi.fn(() => Promise.resolve(gatewayPayload))
         };
         await expect(requestModelOptions({ gateway: gateway, sessionId: null })).resolves.toBe(gatewayPayload);
-        expect(gateway.request).toHaveBeenCalledWith('model.options', {});
+        // explicitOnly defaults true (#56974: chat pickers only list explicitly
+        // configured providers), so it's always present unless overridden.
+        expect(gateway.request).toHaveBeenCalledWith('model.options', { explicit_only: true });
         expect(getGlobalModelOptions).not.toHaveBeenCalled();
     });
     it('passes the active session id and refresh flag through the gateway', async () => {
@@ -25,11 +27,12 @@ describe('requestModelOptions', () => {
         await requestModelOptions({ gateway: gateway, refresh: true, sessionId: 'session-1' });
         expect(gateway.request).toHaveBeenCalledWith('model.options', {
             refresh: true,
-            session_id: 'session-1'
+            session_id: 'session-1',
+            explicit_only: true
         });
     });
     it('falls back to REST when no gateway is connected', async () => {
         await requestModelOptions({ refresh: true });
-        expect(getGlobalModelOptions).toHaveBeenCalledWith({ refresh: true });
+        expect(getGlobalModelOptions).toHaveBeenCalledWith({ explicitOnly: true, refresh: true });
     });
 });

@@ -61,7 +61,9 @@ describe('buildToolView browser_navigate title', () => {
             result: { success: false, error: 'Command timed out after 60 seconds' }
         }), '');
         expect(view.status).toBe('error');
-        expect(view.title).toBe('Failed to open hermes-agent.nousresearch.com');
+        // hostnameOf() intentionally includes a non-root pathname (targets.ts) —
+        // see commit 322138df51c3 for the "pre-existing on main" confirmation.
+        expect(view.title).toBe('Failed to open hermes-agent.nousresearch.com/docs');
     });
     it('shows opened title on success', () => {
         const view = buildToolView(part({
@@ -70,7 +72,8 @@ describe('buildToolView browser_navigate title', () => {
             result: { success: true, url: 'https://hermes-agent.nousresearch.com/docs', title: 'Docs' }
         }), '');
         expect(view.status).toBe('success');
-        expect(view.title).toBe('Opened hermes-agent.nousresearch.com');
+        // Same intentional host+path behavior as the failure case above.
+        expect(view.title).toBe('Opened hermes-agent.nousresearch.com/docs');
     });
 });
 describe('buildToolView file edit diffs', () => {

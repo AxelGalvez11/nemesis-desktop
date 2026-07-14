@@ -97,14 +97,19 @@ describe('panes store', () => {
       expect(getPaneStateSnapshot('files')?.widthOverride).toBeUndefined()
     })
 
-    it('width override is in-memory only — not persisted across reloads', () => {
+    it('width override is persisted across reloads', () => {
+      // persist() was deliberately changed from a `{ open }`-only minimal
+      // shape to persisting the full snapshot (see panes.ts persist() comment
+      // "Persists both open state and resize width" — commit 74352a1e613
+      // "add project and coding stores") so a resized pane keeps its width
+      // after a reload instead of snapping back to its default.
       ensurePaneRegistered('files', { open: true })
       setPaneWidthOverride('files', 300)
 
       const persisted = window.localStorage.getItem(STORAGE_KEY)
 
       expect(persisted).not.toBeNull()
-      expect(JSON.parse(persisted ?? '{}')).toEqual({ files: { open: true } })
+      expect(JSON.parse(persisted ?? '{}')).toEqual({ files: { open: true, widthOverride: 300 } })
     })
 
     it('open flag is persisted across changes', () => {

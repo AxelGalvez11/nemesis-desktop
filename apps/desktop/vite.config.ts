@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
@@ -26,6 +26,15 @@ const fsAllow = [
 ]
 
 export default defineConfig({
+  // Renderer unit tests only. The compiled .test.js siblings are build
+  // artifacts of the .test.ts sources (running both doubles the suite and lets
+  // stale artifacts fail fresh code), and electron/*.test.ts use node:test via
+  // `npm run test:desktop:platforms`, not vitest.
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    setupFiles: ['./vitest.setup.ts']
+  },
   base: './',
   plugins: [react(), tailwindcss()],
   // transformers.js (Whisper transcription) self-loads its WASM at runtime — don't let

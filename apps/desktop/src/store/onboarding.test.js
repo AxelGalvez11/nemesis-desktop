@@ -210,7 +210,11 @@ describe('OAuth onboarding', () => {
             if (path === '/api/providers/oauth/nous/submit') {
                 return { ok: true, status: 'approved' };
             }
-            if (path === '/api/model/options') {
+            // fetchProviderDefaultModel calls getGlobalModelOptions({ includeUnconfigured: true,
+            // explicitOnly: false }), which appends ?include_unconfigured=1 (see
+            // hermes.ts getGlobalModelOptions / commit 37a4cf9000c "limit desktop model
+            // pickers to explicit providers") — match by prefix, not exact path.
+            if (path.startsWith('/api/model/options')) {
                 return {
                     providers: [
                         {
@@ -266,7 +270,7 @@ describe('OAuth onboarding', () => {
             expect(state.flow.currentModel).toBe(model);
         }
         expect(calls.some(c => c.path === '/api/model/set')).toBe(true);
-        const optionsIndex = calls.findIndex(c => c.path === '/api/model/options');
+        const optionsIndex = calls.findIndex(c => c.path.startsWith('/api/model/options'));
         const recommendedIndex = calls.findIndex(c => c.path.startsWith('/api/model/recommended-default'));
         const setIndex = calls.findIndex(c => c.path === '/api/model/set');
         expect(optionsIndex).toBeGreaterThanOrEqual(0);

@@ -3,7 +3,7 @@ import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { useEffect, useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assistantTextPart } from '@/lib/chat-messages';
-import { $previewTarget, clearSessionPreviewRegistry, registerSessionPreview } from '@/store/preview';
+import { $previewTarget, clearSessionPreviewRegistry, getSessionPreviewRecord, registerSessionPreview } from '@/store/preview';
 import { $currentCwd, $messages } from '@/store/session';
 import { usePreviewRouting } from './use-preview-routing';
 function assistantMessage(id, text) {
@@ -98,6 +98,11 @@ describe('usePreviewRouting', () => {
         }));
         act(() => handleEvent({ payload: { path: './dist/index.html' }, session_id: 'session-1', type: 'tool.complete' }));
         expect($previewTarget.get()).toBeNull();
-        expect(window.localStorage.getItem('hermes.desktop.sessionPreviews.v1')).toBeNull();
+        // Not a raw `toBeNull()` on localStorage: clearSessionPreviewRegistry() in
+        // beforeEach always leaves '{}' there (it resets via $sessionPreviewRegistry.set({}),
+        // which the persist subscriber writes out unconditionally — true since the very
+        // first commit of this store, unrelated to auto-open). The real assertion for
+        // "tool results don't register a preview" is that session-1 has no record.
+        expect(getSessionPreviewRecord('session-1')).toBeNull();
     });
 });

@@ -89,7 +89,9 @@ describe('buildToolView browser_navigate title', () => {
     )
 
     expect(view.status).toBe('error')
-    expect(view.title).toBe('Failed to open hermes-agent.nousresearch.com')
+    // hostnameOf() intentionally includes a non-root pathname (targets.ts) —
+    // see commit 322138df51c3 for the "pre-existing on main" confirmation.
+    expect(view.title).toBe('Failed to open hermes-agent.nousresearch.com/docs')
   })
 
   it('shows opened title on success', () => {
@@ -103,7 +105,8 @@ describe('buildToolView browser_navigate title', () => {
     )
 
     expect(view.status).toBe('success')
-    expect(view.title).toBe('Opened hermes-agent.nousresearch.com')
+    // Same intentional host+path behavior as the failure case above.
+    expect(view.title).toBe('Opened hermes-agent.nousresearch.com/docs')
   })
 })
 

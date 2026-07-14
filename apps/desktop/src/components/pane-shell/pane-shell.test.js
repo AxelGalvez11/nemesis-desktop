@@ -72,7 +72,11 @@ describe('PaneShell composition', () => {
     it('uses widthOverride from the store when set', () => {
         setPaneOpen('files', true);
         setPaneWidthOverride('files', 320);
-        const rendered = render(_jsxs(PaneShell, { children: [_jsx(Pane, { id: "files", side: "left", width: "240px", children: "files" }), _jsx(PaneMain, { children: "main" })] }));
+        // trackForPane only reads a stored widthOverride for resizable panes (see
+        // pane-shell.tsx trackForPane) — every other override test in this file
+        // passes `resizable` too; this one was missing it, so it exercised the
+        // non-resizable branch and always fell back to the `width` prop.
+        const rendered = render(_jsxs(PaneShell, { children: [_jsx(Pane, { id: "files", resizable: true, side: "left", width: "240px", children: "files" }), _jsx(PaneMain, { children: "main" })] }));
         expect(getColumnTemplate(gridContainer(rendered))).toEqual(['320px', 'minmax(0,1fr)']);
     });
     it('preserves CSS-string widths verbatim (clamp, var, etc.)', () => {

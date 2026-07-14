@@ -1239,7 +1239,12 @@ describe('usePromptActions sleep/wake session recovery', () => {
 
     expect(ok).toBe(true)
     expect(calls.map(c => c.method)).toEqual(['prompt.submit', 'session.resume', 'prompt.submit'])
-    expect(calls[1]?.params).toEqual({ session_id: STORED_SESSION_ID })
+    // This resume call site has carried `source: 'desktop'` since ac6dd598a4b
+    // ("tag desktop chat sessions as desktop", the tui_gateway platform-hint
+    // fix) — unrelated to and unchanged by the #55578 timeout-retry work this
+    // test covers. The other resume call site in this file (the "split" test
+    // below) is a different one that genuinely has no `source` field.
+    expect(calls[1]?.params).toEqual({ session_id: STORED_SESSION_ID, source: 'desktop' })
     expect(calls[2]?.params).toEqual({
       session_id: RECOVERED_SESSION_ID,
       text: 'message during starved loop'

@@ -1,6 +1,8 @@
 import { jsx as _jsx } from "react/jsx-runtime";
+import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryClient } from '@/lib/query-client';
 // Radix Select calls scrollIntoView on its items when the content opens; jsdom
 // doesn't implement it (nor hasPointerCapture / releasePointerCapture), so stub
 // them to let the dropdown open in tests.
@@ -20,6 +22,7 @@ const setEnvVar = vi.fn();
 const getHermesConfigRecord = vi.fn();
 const saveHermesConfig = vi.fn();
 const startManualProviderOAuth = vi.fn();
+const setApiRequestProfile = vi.fn();
 vi.mock('@/hermes', () => ({
     getGlobalModelInfo: () => getGlobalModelInfo(),
     getGlobalModelOptions: () => getGlobalModelOptions(),
@@ -30,7 +33,8 @@ vi.mock('@/hermes', () => ({
     saveMoaModels: (body) => saveMoaModels(body),
     setEnvVar: (key, value) => setEnvVar(key, value),
     getHermesConfigRecord: () => getHermesConfigRecord(),
-    saveHermesConfig: (config) => saveHermesConfig(config)
+    saveHermesConfig: (config) => saveHermesConfig(config),
+    setApiRequestProfile: (profile) => setApiRequestProfile(profile)
 }));
 vi.mock('@/store/onboarding', () => ({
     startManualProviderOAuth: (slug) => startManualProviderOAuth(slug)
@@ -62,10 +66,14 @@ beforeEach(() => {
 afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    // Shared singleton client — ModelSettings reads/writes the config-record
+    // cache through it (useHermesConfigRecord / setHermesConfigCache), so drop
+    // cached data between tests to avoid one test's config leaking into another.
+    queryClient.clear();
 });
 async function renderModelSettings() {
     const { ModelSettings } = await import('./model-settings');
-    return render(_jsx(ModelSettings, {}));
+    return render(_jsx(QueryClientProvider, { client: queryClient, children: _jsx(ModelSettings, {}) }));
 }
 describe('ModelSettings', () => {
     it('loads the current main model and lists configured providers only', async () => {
