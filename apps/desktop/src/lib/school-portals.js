@@ -1,5 +1,5 @@
 // The student's OWN school portals (LMS + school email) — the one piece of school
-// identity that differs per student. Blackboard-at-UTHSC was hardcoded while Nemesis
+// identity that differs per student. Blackboard-at-one-school was hardcoded while Nemesis
 // had a single user (the owner); every other student needs their own address here.
 // localStorage is the UI's source of truth; every save is mirrored to
 // ~/Documents/Nemesis Library/.nemesis/portals.json so the AGENT navigates to the
@@ -10,7 +10,7 @@ const STORE_KEY = 'nemesis.school.portals.v1';
 const PORTALS_FILE = '~/Documents/Nemesis Library/.nemesis/portals.json';
 export const PORTALS_CHANGED_EVENT = 'nemesis:school-portals-changed';
 // No pre-set school. Nemesis ships to many campuses, so a fresh install must NOT
-// inherit any one school's portal — otherwise a non-UTHSC student would have the
+// inherit any one school's portal — otherwise a student at any other school would have the
 // agent drive to the wrong Blackboard on day one. The student connects their own
 // LMS + school email in onboarding (Step 1) / Settings → Connections. Empty is the
 // safe default: every consumer (connections UI, school-sync) is null/empty-safe.
