@@ -53,7 +53,7 @@ work, read `~/Documents/Nemesis Library/.nemesis/portals.json`:
 Navigate to those exact `url`s. If the file is missing or has no `lms` entry, tell the
 student to open **Settings → Connections** and add their school's course-site address —
 that's where they set it, and the app keeps this file in sync. Do NOT ask them to paste
-it into chat, and do NOT fall back to the UTHSC example address; a wrong school is worse
+it into chat, and do NOT fall back to the example school address; a wrong school is worse
 than asking. (Students change it in Connections, not via memory.)
 
 ## Blackboard flow
@@ -79,7 +79,7 @@ than asking. (Students change it in Connections, not via memory.)
    (it lands in `~/Downloads`), then move it with the terminal into
    `~/Documents/Nemesis Library/School/<Course>/`, and say where you put it.
 
-> See `references/uthsc-blackboard.md` for school-specific navigation patterns.
+> See `references/blackboard-ultra.md` for Blackboard Ultra navigation patterns.
 
 ## Outlook web flow
 

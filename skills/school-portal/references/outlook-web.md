@@ -9,7 +9,7 @@ even when the user IS logged in. To verify:
 browser_console(expression: "document.title")
 ```
 
-Expected result: `"Mail - Galvez, Axel - Outlook"` (or similar `<Name> - Outlook`).
+Expected result: `"Mail - Doe, Jane - Outlook"` (or similar `<Name> - Outlook`).
 If the title contains "Outlook" and a name, the session is live.
 
 ## Inbox structure

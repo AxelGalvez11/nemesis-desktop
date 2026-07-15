@@ -58,7 +58,8 @@ course header automatically. If none exists, ask the student once and save it to
 6. **Verify the TSV** immediately after writing. Run:
    ```sh
    python3 -c "
-   with open('/Users/axelgalvez/Documents/Nemesis Library/Flashcards/<Deck name>.tsv') as f:
+   import os
+   with open(os.path.expanduser('~/Documents/Nemesis Library/Flashcards/<Deck name>.tsv')) as f:
        lines = f.readlines()
    print(f'Lines: {len(lines)}')
    for i, l in enumerate(lines[1:], 1):

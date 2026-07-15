@@ -35,8 +35,8 @@ Connections. Read it at the start of every sync and use those exact URLs:
   skill (which covers the major LMS families).
 - If the file is missing or has no `lms` entry, don't guess a URL: tell the student
   "Open Settings → Connections and add your school's course-site address, then say 'sync
-  my school' again." The UTHSC Blackboard address that appears throughout these skills is
-  just the reference example — never assume it is *this* student's school.
+  my school' again." Any Blackboard address that appears throughout these skills is
+  just a reference example — never assume it is *this* student's school.
 
 ## Hard rules (before anything)
 
@@ -68,7 +68,7 @@ Navigate to the URLs from `portals.json` (above), per the school-portal skill's 
 - **The LMS** (`kind: "lms"` — Blackboard/Canvas/Brightspace/…): for each course the
   student takes — new announcements, new files under Content/Course Documents (slides,
   PDFs, docx), assignment/exam entries with due dates. (Addresses like
-  `blackboard.uthsc.edu` in these skills are examples — use the student's own `url`.)
+  `blackboard.example-university.edu` in these skills are examples — use the student's own `url`.)
 - **School email** (`kind: "email"` — Outlook/Gmail): new school emails since lastRun —
   sender, subject, gist; note attachments worth capturing (syllabi, slides, schedules).
   Triage per nemesis-email (read-only; never send). **If Apple Mail has the school
