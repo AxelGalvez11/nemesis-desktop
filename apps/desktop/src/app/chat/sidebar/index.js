@@ -303,7 +303,9 @@ export function ChatSidebar({ currentView, onNavigate, onLoadMoreSessions, onLoa
     // Workspace grouping is a `project -> repo -> lane -> sessions` tree computed
     // authoritatively on the backend (projects.tree). Parents reorder via
     // workspaceParentOrderIds; worktrees within a parent via workspaceOrderIds.
-    const worktreeGroupingActive = agentsGrouped && !showAllProfiles;
+    // Student build never enters the grouped Projects view (owner ask 2026-07-14):
+    // sessions stay a flat list even if the persisted grouped flag was set earlier.
+    const worktreeGroupingActive = !NEMESIS_STUDENT_BUILD && agentsGrouped && !showAllProfiles;
     const gatewayReady = gatewayState === 'open';
     // The backend project tree is a structural snapshot, NOT a per-message feed.
     // Refresh it on structural edges only — entering the grouped view, a profile
@@ -744,15 +746,17 @@ export function ChatSidebar({ currentView, onNavigate, onLoadMoreSessions, onLoa
                                     step: 0 })) : null, forceEmptyState: showSessionSkeletons, groups: displayAgentGroups, headerAction: inProject && enteredProject ? (_jsxs("div", { className: "group/workspace flex shrink-0 items-center gap-0.5", children: [enteredProject.path && (_jsx(StartWorkButton, { onStarted: onNewSessionInWorkspace, repoPath: enteredProject.path })), _jsx(ProjectMenu, { isActive: enteredProject.id === activeProjectId, onExitScope: exitProjectScope, project: enteredProject, scoped: true }), _jsx("div", { className: "grid size-6 place-items-center", children: _jsx(Button, { "aria-label": s.showProjects, className: HEADER_NAV_BTN, onClick: event => {
                                                     event.stopPropagation();
                                                     exitProjectScope();
-                                                }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "list-unordered", size: "0.75rem" }) }) })] })) : (_jsxs("div", { className: "flex shrink-0 items-center gap-0.5", children: [!showAllProfiles ? (_jsx(Button, { "aria-label": agentsGrouped ? s.projects.newButton : s.nav['new-session'], className: HEADER_ACTION_BTN, onClick: event => {
+                                                }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "list-unordered", size: "0.75rem" }) }) })] })) : (_jsxs("div", { className: "flex shrink-0 items-center gap-0.5", children: [!showAllProfiles ? (_jsx(Button, { "aria-label": !NEMESIS_STUDENT_BUILD && agentsGrouped ? s.projects.newButton : s.nav['new-session'], className: HEADER_ACTION_BTN, onClick: event => {
                                                 event.stopPropagation();
-                                                if (agentsGrouped) {
+                                                // Student build: the grouped flag can persist from beta.5 —
+                                                // "+" must never open project-create there.
+                                                if (!NEMESIS_STUDENT_BUILD && agentsGrouped) {
                                                     openProjectCreate();
                                                 }
                                                 else {
                                                     onNewSessionInWorkspace(null);
                                                 }
-                                            }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "add", size: "0.75rem" }) })) : null, _jsx("div", { className: "grid size-6 place-items-center", children: !showAllProfiles && agentSessions.length > 0 ? (_jsx(Button, { "aria-label": agentsGrouped ? s.showSessions : s.showProjects, className: cn(HEADER_NAV_BTN, agentsGrouped && 'bg-(--ui-control-active-background) text-foreground opacity-100'), onClick: event => {
+                                            }, size: "icon-xs", variant: "ghost", children: _jsx(Codicon, { name: "add", size: "0.75rem" }) })) : null, _jsx("div", { className: "grid size-6 place-items-center", children: !NEMESIS_STUDENT_BUILD && !showAllProfiles && agentSessions.length > 0 ? (_jsx(Button, { "aria-label": agentsGrouped ? s.showSessions : s.showProjects, className: cn(HEADER_NAV_BTN, agentsGrouped && 'bg-(--ui-control-active-background) text-foreground opacity-100'), onClick: event => {
                                                     event.stopPropagation();
                                                     setSidebarRecentsOpen(true);
                                                     setSidebarAgentsGrouped(!agentsGrouped);
@@ -765,7 +769,7 @@ export function ChatSidebar({ currentView, onNavigate, onLoadMoreSessions, onLoa
                                     // still has older threads on disk.
                                     const canRevealMore = visible < group.sessions.length || group.hasMore;
                                     return (_jsx(SidebarSessionsSection, { activeSessionId: activeSidebarSessionId, contentClassName: cn('flex max-h-56 flex-col gap-px pb-1.75', GROUP_BODY), emptyState: null, footer: canRevealMore ? (_jsx(SidebarLoadMoreRow, { loading: Boolean(messagingLoadMorePending[group.sourceId]), onClick: () => revealMoreMessaging(group.sourceId, group.sessions.length, group.hasMore), step: Math.min(NON_SESSION_LOAD_STEP, Math.max(0, group.total - shownSessions.length)) })) : null, label: group.label, labelIcon: _jsx(PlatformAvatar, { className: "size-4 rounded-[4px] text-[0.5625rem] [&_svg]:size-3", platformId: group.sourceId, platformName: group.label }), labelMeta: countLabel(group.sessions.length, group.total), onArchiveSession: onArchiveSession, onDeleteSession: onDeleteSession, onResumeSession: onResumeSession, onToggle: () => toggleSidebarMessagingOpen(group.sourceId), onTogglePin: pinSession, open: messagingOpenIds.includes(group.sourceId), pinned: false, rootClassName: "shrink-0 p-0", sessions: shownSessions, workingSessionIdSet: workingSessionIdSet }, group.sourceId));
-                                }), !NEMESIS_STUDENT_BUILD && !trimmedQuery && !worktreeGroupingActive && cronJobs.length > 0 && (_jsx(SidebarCronJobsSection, { jobs: cronJobs, label: s.cronJobs, onManageJob: onManageCronJob, onOpenRun: onResumeSession, onToggle: () => setSidebarCronOpen(!cronOpen), onTriggerJob: onTriggerCronJob, open: cronOpen }))] })), contentVisible && !showSessionSections && _jsx(SidebarBlankState, { onNewProject: openProjectCreate }), contentVisible && !NEMESIS_STUDENT_BUILD && (_jsx("div", { className: "shrink-0 px-0.5 pb-1 pt-0.5", children: _jsx(ProfileRail, {}) }))] }), contentVisible && NEMESIS_STUDENT_BUILD && (_jsx(StudentSidebarFooter, { onOpenSettings: () => onNavigate(SETTINGS_NAV_ITEM) })), _jsx(ProjectDialog, {})] }));
+                                }), !NEMESIS_STUDENT_BUILD && !trimmedQuery && !worktreeGroupingActive && cronJobs.length > 0 && (_jsx(SidebarCronJobsSection, { jobs: cronJobs, label: s.cronJobs, onManageJob: onManageCronJob, onOpenRun: onResumeSession, onToggle: () => setSidebarCronOpen(!cronOpen), onTriggerJob: onTriggerCronJob, open: cronOpen }))] })), contentVisible && !showSessionSections && (_jsx(SidebarBlankState, { label: NEMESIS_STUDENT_BUILD ? s.nav['new-session'] : undefined, onNewProject: NEMESIS_STUDENT_BUILD ? () => onNewSessionInWorkspace(null) : openProjectCreate })), contentVisible && !NEMESIS_STUDENT_BUILD && (_jsx("div", { className: "shrink-0 px-0.5 pb-1 pt-0.5", children: _jsx(ProfileRail, {}) }))] }), contentVisible && NEMESIS_STUDENT_BUILD && (_jsx(StudentSidebarFooter, { onOpenSettings: () => onNavigate(SETTINGS_NAV_ITEM) })), !NEMESIS_STUDENT_BUILD && _jsx(ProjectDialog, {})] }));
 }
 function StudentSidebarFooter({ onOpenSettings }) {
     const account = useStore($account);

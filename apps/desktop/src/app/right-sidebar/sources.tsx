@@ -1,7 +1,7 @@
-// Sources rail (student build): every citation the agent surfaces in the current chat —
-// markdown links, bare URLs, PMIDs, NCT trial ids, DOIs — collected into one clickable
-// list. This replaces the developer file-tree as the default right-sidebar pane: students
-// ask evidence questions, so the rail should answer "where did that come from?".
+// Sources rail (student build): every citation behind the CURRENT answer — markdown
+// links, bare URLs, PMIDs, NCT trial ids, DOIs — collected into one clickable list.
+// This replaces the developer file-tree as the default right-sidebar pane: students
+// ask evidence questions, so the rail should answer "where did THAT come from?".
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -316,18 +316,30 @@ function SourceRow({
 export function SourcesTab() {
   const messages = useStore($messages)
   const focusedSourceUrl = useStore($focusedSourceUrl)
-  const sources = useMemo(() => extractSources(messages), [messages])
+  // Only the current exchange (last user message onward) feeds the rail. Harvesting the
+  // whole session buried the live answer's citations under every earlier question's pile
+  // — and made the rail look frozen across session switches (owner call 2026-07-14).
+  const exchange = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].role === 'user') {
+        return messages.slice(index)
+      }
+    }
+
+    return messages
+  }, [messages])
+  const sources = useMemo(() => extractSources(exchange), [exchange])
   // ChatGPT splits its drawer into cited-in-the-answer vs everything else the
   // run touched. Cited = named in an ASSISTANT message's text; the rest came
   // from tool traffic only.
   const citedUrls = useMemo(() => {
-    const assistantText = messages
+    const assistantText = exchange
       .filter(message => message.role === 'assistant')
       .map(message => chatMessageText(message))
       .join('\n')
 
     return new Set(sourcesFromText(assistantText).map(source => source.url))
-  }, [messages])
+  }, [exchange])
   const cited = useMemo(() => sources.filter(source => citedUrls.has(source.url)), [citedUrls, sources])
   const consulted = useMemo(() => sources.filter(source => !citedUrls.has(source.url)), [citedUrls, sources])
   const sourceElements = useRef(new Map<string, HTMLButtonElement>())

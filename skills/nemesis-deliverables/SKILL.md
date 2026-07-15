@@ -30,6 +30,11 @@ handout, or one-pager. You BUILD A FILE and the app previews it beside the chat.
 - **No product branding** in the file. No "Nemesis", no logos — the student presents
   this as their own work aid. Neutral, professional design only.
 - Drafts, not submissions: you never submit or upload the deliverable anywhere.
+- **Context economy**: research findings, outlines, and source excerpts go into a
+  working file (`.nemesis/scratch/<topic>-notes.md`) AS you gather them — build the
+  deliverable by reading that file, not by re-printing material into the conversation.
+  Long deliverable jobs re-read the whole conversation every step; a lean conversation
+  is the difference between a 2M-token job and a 9M-token job on the student's meter.
 
 ## Image sourcing (drug/clinical slide decks)
 

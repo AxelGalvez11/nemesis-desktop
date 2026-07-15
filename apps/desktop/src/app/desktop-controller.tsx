@@ -120,7 +120,6 @@ import {
   routeSessionId,
   sessionRoute,
   SETTINGS_ROUTE,
-  TODAY_ROUTE,
   WELCOME_ROUTE
 } from './routes'
 import { SessionPickerOverlay } from './session-picker-overlay'
@@ -1262,11 +1261,13 @@ export function DesktopController() {
     requestComposerSubmit(prompt, { target: 'main' })
   }
 
+  // 2026-07-14: onboarded students land in chat, not Today — the dashboard is hidden
+  // (STUDENT_HIDDEN_NAV) until the semester graph earns a quieter version of it.
   const coldStartView = studentColdStart ? (
     sessionsLoading ? null : !onboardingComplete() && sessionsTotal === 0 ? (
       <Navigate replace to={WELCOME_ROUTE} />
     ) : (
-      <Navigate replace to={TODAY_ROUTE} />
+      chatView
     )
   ) : (
     chatView
@@ -1527,9 +1528,9 @@ export function DesktopController() {
           <Route element={null} path="settings" />
           <Route element={null} path="command-center" />
           <Route element={null} path="agents" />
-          <Route element={<Navigate replace to={NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE} />} path="new" />
+          <Route element={<Navigate replace to={NEW_CHAT_ROUTE} />} path="new" />
           <Route element={<LegacySessionRedirect />} path="sessions/:sessionId" />
-          <Route element={<Navigate replace to={NEMESIS_STUDENT_BUILD ? TODAY_ROUTE : NEW_CHAT_ROUTE} />} path="*" />
+          <Route element={<Navigate replace to={NEW_CHAT_ROUTE} />} path="*" />
         </Routes>
       </PaneMain>
       {/*

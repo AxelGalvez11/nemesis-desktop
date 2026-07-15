@@ -508,7 +508,9 @@ export function ChatSidebar({
   // Workspace grouping is a `project -> repo -> lane -> sessions` tree computed
   // authoritatively on the backend (projects.tree). Parents reorder via
   // workspaceParentOrderIds; worktrees within a parent via workspaceOrderIds.
-  const worktreeGroupingActive = agentsGrouped && !showAllProfiles
+  // Student build never enters the grouped Projects view (owner ask 2026-07-14):
+  // sessions stay a flat list even if the persisted grouped flag was set earlier.
+  const worktreeGroupingActive = !NEMESIS_STUDENT_BUILD && agentsGrouped && !showAllProfiles
   const gatewayReady = gatewayState === 'open'
 
   // The backend project tree is a structural snapshot, NOT a per-message feed.
@@ -1281,12 +1283,14 @@ export function ChatSidebar({
                     <div className="flex shrink-0 items-center gap-0.5">
                       {!showAllProfiles ? (
                         <Button
-                          aria-label={agentsGrouped ? s.projects.newButton : s.nav['new-session']}
+                          aria-label={!NEMESIS_STUDENT_BUILD && agentsGrouped ? s.projects.newButton : s.nav['new-session']}
                           className={HEADER_ACTION_BTN}
                           onClick={event => {
                             event.stopPropagation()
 
-                            if (agentsGrouped) {
+                            // Student build: the grouped flag can persist from beta.5 —
+                            // "+" must never open project-create there.
+                            if (!NEMESIS_STUDENT_BUILD && agentsGrouped) {
                               openProjectCreate()
                             } else {
                               onNewSessionInWorkspace(null)
@@ -1299,9 +1303,9 @@ export function ChatSidebar({
                         </Button>
                       ) : null}
                       <div className="grid size-6 place-items-center">
-                        {/* beta.5: students get the Projects view too — it was the only way
-                            to create a project once a session was already running. */}
-                        {!showAllProfiles && agentSessions.length > 0 ? (
+                        {/* beta.5 gave students the Projects view; owner reversed 2026-07-14 —
+                            hidden for students until the workspace concept earns its place. */}
+                        {!NEMESIS_STUDENT_BUILD && !showAllProfiles && agentSessions.length > 0 ? (
                           <Button
                             aria-label={agentsGrouped ? s.showSessions : s.showProjects}
                             className={cn(
@@ -1426,7 +1430,12 @@ export function ChatSidebar({
           </div>
         )}
 
-        {contentVisible && !showSessionSections && <SidebarBlankState onNewProject={openProjectCreate} />}
+        {contentVisible && !showSessionSections && (
+          <SidebarBlankState
+            label={NEMESIS_STUDENT_BUILD ? s.nav['new-session'] : undefined}
+            onNewProject={NEMESIS_STUDENT_BUILD ? () => onNewSessionInWorkspace(null) : openProjectCreate}
+          />
+        )}
 
         {contentVisible && !NEMESIS_STUDENT_BUILD && (
           <div className="shrink-0 px-0.5 pb-1 pt-0.5">
@@ -1437,7 +1446,7 @@ export function ChatSidebar({
       {contentVisible && NEMESIS_STUDENT_BUILD && (
         <StudentSidebarFooter onOpenSettings={() => onNavigate(SETTINGS_NAV_ITEM)} />
       )}
-      <ProjectDialog />
+      {!NEMESIS_STUDENT_BUILD && <ProjectDialog />}
     </Sidebar>
   )
 }

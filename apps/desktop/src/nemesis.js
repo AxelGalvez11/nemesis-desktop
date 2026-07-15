@@ -4,7 +4,9 @@
 // docs/design/nemesis-product-reskin-plan-2026-07.md). Flip to false → stock Hermes UI.
 export const NEMESIS_STUDENT_BUILD = true;
 /** Sidebar pages hidden for students (machinery stays alive underneath). */
-export const STUDENT_HIDDEN_NAV = new Set(['skills', 'messaging', 'artifacts']);
+// 2026-07-14: 'today' joined — owner call: the dashboard reads as noise until the
+// semester graph earns a quieter version; students boot straight into chat instead.
+export const STUDENT_HIDDEN_NAV = new Set(['today', 'skills', 'messaging', 'artifacts']);
 /** ⌘K palette entries hidden for students. */
 export const STUDENT_HIDDEN_PALETTE = new Set(['nav-terminal', 'nav-skills', 'nav-messaging']);
 /** Settings sections students see. During the beta, students connect their own model
@@ -13,10 +15,12 @@ export const STUDENT_HIDDEN_PALETTE = new Set(['nav-terminal', 'nav-skills', 'na
 // intelligence via the metered proxy, so provider/key/model settings are not student-facing.
 // 2026-07-14 (beta.5): 'usage' restored — students asked where to see their plan + weekly
 // AI usage; the page now also carries account status (usage-settings.tsx).
+// 2026-07-14: 'connections' hidden — the page confused testers; students now hand their
+// school/webmail addresses to the agent in chat and it writes portals.json itself
+// (school-portal skill). The page code stays for when a settings surface earns it back.
 export const STUDENT_SETTINGS_KEEP = new Set([
     'usage',
     'keybinds',
-    'connections',
     'config:appearance',
     'config:chat',
     'config:safety',

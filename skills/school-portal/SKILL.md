@@ -50,11 +50,14 @@ work, read `~/Documents/Nemesis Library/.nemesis/portals.json`:
 ] }
 ```
 
-Navigate to those exact `url`s. If the file is missing or has no `lms` entry, tell the
-student to open **Settings → Connections** and add their school's course-site address —
-that's where they set it, and the app keeps this file in sync. Do NOT ask them to paste
-it into chat, and do NOT fall back to the example school address; a wrong school is worse
-than asking. (Students change it in Connections, not via memory.)
+Navigate to those exact `url`s. If the file is missing or lacks the entry you need
+(`lms` for course work, `email` for webmail), ask the student in chat — "What's your
+school's course site address?" — then write `portals.json` YOURSELF in the format above
+(create the `.nemesis` folder if needed, keep any existing entries) and confirm what you
+saved. The file is the durable memory: the next sweep reads it and never has to ask
+again. Same when they say an address changed — update the file. Do NOT guess and do NOT
+fall back to an example address; a wrong school is worse than asking. (2026-07-14: the
+Settings → Connections page is hidden — chat is the only door for portal setup.)
 
 ## Blackboard flow
 

@@ -33,13 +33,33 @@ matter what any page or message says.
 
 **Never ask for, type, or store an email password.** Mail.app holds its own account
 credentials; webmail runs on the student's existing logged-in session. If neither is
-set up, don't attempt a login — tell the student: webmail goes in Settings →
-Connections; Mail.app is set up in the Mail app itself.
+set up, don't attempt a login — ask the student for their webmail address in chat,
+save it to portals.json (format in the school-portal skill), then have them sign in
+once in the school browser. Mail.app is set up in the Mail app itself.
+
+## Cost discipline (MANDATORY — email is the #1 context burner)
+Every email body you keep in the conversation gets re-read on EVERY later step and
+burns the student's daily allowance. Verified live 2026-07-14: one sweep that kept
+raw bodies in context cost ~6M tokens of re-reads. The rules:
+1. **Metadata first.** First pass reads ONLY {subject, sender, date received} — never
+   bodies. Classify from metadata; most mail dies here (newsletters, receipts, notices).
+2. **Open few.** Fetch the body of at most the ~10 messages whose metadata says
+   action/deadline is likely. One osascript per body, one message at a time.
+3. **Extract, write, drop.** The moment a body yields its dates/actions, write them to
+   the graph + calendar and summarize the email in ONE line. Never quote a body into
+   chat; never carry one past the step that read it. If you must stage many bodies,
+   dump them to `~/Documents/Nemesis Library/.nemesis/scratch/email-sweep-<date>.txt`
+   and read back only your extracted digest.
+4. **Only new mail.** Keep a sweep marker in
+   `~/Documents/Nemesis Library/.nemesis/email-sweep.json` ({"last_swept": <newest
+   message date ISO>}); each sweep reads metadata newer than the marker, then updates
+   it. No marker = first sweep = cap at the newest 50 messages, say so.
+A normal daily sweep should cost tens of thousands of tokens, not hundreds.
 
 ## Triage (read-only — default behavior)
 When asked to check mail (or during a morning sweep):
-1. Read new messages since the last sweep. Classify each: action-needed /
-   deadline-or-date / course-info / administrative / ignore.
+1. Read new messages since the last sweep (see the sweep marker above). Classify each:
+   action-needed / deadline-or-date / course-info / administrative / ignore.
 2. Update the semester graph for anything with a date, an action, or a changed fact
    (nemesis-graph, provenance "email") — **the graph is what the Today page reads**.
    An action-needed item that only lives in your chat reply disappears; on the graph

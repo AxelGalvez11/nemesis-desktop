@@ -225,6 +225,9 @@
         "CFBundleExecutable": "Nemesis",
         "CFBundleName": "Nemesis",
         "NSAudioCaptureUsageDescription": "Nemesis uses audio capture for voice conversations.",
+        "NSDesktopFolderUsageDescription": "Nemesis only looks in your Desktop when you ask it to find course files there (for example, during import). It never browses your Desktop on its own.",
+        "NSDocumentsFolderUsageDescription": "Nemesis keeps your notes, flashcards, and recordings in Documents > Nemesis Library — that folder is its home.",
+        "NSDownloadsFolderUsageDescription": "Nemesis files the course materials you download (slides, syllabi, attachments) from Downloads into your library.",
         "NSLocalNetworkUsageDescription": "Nemesis talks to its own study engine running on this Mac (localhost only).",
         "NSMicrophoneUsageDescription": "Nemesis uses the microphone for voice input and voice conversations."
       },

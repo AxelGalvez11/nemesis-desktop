@@ -296,7 +296,12 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       <OverlaySplitLayout>
         <OverlayNav footer={navFooter} groups={navGroups} />
 
-        <OverlayMain className="px-0 pb-0">
+        {/* overflow-y-auto (tailwind-merge beats OverlayMain's overflow-hidden): EVERY
+            settings page scrolls, not just the ones that rolled their own scroller.
+            Pages with an internal flex-1 scroller still fit the viewport and keep it;
+            natural-height pages overflow into this bar instead of clipping (owner
+            report 2026-07-14: several pages had no scrollbar at small window sizes). */}
+        <OverlayMain className="overflow-y-auto overscroll-contain px-0 pb-0">
           {activeView === 'usage' ? (
             <UsageSettings />
           ) : activeView === 'connections' ? (
