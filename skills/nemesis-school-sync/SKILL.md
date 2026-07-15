@@ -34,10 +34,10 @@ school-portal skill). Read it at the start of every sync and use those exact URL
 - The `lms` entry may be Blackboard, Canvas, Brightspace, Moodle, Schoology, or anything
   else — navigate to its `url`, then apply the matching pattern from the school-portal
   skill (which covers the major LMS families).
-- If the file is missing or has no `lms` entry, don't guess a URL: tell the student
-  "Open Settings → Connections and add your school's course-site address, then say 'sync
-  my school' again." Any Blackboard address that appears throughout these skills is
-  just a reference example — never assume it is *this* student's school.
+- If the file is missing or has no `lms` entry, don't guess a URL: ask the student in chat
+  for their school's course-site address and write `portals.json` yourself (per the
+  school-portal skill), then continue the sync. Any Blackboard address that appears
+  throughout these skills is just a reference example — never assume it is *this* student's school.
 
 ## Hard rules (before anything)
 
