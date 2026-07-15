@@ -1,0 +1,98 @@
+# Heartbeat — external uptime probes for the Nemesis student services.
+#
+# Runs OUTSIDE our infrastructure (GitHub's runners) every 15 minutes and fails
+# loudly when any user-facing door answers wrong. GitHub emails the repo owner
+# on scheduled-workflow failures, so a red run IS the alarm.
+#
+# The device-key probes use a deliberately INVALID key: a 403 "unknown or
+# revoked device key" proves OUR code answered. A 401 "Invalid JWT" means the
+# platform's verify_jwt gate got switched back on (the 2026-07-15 outage: the
+# deploy tool defaults it ON; these functions do their own device-key auth and
+# must be deployed with it OFF). 5xx/timeout means the function is down.
+#
+# No secrets: every endpoint probed here is already public client-facing surface.
+name: heartbeat
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: nemesis-llm (chat + usage valve)
+        run: |
+          code=000
+          for attempt in 1 2; do
+            code=$(curl -s -o /tmp/body -w "%{http_code}" --max-time 20 \
+              -H "Authorization: Bearer nmk_heartbeat" \
+              "https://qyjmivntajbigjswhahb.supabase.co/functions/v1/nemesis-llm/usage") || code=000
+            [ "$code" = "403" ] && break
+            sleep 15
+          done
+          echo "nemesis-llm: HTTP $code — $(head -c 200 /tmp/body 2>/dev/null)"
+          if [ "$code" = "401" ]; then
+            echo "::error::nemesis-llm rejected by the PLATFORM JWT gate (verify_jwt is ON again — redeploy with --no-verify-jwt). Every desktop user is locked out of chat right now."
+            exit 1
+          fi
+          if [ "$code" != "403" ]; then
+            echo "::error::nemesis-llm unhealthy: got HTTP $code, expected 403 from our own device-key auth."
+            exit 1
+          fi
+
+      - name: nemesis-search (web search valve)
+        run: |
+          code=000
+          for attempt in 1 2; do
+            code=$(curl -s -o /tmp/body -w "%{http_code}" --max-time 20 -X POST \
+              -H "Authorization: Bearer nmk_heartbeat" -H "Content-Type: application/json" \
+              -d '{"query":"heartbeat"}' \
+              "https://qyjmivntajbigjswhahb.supabase.co/functions/v1/nemesis-search/v2/search") || code=000
+            [ "$code" = "403" ] && break
+            sleep 15
+          done
+          echo "nemesis-search: HTTP $code — $(head -c 200 /tmp/body 2>/dev/null)"
+          if [ "$code" = "401" ]; then
+            echo "::error::nemesis-search rejected by the PLATFORM JWT gate (verify_jwt is ON again — redeploy with --no-verify-jwt)."
+            exit 1
+          fi
+          if [ "$code" != "403" ]; then
+            echo "::error::nemesis-search unhealthy: got HTTP $code, expected 403 from our own device-key auth."
+            exit 1
+          fi
+
+      - name: web app (accounts + billing + pricing)
+        run: |
+          code=000
+          for attempt in 1 2; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
+              "https://app.enternemesis.com/pricing") || code=000
+            [ "$code" = "200" ] && break
+            sleep 15
+          done
+          echo "app.enternemesis.com/pricing: HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::app.enternemesis.com unhealthy: /pricing returned HTTP $code."
+            exit 1
+          fi
+
+      - name: ask function (web app answer engine)
+        run: |
+          code=000
+          for attempt in 1 2; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 -X POST \
+              -H "Content-Type: application/json" -d '{}' \
+              "https://qyjmivntajbigjswhahb.supabase.co/functions/v1/ask") || code=000
+            [ "$code" = "401" ] && break
+            sleep 15
+          done
+          echo "ask: HTTP $code"
+          if [ "$code" != "401" ]; then
+            echo "::error::ask function unhealthy: got HTTP $code, expected 401 (its auth gate answering)."
+            exit 1
+          fi
