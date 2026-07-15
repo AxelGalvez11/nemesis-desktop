@@ -8,9 +8,9 @@ const reasoning = (text: string): ActivityEvent => ({ text, type: 'reasoning' })
 
 describe('phraseForActivity', () => {
   it('maps browser navigation to the bare hostname', () => {
-    const event = tool('browser_navigate', { url: 'https://www.blackboard.uthsc.edu/ultra/courses/_123' })
+    const event = tool('browser_navigate', { url: 'https://www.blackboard.example-university.edu/ultra/courses/_123' })
 
-    expect(phraseForActivity(event)).toBe('Browsing blackboard.uthsc.edu…')
+    expect(phraseForActivity(event)).toBe('Browsing blackboard.example-university.edu…')
   })
 
   it('stays generic for browser actions without a nameable destination', () => {

@@ -91,7 +91,7 @@ function truncate(value: string, max: number): string {
   return `${cut.trimEnd()}…`
 }
 
-/** Bare hostname ("blackboard.uthsc.edu") — no scheme, no path, no www. */
+/** Bare hostname ("blackboard.example-university.edu") — no scheme, no path, no www. */
 function hostnameOnly(value: string): string {
   const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`
 

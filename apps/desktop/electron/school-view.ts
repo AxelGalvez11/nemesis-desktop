@@ -223,7 +223,7 @@ function normalizeUrl(raw: string): null | string {
     return value
   }
 
-  // Bare "blackboard.uthsc.edu" style input from the URL bar.
+  // Bare "blackboard.example-university.edu" style input from the URL bar.
   if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/|$)/.test(value)) {
     return `https://${value}`
   }

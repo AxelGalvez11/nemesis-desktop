@@ -60,7 +60,7 @@ function truncate(value, max) {
     const cut = lastSpace > max * 0.6 ? hardCut.slice(0, lastSpace) : hardCut;
     return `${cut.trimEnd()}…`;
 }
-/** Bare hostname ("blackboard.uthsc.edu") — no scheme, no path, no www. */
+/** Bare hostname ("blackboard.example-university.edu") — no scheme, no path, no www. */
 function hostnameOnly(value) {
     const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`;
     try {
