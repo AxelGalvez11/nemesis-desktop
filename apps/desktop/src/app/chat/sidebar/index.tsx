@@ -508,7 +508,9 @@ export function ChatSidebar({
   // Workspace grouping is a `project -> repo -> lane -> sessions` tree computed
   // authoritatively on the backend (projects.tree). Parents reorder via
   // workspaceParentOrderIds; worktrees within a parent via workspaceOrderIds.
-  const worktreeGroupingActive = agentsGrouped && !showAllProfiles
+  // Student build never enters the grouped Projects view (owner ask 2026-07-14):
+  // sessions stay a flat list even if the persisted grouped flag was set earlier.
+  const worktreeGroupingActive = !NEMESIS_STUDENT_BUILD && agentsGrouped && !showAllProfiles
   const gatewayReady = gatewayState === 'open'
 
   // The backend project tree is a structural snapshot, NOT a per-message feed.
@@ -1299,9 +1301,9 @@ export function ChatSidebar({
                         </Button>
                       ) : null}
                       <div className="grid size-6 place-items-center">
-                        {/* beta.5: students get the Projects view too — it was the only way
-                            to create a project once a session was already running. */}
-                        {!showAllProfiles && agentSessions.length > 0 ? (
+                        {/* beta.5 gave students the Projects view; owner reversed 2026-07-14 —
+                            hidden for students until the workspace concept earns its place. */}
+                        {!NEMESIS_STUDENT_BUILD && !showAllProfiles && agentSessions.length > 0 ? (
                           <Button
                             aria-label={agentsGrouped ? s.showSessions : s.showProjects}
                             className={cn(

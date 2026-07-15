@@ -3330,11 +3330,25 @@ class GatewaySlashCommandsMixin:
                 # note so they can fix their config.
                 _aux_fail_model = getattr(compressor, "_last_aux_model_failure_model", None)
                 _aux_fail_err = getattr(compressor, "_last_aux_model_failure_error", None)
+                # Lock contention: the compressor refused to run because another
+                # path (usually the auto-compactor) holds this session's
+                # compression lock. It returns messages unchanged, which the
+                # summary formatter would misreport as "No changes" — nothing
+                # was evaluated at all, so surface the real reason instead.
+                _lock_skipped = bool(
+                    getattr(tmp_agent, "_last_compression_lock_warning_sid", None)
+                )
             finally:
                 # Evict cached agent so next turn rebuilds system prompt
                 # from current files (SOUL.md, memory, etc.).
                 self._evict_cached_agent(session_key)
                 self._cleanup_agent_resources(tmp_agent)
+            if summary["noop"] and _lock_skipped:
+                return (
+                    "🗜️ Compression is already running for this session "
+                    "(auto-compaction holds the lock) — nothing was skipped or "
+                    "lost. Try /compress again in a minute."
+                )
             lines = [f"🗜️ {summary['headline']}"]
             if focus_topic:
                 lines.append(t("gateway.compress.focus_line", topic=focus_topic))

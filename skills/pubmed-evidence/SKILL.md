@@ -62,6 +62,10 @@ with unsourced memory. Cite each PMID INLINE next to the claim it supports, e.g.
 - NCBI rate-limits ~3 requests/sec unauthenticated — do the 2-3 calls sequentially, don't fan out dozens.
 - If a query is too broad (thousands of hits) tighten it; too narrow (0 hits) loosen synonyms (generic ↔ brand, MeSH terms).
 - Keep it tight: 5-8 PMIDs is plenty for a study answer; you don't need 40.
+- **Context economy**: abstracts you've mined go to a scratch file
+  (`.nemesis/scratch/<topic>-evidence.md` — PMID, one-line finding, quote if needed),
+  not into the conversation. Cite from your digest; every raw abstract kept in chat is
+  re-read on every later step of the job and burns the student's daily allowance.
 
 ## Example
 > Student: "Why do ACE inhibitors cause a cough and what do you switch to?"

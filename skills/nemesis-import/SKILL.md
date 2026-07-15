@@ -53,14 +53,16 @@ groups under the right section (see nemesis-study-decks for the exact format). N
 seeded mastery in the graph, and report exactly how many decks/cards came over. If the
 schema defeats you, fall back to asking for a File → Export `.apkg` and say why.
 
-## 3. Quizlet — fetch their sets from the site
-The student signs into quizlet.com in YOUR browser (same as Blackboard — their login,
-their machine). Then, one set at a time from their library:
-- Prefer each set's built-in "Export text" (tab-delimited) — it matches the deck format
-  exactly; otherwise read the terms from the page.
-- ONLY sets they own or can view. Polite pacing; no hammering.
-- If a CAPTCHA or verification appears, STOP and ask the student to click it themselves,
-  then continue. You never solve CAPTCHAs.
+## 3. Quizlet — via THEIR export, never by scraping
+Quizlet bot-blocks automated browsers (verified live 2026-07-14: instant CAPTCHA), so
+don't browse it — the export feature is the whole path:
+- Walk the student through it: open the set → ⋯ menu → "Export text" (tab-delimited) →
+  copy or save; they paste it to you or drop the file in Downloads.
+- Convert each export into a Nemesis deck `.tsv` exactly like an Anki import (§2).
+- ONLY sets they own or can view. If they have many sets, they repeat export per set —
+  it's their content on their account; you do all the conversion work.
+- If any CAPTCHA/verification appears anywhere, STOP and ask the student to complete it
+  themselves. You never solve CAPTCHAs, and you never retry around a bot-wall.
 
 ## 4. Notes from Notion / Google Docs / Word / OneNote
 - Notion: their Export (Markdown & CSV zip) → unzip, strip the hash suffixes Notion adds

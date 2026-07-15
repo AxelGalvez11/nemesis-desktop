@@ -4221,6 +4221,35 @@ def _resolve_auto(
             # so that a working key is reused instead of re-selecting from the pool
             # (which might pick a different, potentially exhausted key).
             explicit_api_key = runtime_api_key
+        # A COMPLETE runtime credential surface (base_url + api_key) is the live
+        # session's own lane — use it directly, bypassing both the provider
+        # registry (whose named branch may ignore the override and demand its
+        # own env key, e.g. provider "deepseek" behind a metered proxy) and the
+        # unhealthy-cache skip below (a momentary budget 429 on the main lane
+        # must not exile aux tasks to dead Step-2 fallbacks; the retry through
+        # the same proxy is exactly what we want once budget frees). Found the
+        # hard way in the Nemesis student build: compression/title aux calls
+        # fell through to credit-dead OpenRouter + unauthed Nous and returned
+        # None — /compress no-op'd for the whole session (2026-07-14).
+        if runtime_base_url and runtime_api_key:
+            try:
+                _direct_model = main_model
+                # Aux tasks never want a thinking model: the proxy maps
+                # deepseek-reasoner to thinking-enabled — pay for reasoning on
+                # chat turns, not on summarization side work.
+                if _direct_model.startswith("deepseek-reasoner"):
+                    _direct_model = "deepseek-chat"
+                _direct = OpenAI(base_url=runtime_base_url, api_key=runtime_api_key)
+                logger.info(
+                    "Auxiliary auto-detect: using live session runtime directly (%s)",
+                    _direct_model,
+                )
+                return _direct, _direct_model
+            except Exception:
+                logger.debug(
+                    "Auxiliary: direct session-runtime client construction failed; "
+                    "continuing with registry resolution", exc_info=True,
+                )
         # Skip Step-1 if the main provider was recently 402'd. The unhealthy
         # cache TTL bounds how long we bypass it, so a topped-up account
         # recovers automatically. If we tried Step-1 anyway, every aux call

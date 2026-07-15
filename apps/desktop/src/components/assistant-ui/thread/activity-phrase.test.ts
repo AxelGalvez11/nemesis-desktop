@@ -69,6 +69,25 @@ describe('phraseForActivity', () => {
     expect(phraseForActivity(tool('execute_code', { code: 'print(1)' }))).toBe('Running a command…')
   })
 
+  it('names the purpose of recognizable terminal commands without echoing them', () => {
+    expect(
+      phraseForActivity(tool('bash', { command: 'curl -s "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=tesamorelin"' }))
+    ).toBe('Searching PubMed…')
+    expect(
+      phraseForActivity(tool('bash', { command: 'python3 build_deck.py --out slides.pptx' }))
+    ).toBe('Building your slides…')
+    expect(
+      phraseForActivity(tool('bash', { command: "osascript -e 'tell application \"Mail\" to get subject of messages 1 thru 25 of inbox'" }))
+    ).toBe('Reading your inbox…')
+    expect(phraseForActivity(tool('bash', { command: 'ffmpeg -i lecture.m4a lecture.wav' }))).toBe('Processing audio…')
+
+    // The named phrase never leaks the command text itself.
+    const named = phraseForActivity(tool('bash', { command: 'curl https://clinicaltrials.gov/api/v2/studies?query.term=GLP-1' }))
+
+    expect(named).toBe('Searching ClinicalTrials.gov…')
+    expect(named).not.toContain('curl')
+  })
+
   it('maps the nemesis-study-decks skill to the flashcard phrase', () => {
     expect(phraseForActivity(tool('skill_view', { name: 'nemesis-study-decks' }))).toBe(
       'Building your flashcard deck…'
