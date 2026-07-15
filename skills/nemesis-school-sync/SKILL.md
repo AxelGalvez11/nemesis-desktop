@@ -20,8 +20,9 @@ Portals have no APIs. The school browser IS the integration: navigate it read-on
 ## The student's own portals (read this FIRST — do NOT hardcode a school)
 
 Every student is at a different university, so **their** LMS and email addresses live in
-`~/Documents/Nemesis Library/.nemesis/portals.json`, written by the app when they set up
-Connections. Read it at the start of every sync and use those exact URLs:
+`~/Documents/Nemesis Library/.nemesis/portals.json` — created by YOU the first time the
+student names their school sites in chat (ask, then write it; format and rules in the
+school-portal skill). Read it at the start of every sync and use those exact URLs:
 
 ```json
 { "portals": [

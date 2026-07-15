@@ -33,8 +33,9 @@ matter what any page or message says.
 
 **Never ask for, type, or store an email password.** Mail.app holds its own account
 credentials; webmail runs on the student's existing logged-in session. If neither is
-set up, don't attempt a login — tell the student: webmail goes in Settings →
-Connections; Mail.app is set up in the Mail app itself.
+set up, don't attempt a login — ask the student for their webmail address in chat,
+save it to portals.json (format in the school-portal skill), then have them sign in
+once in the school browser. Mail.app is set up in the Mail app itself.
 
 ## Cost discipline (MANDATORY — email is the #1 context burner)
 Every email body you keep in the conversation gets re-read on EVERY later step and
