@@ -29,8 +29,11 @@ def test_cached_is_far_cheaper_than_uncached():
 
 # ── budgets + meter ──────────────────────────────────────────────────────────
 
-def test_budget_for_falls_back_to_default():
-    assert cm.budget_for("lms_sync").max_browser_steps == 50
+def test_budget_is_enforcement_ceiling_target_is_steady_state():
+    # budget_for = generous enforcement ceiling; target_for = tight steady-state goal.
+    assert cm.budget_for("lms_sync").max_browser_steps == 80
+    assert cm.target_for("lms_sync").max_browser_steps == 50
+    assert cm.budget_for("lms_sync").max_model_calls > cm.target_for("lms_sync").max_model_calls
     assert cm.budget_for("nonsense") is cm._DEFAULT_BUDGET
 
 

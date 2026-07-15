@@ -65,6 +65,10 @@ school-portal skill). Read it at the start of every sync and use those exact URL
 - **Budget the sweep.** Extract in bulk (Phase 1) and build from digests (Phase 3) so a
   full sync stays in the tens-of-steps range. If the browser half balloons past ~25 steps
   without progress, stop, save what you have, and tell the student what's left — never loop.
+- **Wrap the run for cost tracking.** Call `workflow_begin("lms_sync")` at the very start of
+  the sweep and `workflow_end` when you finish (or abandon). This records what the sync cost
+  and lets Nemesis pause automatically if the job ever runs away — a safety net on top of the
+  step budget above.
 
 ## Phase 1 — Sweep (read-only)
 

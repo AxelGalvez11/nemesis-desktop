@@ -79,9 +79,11 @@ def record_event(
     status: str = "ok",
     event_id: Optional[str] = None,
     created_at: Optional[str] = None,
+    cost_usd: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Record one workflow event; cost is computed from the token split. Returns the row."""
-    cost = compute_cost(model, input_tokens, cache_hit_tokens, output_tokens)
+    """Record one workflow event. Cost is computed from the token split unless ``cost_usd``
+    is given (pass the meter's own total when a run mixed Flash + Pro calls). Returns the row."""
+    cost = cost_usd if cost_usd is not None else compute_cost(model, input_tokens, cache_hit_tokens, output_tokens)
     row = {
         "id": event_id or uuid.uuid4().hex,
         "user_id": user_id,

@@ -2297,6 +2297,28 @@ BROWSER_TOOL_SCHEMAS = [
             "required": ["name", "steps"]
         }
     },
+    {
+        "name": "workflow_begin",
+        "description": "Mark the START of a scoped job (an LMS sync, email triage, homework draft) so Nemesis tracks its cost and can pause it if it runs away. Call once at the start with the closest type, then workflow_end when done. Types: lms_sync, email_triage, file_ingest, lecture_notes, flashcards, discussion_draft, homework, research.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_type": {"type": "string", "description": "lms_sync | email_triage | file_ingest | lecture_notes | flashcards | discussion_draft | homework | research"}
+            },
+            "required": ["workflow_type"]
+        }
+    },
+    {
+        "name": "workflow_end",
+        "description": "Mark the END of the job started with workflow_begin; records what it cost. Call when finished or abandoned.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "ok | partial | failed (default ok)"}
+            },
+            "required": []
+        }
+    },
 ]
 
 
@@ -5069,6 +5091,24 @@ from tools.browser_recipe import (
     list_recipes as _recipe_list,
     run_recipe as _recipe_run,
 )
+from agent import workflow_context as _wfctx
+
+
+def _wf_begin_tool(workflow_type: str, task_id=None) -> str:
+    _wfctx.begin(task_id, workflow_type)
+    return json.dumps({
+        "success": True, "workflow": workflow_type,
+        "message": f"Tracking '{workflow_type}' — I'll pause and check with you if it runs long.",
+    })
+
+
+def _wf_end_tool(status: str = "ok", task_id=None) -> str:
+    row = _wfctx.end(task_id, status=status or "ok")
+    return json.dumps({
+        "success": True, "recorded": bool(row),
+        "cost_usd": row.get("cost_usd") if row else None,
+    })
+
 
 _BROWSER_SCHEMA_MAP = {s["name"]: s for s in BROWSER_TOOL_SCHEMAS}
 
@@ -5177,4 +5217,19 @@ registry.register(
     schema=_BROWSER_SCHEMA_MAP["browser_recipe_save"],
     handler=lambda args, **kw: _recipe_save(args.get("name", ""), args.get("steps", [])),
     emoji="💾",
+)
+# Cost governor: label a scoped job so the loop can track its cost and pause a runaway.
+registry.register(
+    name="workflow_begin",
+    toolset="browser",
+    schema=_BROWSER_SCHEMA_MAP["workflow_begin"],
+    handler=lambda args, **kw: _wf_begin_tool(args.get("workflow_type", ""), task_id=kw.get("task_id")),
+    emoji="🎫",
+)
+registry.register(
+    name="workflow_end",
+    toolset="browser",
+    schema=_BROWSER_SCHEMA_MAP["workflow_end"],
+    handler=lambda args, **kw: _wf_end_tool(args.get("status", "ok"), task_id=kw.get("task_id")),
+    emoji="🏁",
 )

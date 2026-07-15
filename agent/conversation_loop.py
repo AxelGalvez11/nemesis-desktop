@@ -647,6 +647,19 @@ def run_conversation(
                 agent._safe_print("\n⚡ Breaking out of tool loop due to interrupt...")
             break
         
+        # Cost governor: a labeled workflow (see workflow_begin) that hit its GENEROUS
+        # enforcement ceiling pauses before the next model call and asks the student.
+        # Fails open — a governor error never blocks legit work.
+        try:
+            from agent.workflow_context import status as _wf_status
+            if _wf_status(effective_task_id) == "halt":
+                _turn_exit_reason = "workflow_budget_reached"
+                if not agent.quiet_mode:
+                    agent._safe_print("\n🛑 This job hit its budget — pausing to check with you before spending more.")
+                break
+        except Exception:
+            pass
+
         api_call_count += 1
         agent._api_call_count = api_call_count
         agent._touch_activity(f"starting API call #{api_call_count}")
@@ -2124,6 +2137,16 @@ def run_conversation(
                     agent.session_output_tokens += canonical_usage.output_tokens
                     agent.session_cache_read_tokens += canonical_usage.cache_read_tokens
                     agent.session_cache_write_tokens += canonical_usage.cache_write_tokens
+
+                    # Cost governor: record this call against any active scoped workflow
+                    # (no-op unless workflow_begin was called; fails open).
+                    try:
+                        from agent.workflow_context import feed as _wf_feed
+                        _wf_feed(effective_task_id, agent.model,
+                                 canonical_usage.input_tokens, canonical_usage.cache_read_tokens,
+                                 canonical_usage.output_tokens)
+                    except Exception:
+                        pass
                     agent.session_reasoning_tokens += canonical_usage.reasoning_tokens
 
                     # Log API call details for debugging/observability

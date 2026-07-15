@@ -92,9 +92,15 @@ class WorkflowBudget:
     max_pro_calls: int = 3
 
 
-# Defaults from the cost-governor table (docs/design/killer-workflow-optimization).
-# Tuned so a normal run sits well under budget; the ceilings catch runaways.
-WORKFLOW_BUDGETS: Dict[str, WorkflowBudget] = {
+# Two-tier, on purpose:
+#   WORKFLOW_TARGETS  = the steady-state numbers a well-behaved run should hit (from the
+#                       economics doc). Used for REPORTING ("did this run beat target?").
+#   WORKFLOW_BUDGETS  = generous ENFORCEMENT ceilings sized for the WORST LEGIT run (e.g. a
+#                       first-time discovery sweep before any recipe exists), so a hard halt
+#                       only ever catches a genuine runaway — never legit first-time work.
+# Enforcement fails OPEN (see workflow_context): if anything is off, it declines to halt
+# rather than block real work.
+WORKFLOW_TARGETS: Dict[str, WorkflowBudget] = {
     "lms_sync":         WorkflowBudget(max_input_tokens=20_000,  max_output_tokens=1_000,  max_model_calls=2,  max_browser_steps=50, max_browser_minutes=8,  max_pro_calls=0),
     "email_triage":     WorkflowBudget(max_input_tokens=40_000,  max_output_tokens=3_000,  max_model_calls=2,  max_browser_steps=10, max_browser_minutes=5,  max_pro_calls=0),
     "file_ingest":      WorkflowBudget(max_input_tokens=20_000,  max_output_tokens=2_000,  max_model_calls=2,  max_browser_steps=5,  max_browser_minutes=3,  max_pro_calls=0),
@@ -105,11 +111,32 @@ WORKFLOW_BUDGETS: Dict[str, WorkflowBudget] = {
     "research":         WorkflowBudget(max_input_tokens=1_000_000, max_output_tokens=100_000, max_model_calls=30, max_browser_steps=40, max_browser_minutes=20, max_pro_calls=8),
 }
 
-_DEFAULT_BUDGET = WorkflowBudget()
+# Enforcement ceilings ≈ worst-legit-run × margin. A run under these is never halted.
+WORKFLOW_BUDGETS: Dict[str, WorkflowBudget] = {
+    "lms_sync":         WorkflowBudget(max_input_tokens=400_000,   max_output_tokens=40_000,  max_model_calls=30, max_browser_steps=80, max_browser_minutes=15, max_pro_calls=2),
+    "email_triage":     WorkflowBudget(max_input_tokens=200_000,   max_output_tokens=20_000,  max_model_calls=15, max_browser_steps=25, max_browser_minutes=8,  max_pro_calls=1),
+    "file_ingest":      WorkflowBudget(max_input_tokens=150_000,   max_output_tokens=15_000,  max_model_calls=10, max_browser_steps=15, max_browser_minutes=5,  max_pro_calls=1),
+    "lecture_notes":    WorkflowBudget(max_input_tokens=250_000,   max_output_tokens=40_000,  max_model_calls=20, max_browser_steps=0,  max_browser_minutes=0,  max_pro_calls=3),
+    "flashcards":       WorkflowBudget(max_input_tokens=250_000,   max_output_tokens=60_000,  max_model_calls=15, max_browser_steps=0,  max_browser_minutes=0,  max_pro_calls=2),
+    "discussion_draft": WorkflowBudget(max_input_tokens=150_000,   max_output_tokens=20_000,  max_model_calls=12, max_browser_steps=20, max_browser_minutes=6,  max_pro_calls=2),
+    "homework":         WorkflowBudget(max_input_tokens=600_000,   max_output_tokens=80_000,  max_model_calls=30, max_browser_steps=40, max_browser_minutes=10, max_pro_calls=5),
+    "research":         WorkflowBudget(max_input_tokens=3_000_000, max_output_tokens=300_000, max_model_calls=80, max_browser_steps=80, max_browser_minutes=25, max_pro_calls=12),
+}
+
+# Generous default enforcement ceiling for an unrecognized workflow (still catches a true
+# runaway; comfortably above any normal single job).
+_DEFAULT_BUDGET = WorkflowBudget(max_input_tokens=1_000_000, max_output_tokens=120_000,
+                                 max_model_calls=40, max_browser_steps=80, max_browser_minutes=20, max_pro_calls=8)
 
 
 def budget_for(workflow_type: str) -> WorkflowBudget:
+    """The ENFORCEMENT ceiling for a workflow (generous; halts only runaways)."""
     return WORKFLOW_BUDGETS.get(workflow_type, _DEFAULT_BUDGET)
+
+
+def target_for(workflow_type: str) -> WorkflowBudget:
+    """The steady-state TARGET for a workflow (for reporting, not enforcement)."""
+    return WORKFLOW_TARGETS.get(workflow_type, _DEFAULT_BUDGET)
 
 
 # ── Live meter for one workflow run ──────────────────────────────────────────
@@ -184,5 +211,6 @@ class WorkflowMeter:
 __all__ = [
     "Status", "COMPRESS_AT", "DEGRADE_AT", "HALT_AT",
     "ModelRate", "MODEL_RATES", "resolve_rate", "is_pro", "compute_cost",
-    "WorkflowBudget", "WORKFLOW_BUDGETS", "budget_for", "WorkflowMeter",
+    "WorkflowBudget", "WORKFLOW_BUDGETS", "WORKFLOW_TARGETS",
+    "budget_for", "target_for", "WorkflowMeter",
 ]
