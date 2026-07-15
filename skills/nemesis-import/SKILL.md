@@ -10,6 +10,16 @@ you file. They approve. Copy, never move; never delete originals. Log every batc
 activity ledger (nemesis-ledger). Update the semester graph (nemesis-graph) after ingest.
 
 ## 1. Local discovery — "Find my school files" (ALWAYS scan for Anki too)
+
+**Consent BEFORE the first scan (macOS permission prompts scare students).** Touching
+Desktop/Documents/Downloads triggers macOS "Nemesis would like to access…" dialogs. So:
+ask first — "Want me to look through your Desktop, Documents, and Downloads for course
+files and flashcard decks? Your Mac will show a permission prompt for each folder —
+that's macOS being careful, and it's expected." Only scan after a yes, and if a
+permission dialog blocks a folder, tell them which one and move on — never treat a
+denial as an error. Outside this import flow, stay in the Nemesis Library and its
+scratch folder; other folders only when the student names them.
+
 Search ONLY these locations (never the whole disk):
 `~/Documents`, `~/Desktop`, `~/Downloads`, and cloud-synced folders under
 `~/Library/CloudStorage/` (OneDrive-*, GoogleDrive-*).
