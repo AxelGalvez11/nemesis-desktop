@@ -6,9 +6,11 @@ export const NEMESIS_STUDENT_BUILD = true;
 /** Sidebar pages hidden for students (machinery stays alive underneath). */
 // 2026-07-14: 'today' joined — owner call: the dashboard reads as noise until the
 // semester graph earns a quieter version; students boot straight into chat instead.
-export const STUDENT_HIDDEN_NAV = new Set(['today', 'skills', 'messaging', 'artifacts']);
+// 2026-07-15: 'recorder' joined — hidden until the recording UI is refined (zoom
+// layout + polish); the ASR engine and note pipeline stay intact underneath.
+export const STUDENT_HIDDEN_NAV = new Set(['today', 'recorder', 'skills', 'messaging', 'artifacts']);
 /** ⌘K palette entries hidden for students. */
-export const STUDENT_HIDDEN_PALETTE = new Set(['nav-terminal', 'nav-skills', 'nav-messaging']);
+export const STUDENT_HIDDEN_PALETTE = new Set(['nav-terminal', 'nav-skills', 'nav-messaging', 'nav-recorder']);
 /** Settings sections students see. During the beta, students connect their own model
  *  provider, so model/provider controls stay visible and hosted-usage claims stay hidden. */
 // 2026-07-13: 'providers' and 'config:model' removed — student plans include Nemesis
