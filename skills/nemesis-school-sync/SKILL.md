@@ -62,6 +62,9 @@ school-portal skill). Read it at the start of every sync and use those exact URL
   rest.").
 - Ledger-log every capture and every produced artifact (nemesis-ledger; sent/submitted
   always false). Batch lookups and page-reads in the same turn wherever possible.
+- **Budget the sweep.** Extract in bulk (Phase 1) and build from digests (Phase 3) so a
+  full sync stays in the tens-of-steps range. If the browser half balloons past ~25 steps
+  without progress, stop, save what you have, and tell the student what's left — never loop.
 
 ## Phase 1 — Sweep (read-only)
 
@@ -107,7 +110,15 @@ Collect everything into one worklist before producing anything.
 
 ## Phase 3 — Produce (the intelligence; this is why students pay)
 
-For each new lecture file (up to the batch cap), READ it and produce:
+**Read each lecture ONCE, then build every artifact from a digest — not from re-reading.**
+For each new lecture file: extract its TEXT (never render the pages as images — that costs
+15–30× more per page), and stage the atomic concepts + key terms + numbers-with-slide into
+`.nemesis/scratch/<lecture>-digest.md`. Then produce the note, the deck, AND the vocabulary
+by reading that small digest — so processing lecture 2 doesn't require lecture 1's full
+slide text still sitting in the conversation. A lean conversation is the difference between
+a ~2M-token sync and a ~9M-token sync on the student's meter.
+
+For each new lecture file (up to the batch cap), from its digest produce:
 
 **A structured lecture note** at `<Course>/<Lecture name>.md`:
 - `# <Lecture name>` + one-line "what this lecture is really about".

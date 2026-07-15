@@ -48,12 +48,24 @@ course header automatically. If none exists, ask the student once and save it to
      memory, or the course the student specified. Always include this line.
    - Then one card per line: `front<TAB>back` — a real TAB character between front and back.
    - No other headers, no numbering, no blank fronts/backs.
+   - **Cloze (fill-in-the-blank) cards** — put `{{c1::the hidden term}}` markers INSIDE the
+     front; the back stays a short source/why note (still two TAB fields). Multiple markers
+     on one line become multiple cards that schedule independently, so one line can test a
+     whole set: `The {{c1::renal}} system clears {{c2::hydrophilic}} drugs<TAB>Basic pharmacokinetics.`
+     Optional hint: `{{c1::term::hint shown in the blank}}`. This is the cheapest high-value
+     card type — several tested facts from one written line — so prefer it for lists and
+     paired terms. (Malformed markers just show as text; keep the `{{cN::…}}` shape exact.)
 3. 8–20 cards is the sweet spot. Application-level questions (mechanisms, adverse
    effects, interactions, monitoring, "patient on X develops Y — why?"), one concept per
-   card, no "what is X" filler.
+   card, no "what is X" filler. Card-quality rules: **one fact per card** (back ≤ 1
+   sentence, never join two facts with "and"/"vs"); use a **cloze** for any enumeration or
+   list instead of stuffing a semicolon-separated answer into one back; for the highest-
+   yield numbers/thresholds, make BOTH a Q/A card (recognition) and a cloze card (exact recall).
 4. GROUNDING RULE: every card must come from the conversation, note, or sources actually
    discussed or retrieved. Never pad a deck with facts you didn't ground — a wrong card
-   is worse than a missing card.
+   is worse than a missing card. **Plain text only** — the Study page shows card text as-is,
+   so no HTML tags and no LaTeX/MathJax (they render as literal `<b>`/`\frac{}` garbage);
+   write equations in Unicode (`Cₛ`, `≤`, `→`).
 5. Don't overwrite an existing deck file; check with `test -f ~/Documents/Nemesis\ Library/Flashcards/<Name>.tsv` first; if it exists, append ` 2` to the file name.
 6. **Verify the TSV** immediately after writing. Run:
    ```sh
@@ -72,6 +84,26 @@ course header automatically. If none exists, ask the student once and save it to
    Fix any cards with more or fewer than 2 TAB-delimited fields before telling the student.
 7. After writing and verifying, tell the student: the deck will appear in the Study page automatically
    (they may need to open or revisit Study), under the course you set.
+
+## Generate cost-smart (read the source ONCE, build from a digest)
+
+Making cards from a document is where cost runs away if you re-read the source for every
+step. Do it once:
+
+1. **Extract text once, never page-images.** Pull a PDF/slide's TEXT (the file already has a
+   text layer — read it as text). Do NOT send rendered page images to yourself to "read" a
+   deck — that costs 15–30× more per page and repeats every step. OCR (local) is only for a
+   scanned page with no text layer.
+2. **Write a short digest first**, then build from it. Stage the lecture's atomic
+   concepts + key terms + numbers-with-source into `.nemesis/scratch/<lecture>-digest.md`,
+   then generate the cards (and any note or practice test) by reading that small digest —
+   not by re-reading the whole PDF for each artifact. A structured digest also makes cards
+   more accurate, not just cheaper.
+3. **Generate in one batch.** Write all the cards for one lecture/topic in a single pass
+   (≤ ~15 per batch), not one card per step.
+4. **Quick self-check before you show the student (the QA pass):** does every number and
+   claim on a card actually appear in the digest? Drop or fix any that don't — this is the
+   cheap guard against a confident-but-wrong card.
 
 ## Example
 

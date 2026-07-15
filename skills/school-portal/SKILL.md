@@ -19,11 +19,13 @@ throughout this skill, but the student's LMS may be Canvas, Brightspace, Moodle,
 Schoology; read their actual addresses from `portals.json` (below) and apply the closest
 pattern here.
 
-**Fast extraction:** once authenticated on a list page (course tiles, announcements,
-inbox), prefer ONE `browser_console` call that returns the whole list via
-`Runtime.evaluate` (e.g. `[...document.querySelectorAll('article h4')].map(e => e.innerText)`)
-over a click → snapshot → click loop. Fall back to click+snapshot only to open one
-specific item.
+**Fast extraction (the #1 cost rule here):** prefer ONE `browser_console` call that returns
+structured data via `Runtime.evaluate` over a click → snapshot → click loop — and do this
+**not just on list pages but INSIDE each page too.** On a course's Content page, one eval
+returns every item as `{title, type, dueDate, href}`; on an assignment page, one eval
+returns the prompt + rubric + attachment links. A screenshot/snapshot re-read of a page is
+the expensive path (it sits in context and is re-read every later step); the console eval
+returns compact text once. Reserve click+snapshot for actually opening/downloading one item.
 
 ## Hard rules (non-negotiable)
 
@@ -37,6 +39,11 @@ specific item.
    into the chat.
 4. **Read-only bias.** Navigation, reading, and downloading course materials the student
    already has access to are fine. Anything that writes to the portal is not.
+5. **Budget the job (don't run away).** A portal sweep should be tens of steps, not
+   hundreds. If a task is ballooning past ~25 browser steps without finishing, STOP and
+   tell the student what you've got so far and what's left, rather than looping — a runaway
+   browser loop is the single most expensive thing this skill can do. Extract in bulk
+   (above) so you rarely get near the limit.
 
 ## Portal addresses: read them from portals.json
 
@@ -85,6 +92,13 @@ Settings → Connections page is hidden — chat is the only door for portal set
 > See `references/blackboard-ultra.md` for Blackboard Ultra navigation patterns.
 
 ## Outlook web flow
+
+**Cost discipline (email is the #1 context burner — follow nemesis-email's rules here too):**
+read the inbox list as METADATA first (subject, sender, date) via one bulk extraction;
+classify from metadata; open the BODY of only the ~10 messages that look action/deadline-
+relevant, one at a time; the moment a body yields its dates/actions, write them out and
+summarize the email in one line — never keep raw bodies in the conversation (a sweep that
+kept bodies once cost ~6M tokens). Only sweep mail newer than the last sync marker.
 
 1. Navigate to the mail URL from memory (student logs in themselves). If the initial
    browser_snapshot returns an "(empty page)", do NOT assume the session is dead —
