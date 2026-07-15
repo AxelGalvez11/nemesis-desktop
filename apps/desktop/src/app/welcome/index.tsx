@@ -1,12 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { ConnectionsSettings } from '@/app/settings/connections-settings'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { cn } from '@/lib/utils'
 
-import { TODAY_ROUTE } from '../routes'
+import { NEW_CHAT_ROUTE } from '../routes'
 
 import { completeOnboarding } from './onboarding'
 
@@ -59,13 +58,27 @@ function SweepCard({ icon, onClick, text, title }: { icon: string; onClick: () =
   )
 }
 
+function ConnectStep({ icon, text, title }: { icon: string; text: string; title: string }) {
+  return (
+    <div className="flex items-start gap-3.5 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4">
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-(--theme-primary)/10 text-(--theme-primary)">
+        <Codicon name={icon} size="0.875rem" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold tracking-[-0.01em] text-(--ui-text-primary)">{title}</span>
+        <span className="mt-0.5 block text-xs leading-relaxed text-(--ui-text-tertiary)">{text}</span>
+      </span>
+    </div>
+  )
+}
+
 export function WelcomeView({ onStartSweep }: WelcomeViewProps) {
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
 
   const finish = () => {
     completeOnboarding()
-    navigate(TODAY_ROUTE, { replace: true })
+    navigate(NEW_CHAT_ROUTE, { replace: true })
   }
 
   const startSweep = (prompt: string) => {
@@ -111,11 +124,28 @@ export function WelcomeView({ onStartSweep }: WelcomeViewProps) {
               <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-(--theme-primary)">Connect</p>
               <h1 className="mt-2 text-2xl font-semibold tracking-[-0.03em]">Bring your school within reach.</h1>
               <p className="mt-2 max-w-2xl text-sm leading-relaxed text-(--ui-text-secondary)">
-                Sign in on the real site, in Nemesis&apos;s own browser. Your logins stay on this Mac.
+                No forms here — you set this up by talking to Nemesis. Your logins stay on this Mac.
               </p>
             </div>
-            <div className="-mx-6 mt-2 sm:-mx-6">
-              <ConnectionsSettings />
+            {/* 2026-07-14: onboarding stopped embedding the Connections settings page (it
+                confused testers). The agent owns portal setup now: the student names their
+                school sites in chat and Nemesis writes portals.json (school-portal skill). */}
+            <div className="mt-8 grid max-w-2xl gap-3">
+              <ConnectStep
+                icon="comment"
+                text="Paste your school’s course site and webmail — “my school uses canvas.myschool.edu and outlook.com”."
+                title="Tell Nemesis in chat"
+              />
+              <ConnectStep
+                icon="globe"
+                text="Nemesis opens the real site in its own browser panel. Type your password there — never in chat."
+                title="Sign in once, in its browser"
+              />
+              <ConnectStep
+                icon="pass"
+                text="Your addresses are saved on this Mac, so every future sweep knows where your school lives."
+                title="It remembers"
+              />
             </div>
             <div className="mt-auto flex justify-end pt-4">
               <Button onClick={() => setStep(2)} size="lg">
@@ -180,10 +210,10 @@ export function WelcomeView({ onStartSweep }: WelcomeViewProps) {
             </p>
             <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">Nemesis is watching your semester now.</h1>
             <p className="mt-4 max-w-xl text-sm leading-relaxed text-(--ui-text-secondary)">
-              Your Today view stays quiet until there is something worth your attention.
+              Ask anything in chat — Nemesis keeps watch and speaks up when something needs you.
             </p>
             <Button className="mt-9" onClick={finish} size="lg">
-              Go to Today
+              Start
             </Button>
           </section>
         )}

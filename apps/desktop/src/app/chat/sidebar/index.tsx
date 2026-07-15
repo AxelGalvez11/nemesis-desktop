@@ -1283,12 +1283,14 @@ export function ChatSidebar({
                     <div className="flex shrink-0 items-center gap-0.5">
                       {!showAllProfiles ? (
                         <Button
-                          aria-label={agentsGrouped ? s.projects.newButton : s.nav['new-session']}
+                          aria-label={!NEMESIS_STUDENT_BUILD && agentsGrouped ? s.projects.newButton : s.nav['new-session']}
                           className={HEADER_ACTION_BTN}
                           onClick={event => {
                             event.stopPropagation()
 
-                            if (agentsGrouped) {
+                            // Student build: the grouped flag can persist from beta.5 —
+                            // "+" must never open project-create there.
+                            if (!NEMESIS_STUDENT_BUILD && agentsGrouped) {
                               openProjectCreate()
                             } else {
                               onNewSessionInWorkspace(null)
@@ -1428,7 +1430,12 @@ export function ChatSidebar({
           </div>
         )}
 
-        {contentVisible && !showSessionSections && <SidebarBlankState onNewProject={openProjectCreate} />}
+        {contentVisible && !showSessionSections && (
+          <SidebarBlankState
+            label={NEMESIS_STUDENT_BUILD ? s.nav['new-session'] : undefined}
+            onNewProject={NEMESIS_STUDENT_BUILD ? () => onNewSessionInWorkspace(null) : openProjectCreate}
+          />
+        )}
 
         {contentVisible && !NEMESIS_STUDENT_BUILD && (
           <div className="shrink-0 px-0.5 pb-1 pt-0.5">
@@ -1439,7 +1446,7 @@ export function ChatSidebar({
       {contentVisible && NEMESIS_STUDENT_BUILD && (
         <StudentSidebarFooter onOpenSettings={() => onNavigate(SETTINGS_NAV_ITEM)} />
       )}
-      <ProjectDialog />
+      {!NEMESIS_STUDENT_BUILD && <ProjectDialog />}
     </Sidebar>
   )
 }

@@ -179,12 +179,12 @@ export function RecorderView() {
   }
 
   if (recording === 'recording') {
+    // xl previously locked overflow to hidden for app-like fixed panes, but the
+    // breakpoints see zoom-scaled pixels: at 125-150% UI scale a window can sit
+    // in the xl column layout while the panels no longer fit vertically, and
+    // hidden overflow made them overlap with no way to scroll (tester report
+    // 2026-07-14). overflow-y-auto is visually identical when content fits.
     return (
-      {/* xl previously locked overflow to hidden for app-like fixed panes, but the
-          breakpoints see zoom-scaled pixels: at 125-150% UI scale a window can sit
-          in the xl column layout while the panels no longer fit vertically, and
-          hidden overflow made them overlap with no way to scroll (tester report
-          2026-07-14). overflow-y-auto is visually identical when content fits. */}
       <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-(--ui-editor-surface-background) px-4 pb-5 pt-4 sm:px-5">
         <header className="mb-4 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-4 py-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
           <span aria-hidden="true" className="relative flex size-3 shrink-0">

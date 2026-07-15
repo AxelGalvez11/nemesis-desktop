@@ -20,7 +20,7 @@ export function SidebarSessionSkeletons() {
   )
 }
 
-export function SidebarBlankState({ onNewProject }: { onNewProject: () => void }) {
+export function SidebarBlankState({ label, onNewProject }: { label?: string; onNewProject: () => void }) {
   const { t } = useI18n()
   const s = t.sidebar
 
@@ -31,7 +31,7 @@ export function SidebarBlankState({ onNewProject }: { onNewProject: () => void }
         <p className="text-xs text-(--ui-text-tertiary)">{s.noSessions}</p>
         <Button className="mt-0.5 text-(--ui-text-secondary)" onClick={onNewProject} size="sm" variant="ghost">
           <Codicon name="add" size="0.75rem" />
-          {s.projects.newButton}
+          {label ?? s.projects.newButton}
         </Button>
       </div>
     </div>

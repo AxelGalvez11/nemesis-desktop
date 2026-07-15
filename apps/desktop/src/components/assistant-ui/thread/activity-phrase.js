@@ -90,6 +90,30 @@ function searchSource(toolName) {
     }
     return '';
 }
+/** Ordered [pattern, phrase] pairs — first match names the shell command's purpose.
+ *  Patterns test the lowercased command line; keep them specific enough that a
+ *  mismatch falls through to the generic line rather than mislabeling. */
+const TERMINAL_ACTIVITIES = [
+    [/osascript[\s\S]*?\bmail\b/, 'Reading your inbox…'],
+    [/osascript[\s\S]*?\bcalendar\b/, 'Checking your calendar…'],
+    [/pubmed|eutils|ncbi/, 'Searching PubMed…'],
+    [/clinicaltrials/, 'Searching ClinicalTrials.gov…'],
+    [/openfda|fda\.gov/, 'Checking openFDA…'],
+    [/pptx|marp|pandoc|reveal/, 'Building your slides…'],
+    [/\.apkg|anki/, 'Working on your flashcards…'],
+    [/pdftotext|pdfinfo|\bocr\b/, 'Reading a PDF…'],
+    [/ffmpeg|sherpa|whisper/, 'Processing audio…'],
+    [/pip3? install|npm install|brew install/, 'Setting up tools…']
+];
+function terminalPhrase(args) {
+    const command = firstString(args, ['command', 'cmd', 'script', 'code']).toLowerCase();
+    for (const [pattern, phrase] of TERMINAL_ACTIVITIES) {
+        if (pattern.test(command)) {
+            return phrase;
+        }
+    }
+    return 'Running a command…';
+}
 function browserPhrase(args) {
     const target = firstString(args, ['url', 'target']);
     const host = target ? hostnameOnly(target) : '';
@@ -157,9 +181,10 @@ export function phraseForActivity(event) {
     if (FILE_EDIT_TOOLS.has(toolName)) {
         return fileEditPhrase(args);
     }
-    // Never echo the raw command — a shell line is noise (or worse) to a student.
+    // Never echo the raw command — a shell line is noise (or worse) to a student —
+    // but DO classify it into a named activity when the command's purpose is clear.
     if (TERMINAL_TOOLS.has(toolName)) {
-        return 'Running a command…';
+        return terminalPhrase(args);
     }
     if (toolName === 'browser' || toolName.startsWith('browser_')) {
         return browserPhrase(args);
