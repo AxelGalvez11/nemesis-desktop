@@ -2265,6 +2265,38 @@ BROWSER_TOOL_SCHEMAS = [
             "required": []
         }
     },
+    {
+        "name": "browser_recipe_list",
+        "description": "List saved browser recipes — deterministic, replayable data-extraction workflows you can run with ZERO model calls. Check this BEFORE a repeat browser sweep (e.g. syncing a school portal): if a recipe already exists, browser_recipe_run replays it for free instead of clicking through the pages again.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+        "name": "browser_recipe_run",
+        "description": "Replay a saved browser recipe deterministically — navigates and re-runs its extraction scripts with NO model calls, returning the extracted data keyed by step. The student must already be logged into the site (replay rides their live session). If the result has 'stale': true, the page changed — do a normal discovery sweep and browser_recipe_save the fresh steps to repair it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The recipe name (or slug) from browser_recipe_list."}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "browser_recipe_save",
+        "description": "Save the navigate + JS-extraction steps that JUST worked as a reusable recipe, so future runs replay them free (no model calls). Record the browser_console extraction scripts you used, NOT clicks. Only save a workflow you just verified returns the right data. Store no secrets — recipes hold URLs and selectors, never cookies or passwords (replay reuses the student's own logged-in session).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "A stable name for this workflow, e.g. 'blackboard-course-sweep'."},
+                "steps": {
+                    "type": "array",
+                    "description": "Ordered steps. Each is either {\"kind\":\"navigate\",\"url\":\"https://...\"} or {\"kind\":\"eval\",\"expression\":\"<JS that returns data>\",\"as\":\"<result key>\",\"expect_nonempty\":true}. The eval expression is the same JS you'd pass to browser_console.",
+                    "items": {"type": "object"}
+                }
+            },
+            "required": ["name", "steps"]
+        }
+    },
 ]
 
 
@@ -5032,6 +5064,11 @@ if __name__ == "__main__":
 # Registry
 # ---------------------------------------------------------------------------
 from tools.registry import registry, tool_error
+from tools.browser_recipe import (
+    save_recipe as _recipe_save,
+    list_recipes as _recipe_list,
+    run_recipe as _recipe_run,
+)
 
 _BROWSER_SCHEMA_MAP = {s["name"]: s for s in BROWSER_TOOL_SCHEMAS}
 
@@ -5116,4 +5153,28 @@ registry.register(
     handler=lambda args, **kw: browser_console(clear=args.get("clear", False), expression=args.get("expression"), task_id=kw.get("task_id")),
     check_fn=check_browser_requirements,
     emoji="🖥️",
+)
+# Record-replay recipes (tools/browser_recipe.py): list/save are plain file ops (no
+# browser needed); run replays navigate+eval steps and so requires a live browser.
+registry.register(
+    name="browser_recipe_list",
+    toolset="browser",
+    schema=_BROWSER_SCHEMA_MAP["browser_recipe_list"],
+    handler=lambda args, **kw: _recipe_list(),
+    emoji="📼",
+)
+registry.register(
+    name="browser_recipe_run",
+    toolset="browser",
+    schema=_BROWSER_SCHEMA_MAP["browser_recipe_run"],
+    handler=lambda args, **kw: _recipe_run(args.get("name", ""), task_id=kw.get("task_id")),
+    check_fn=check_browser_requirements,
+    emoji="▶️",
+)
+registry.register(
+    name="browser_recipe_save",
+    toolset="browser",
+    schema=_BROWSER_SCHEMA_MAP["browser_recipe_save"],
+    handler=lambda args, **kw: _recipe_save(args.get("name", ""), args.get("steps", [])),
+    emoji="💾",
 )

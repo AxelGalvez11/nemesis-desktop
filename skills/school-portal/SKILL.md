@@ -27,6 +27,12 @@ returns the prompt + rubric + attachment links. A screenshot/snapshot re-read of
 the expensive path (it sits in context and is re-read every later step); the console eval
 returns compact text once. Reserve click+snapshot for actually opening/downloading one item.
 
+**Save what works so it runs free next time.** For a workflow you'll repeat (a portal
+sweep), once your `browser_console` extraction scripts return the right data, save them with
+`browser_recipe_save` (navigate + eval steps). Future runs `browser_recipe_run` them with
+zero model calls; if the page later changes the run returns `"stale": true` and you just
+re-discover and re-save. See nemesis-school-sync for the recipe-first sweep flow.
+
 ## Hard rules (non-negotiable)
 
 1. **Never submit anything.** Do not click Submit, Send, Post, Reply, or any button that

@@ -80,6 +80,18 @@ Navigate to the URLs from `portals.json` (above), per the school-portal skill's 
   see nemesis-email "Which door"); drop to webmail only for attachment downloads or
   when the account isn't in Mail.app.
 
+**Replay a saved recipe first — it's free (no model calls).** Before you sweep a portal,
+run `browser_recipe_list`; if a recipe for this portal's extraction already exists (you
+saved it on a past sync), `browser_recipe_run` it — it re-navigates and re-runs the saved
+`browser_console` scripts and hands back the course/announcement data directly, with the
+student already logged in. Only do the full discovery sweep below when there's NO recipe, or
+the run comes back `"stale": true` (the page changed). After a successful discovery sweep,
+`browser_recipe_save` the exact navigate + `browser_console` extraction steps that worked
+(name it per portal, e.g. `blackboard-course-sweep`) so the NEXT sync replays for free
+instead of thinking through the pages again. This is the biggest cost saver in the whole
+pipeline: the model maps the workflow once, then it runs itself. (Recipes store only URLs +
+selectors — never logins; replay rides the student's own session.)
+
 **Extract in bulk, don't click row-by-row.** Once you're authenticated on a portal page,
 the FAST path is `browser_console` / `browser_cdp` running one `Runtime.evaluate` that
 returns the whole list at once — every course tile, the full announcements table, all
