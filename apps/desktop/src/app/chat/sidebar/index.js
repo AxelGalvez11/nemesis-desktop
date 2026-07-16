@@ -24,7 +24,7 @@ import { $dismissedAutoProjectIds, $panesFlipped, $pinnedSessionIds, $sidebarAge
 import { $newChatProfile, $profiles, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile';
 import { $activeProjectId, $projects, $projectScope, $projectTree, $projectTreeLoading, $removedSessionIds, $reposScanning, ALL_PROJECTS, enterProject, exitProjectScope, fetchProjectSessions, openProjectCreate, refreshProjects, refreshProjectTree, refreshWorktrees, scanAndRecordRepos } from '@/store/projects';
 import { $cronSessions, $currentCwd, $gatewayState, $messagingPlatformTotals, $messagingSessions, $messagingTruncated, $selectedStoredSessionId, $sessionProfileTotals, $sessions, $sessionsLoading, $sessionsTotal, $workingSessionIds, sessionPinId, setCurrentCwd } from '@/store/session';
-import { ARTIFACTS_ROUTE, CALENDAR_ROUTE, GRAPH_ROUTE, LIBRARY_ROUTE, MESSAGING_ROUTE, RECORDER_ROUTE, SETTINGS_ROUTE, SKILLS_ROUTE, STUDY_ROUTE, TODAY_ROUTE } from '../../routes';
+import { ARTIFACTS_ROUTE, CALENDAR_ROUTE, GRAPH_ROUTE, LIBRARY_ROUTE, MESSAGING_ROUTE, SETTINGS_ROUTE, SKILLS_ROUTE, STUDY_ROUTE, TODAY_ROUTE } from '../../routes';
 import { countLabel } from './chrome';
 import { SidebarCronJobsSection } from './cron-jobs-section';
 import { SidebarLoadMoreRow } from './load-more-row';
@@ -59,7 +59,6 @@ const SIDEBAR_NAV_ALL = [
     { id: 'study', label: 'Study', icon: props => _jsx(Codicon, { name: "mortar-board", ...props }), route: STUDY_ROUTE },
     { id: 'library', label: 'Library', icon: props => _jsx(Codicon, { name: "book", ...props }), route: LIBRARY_ROUTE },
     { id: 'graph', label: 'Graph', icon: props => _jsx(Codicon, { name: "type-hierarchy-sub", ...props }), route: GRAPH_ROUTE },
-    { id: 'recorder', label: 'Recorder', icon: props => _jsx(Codicon, { name: "record", ...props }), route: RECORDER_ROUTE },
     { id: 'calendar', label: 'Calendar', icon: props => _jsx(Codicon, { name: "calendar", ...props }), route: CALENDAR_ROUTE }
 ];
 const SIDEBAR_NAV = SIDEBAR_NAV_ALL.filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_NAV.has(item.id));

@@ -158,7 +158,6 @@ const SkillsView = lazy(async () => ({ default: (await import('./skills')).Skill
 const StudyView = lazy(async () => ({ default: (await import('./study')).StudyView }))
 const LibraryView = lazy(async () => ({ default: (await import('./library')).LibraryView }))
 const GraphView = lazy(async () => ({ default: (await import('./graph')).GraphView }))
-const RecorderView = lazy(async () => ({ default: (await import('./recorder')).RecorderView }))
 const CalendarView = lazy(async () => ({ default: (await import('./calendar')).CalendarView }))
 const TodayView = lazy(async () => ({ default: (await import('./today')).TodayView }))
 const LedgerView = lazy(async () => ({ default: (await import('./ledger')).LedgerView }))
@@ -1506,14 +1505,6 @@ export function DesktopController() {
               </Suspense>
             }
             path="graph"
-          />
-          <Route
-            element={
-              <Suspense fallback={null}>
-                <RecorderView />
-              </Suspense>
-            }
-            path="recorder"
           />
           <Route
             element={

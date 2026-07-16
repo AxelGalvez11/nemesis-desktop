@@ -1,6 +1,6 @@
 ---
 name: nemesis-organize
-description: Organize the student's Nemesis workspace — notes, folders, flashcard decks, and lecture recordings. Move, rename, group, tidy, and clean up files in the Library so Study/Library/Recorder stay orderly. Use when the student says "organize/clean up/tidy/sort/rename/group/file my notes/decks/folders/recordings/library".
+description: Organize the student's Nemesis workspace — notes, folders, flashcard decks, and lecture recordings. Move, rename, group, tidy, and clean up files in the Library so Study and Library stay orderly. Use when the student says "organize/clean up/tidy/sort/rename/group/file my notes/decks/folders/recordings/library".
 version: 1.3.0
 metadata:
   hermes:
@@ -10,7 +10,7 @@ metadata:
 # Organize the Nemesis workspace
 
 The whole workspace is plain files on the student's Mac. The app reads these folders live,
-so your changes show up in the Library, Study, and Recorder pages.
+so your changes show up in the Library and Study pages.
 
 **How you touch files (tool choice determines speed):** prefer your built-in file tools
 (read_file, write_file, search_files, patch) for single-file operations — they run
@@ -53,7 +53,7 @@ or file their notes, folders, flashcard decks, or recordings.
    `~/.Trash`-style holding folder) over `rm` so nothing is unrecoverable. Never `rm -rf`.
 3. **Keep pairs together.** When you move or rename a recording, move/rename its companion
    `Lectures/` note too, and keep the `*Audio: <file>*` marker line pointing at the right
-   filename — otherwise the Recorder page can't match them.
+   filename — otherwise the recording can't be matched back to its note.
 4. **Don't rewrite content while organizing.** Organizing = moving/renaming/grouping files.
    Do not edit the inside of a note or a card as a side effect of tidying.
 5. **Quote paths** — these folders have spaces (`Nemesis Library`). Always quote or escape.
@@ -224,6 +224,6 @@ touch the Library, not only when asked.
 
 ## After organizing
 
-Tell the student to glance at the Library / Study / Recorder page — it refreshes when the
+Tell the student to glance at the Library / Study page — it refreshes when the
 window regains focus, so their reorganized workspace shows up right away. If something looks
 off, you can still see the true state by listing the folders again.
