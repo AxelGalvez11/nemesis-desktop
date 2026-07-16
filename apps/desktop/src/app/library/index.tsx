@@ -72,6 +72,9 @@ function countWords(value: string): number {
 }
 
 const SIDEBAR_KEY = 'nemesis.library.sidebar.v1'
+// Which folders the student has expanded. Empty = all collapsed (the tidy default —
+// the Library used to open with every folder expanded). Persisted so it's remembered.
+const EXPANDED_KEY = 'nemesis.library.expanded.v1'
 
 /** Browser-style visit history over opened notes/files. Pure: visit/step in,
  *  new state out — unit-testable without React. */
@@ -151,7 +154,14 @@ export function LibraryView() {
   // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
   const [tabs, setTabs] = useState<TabItem[]>([])
   const [activeTab, setActiveTab] = useState(0)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem(EXPANDED_KEY)
+      return raw ? new Set<string>(JSON.parse(raw) as string[]) : new Set<string>()
+    } catch {
+      return new Set<string>()
+    }
+  })
   const [creating, setCreating] = useState<null | 'folder' | 'note'>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -831,16 +841,22 @@ export function LibraryView() {
             <SearchResults hits={searchHits} onSelect={note => openSelection({ kind: 'note', note })} />
           ) : (
             <TreeLevel
-              collapsed={collapsed}
+              expanded={expanded}
               depth={0}
               node={tree}
               onRequestDelete={setDeleteTarget}
               onRequestRename={setRenameTarget}
               onSelect={next => next && openSelection(next)}
               onToggle={path =>
-                setCollapsed(current => {
+                setExpanded(current => {
                   const next = new Set(current)
                   next.has(path) ? next.delete(path) : next.add(path)
+
+                  try {
+                    window.localStorage.setItem(EXPANDED_KEY, JSON.stringify([...next]))
+                  } catch {
+                    // persistence is best-effort
+                  }
 
                   return next
                 })
@@ -1103,7 +1119,7 @@ function SearchResults({ hits, onSelect }: { hits: SearchHit[]; onSelect: (note:
 }
 
 function TreeLevel({
-  collapsed,
+  expanded,
   depth,
   node,
   onRequestDelete,
@@ -1112,7 +1128,7 @@ function TreeLevel({
   onToggle,
   selection
 }: {
-  collapsed: Set<string>
+  expanded: Set<string>
   depth: number
   node: TreeNode
   /** Right-click "Delete" on a note or folder row (sidebar tree only — files aren't
@@ -1129,7 +1145,7 @@ function TreeLevel({
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(folder => {
-          const isCollapsed = collapsed.has(folder.path)
+          const isCollapsed = !expanded.has(folder.path)
           const folderTarget: FsTarget = { kind: 'folder', name: folder.name, path: folder.path }
 
           return (
@@ -1169,7 +1185,7 @@ function TreeLevel({
               </ContextMenu>
               {!isCollapsed && (
                 <TreeLevel
-                  collapsed={collapsed}
+                  expanded={expanded}
                   depth={depth + 1}
                   node={folder}
                   onRequestDelete={onRequestDelete}
