@@ -113,7 +113,7 @@ Collect everything into one worklist before producing anything.
 **Read each lecture ONCE, then build every artifact from a digest — not from re-reading.**
 For each new lecture file: extract its TEXT (never render the pages as images — that costs
 15–30× more per page), and stage the atomic concepts + key terms + numbers-with-slide into
-`.nemesis/scratch/<lecture>-digest.md`. Then produce the note, the deck, AND the vocabulary
+`.nemesis/scratch/<lecture>-digest.md`. Then produce the note and the vocabulary
 by reading that small digest — so processing lecture 2 doesn't require lecture 1's full
 slide text still sitting in the conversation. A lean conversation is the difference between
 a ~2M-token sync and a ~9M-token sync on the student's meter.
@@ -132,11 +132,15 @@ For each new lecture file (up to the batch cap), from its digest produce:
   pearls" for health sciences).
 - `[[wikilinks]]` to related existing notes (check what exists first; link, don't duplicate).
 
-**A flashcard deck** per nemesis-study-decks (`Flashcards/<Course> — <Lecture name>.tsv`,
-`# course: <Course>` on line 1): 8–15 exam-quality cards — application-level (mechanisms,
-adverse effects, interactions, monitoring, dosing decisions), one concept per card, no
-"what is X" filler. If a deck for this lecture already exists, ADD only genuinely new
-cards.
+**Concepts into the graph** (per nemesis-graph): record the lecture's key concepts as
+`concept` objects, linked (`covers`) to the lecture and to the exam whose weeks include
+this topic. This is what lets the study planner know what an upcoming exam actually covers.
+
+**Do NOT auto-build a flashcard deck for every lecture.** Study material is need-driven now
+(Phase 5): the planner builds the RIGHT tool — cards, a practice quiz, or worked problems —
+for the topics on the *next* exam, not eagerly for every lecture that lands. The note above
+is the durable record; the study set is built when it's needed. (The student can of course
+still say "make me flashcards / a quiz for this lecture" anytime → nemesis-study-decks.)
 
 **Vocabulary**: append new terms the lecture introduced to `Vocabulary.md` (one line
 each, per nemesis-organize).
@@ -149,8 +153,17 @@ each, per nemesis-organize).
 - **Home.md**: refresh "This week" and "Recent lectures" (per nemesis-organize).
 - **Ledger**: one line per real action.
 - **Report to the student, plain and short**: what's new (per course), what you made
-  (notes/decks by name), what deadlines changed, what's queued, and anything that needs
+  (notes by name), what deadlines changed, what's queued, and anything that needs
   them (a login, an ambiguous course mapping). Lead with the single most urgent thing.
+
+## Phase 5 — Study plan (need-based, method-chosen)
+
+After the graph and calendar are current, run **nemesis-study-planner**: check for exams in
+the next ~10 days, and for the weakest, highest-stakes, soonest topics, build the RIGHT study
+tool for mastery — flashcards, a practice quiz, or worked problems — not a deck for every
+lecture. If nothing's coming up, say so ("Nothing due soon — no study sets needed yet; your
+next exam is the Pharmacology midterm in 3 weeks, I'll start its set next week") and stop.
+Fold the study plan into the report: which exam, your weak spots, what you built and why.
 
 ## When there's nothing new
 
