@@ -98,13 +98,21 @@ export function createMissionRunner(gateway: MissionGateway, options: MissionRun
           })
         )
 
-        unsubscribers.push(
-          gateway.on('message.complete', (event) => {
-            if (event.session_id !== sessionId) return
-            const finalText = coerceText(event.payload?.text) || coerceText(event.payload?.rendered)
-            settle({ ok: true, summary: finalText.slice(0, MAX_SUMMARY_LENGTH) })
-          })
-        )
+        const onComplete = (event: MissionGatewayEvent) => {
+          if (event.session_id !== sessionId) return
+          const finalText = coerceText(event.payload?.text) || coerceText(event.payload?.rendered)
+          settle({ ok: true, summary: finalText.slice(0, MAX_SUMMARY_LENGTH) })
+        }
+
+        unsubscribers.push(gateway.on('message.complete', onComplete))
+        // A session opened from the main process (no foreground renderer
+        // window) may route its completion as background.complete instead of
+        // message.complete — both are real GatewayEventName values in the
+        // renderer's protocol (apps/shared/src/json-rpc-gateway.ts) and this
+        // can't be verified without a live device smoke test, so listen for
+        // both rather than risk every mission timing out at completionTimeoutMs
+        // despite the agent actually finishing.
+        unsubscribers.push(gateway.on('background.complete', onComplete))
 
         unsubscribers.push(
           gateway.on('error', (event) => {

@@ -7269,6 +7269,20 @@ function writeCachedMissionDeviceId(id: string): void {
   }
 }
 
+// A cached device id is scoped to the user who registered it (devices'
+// unique key is user_id+kind+name, not just kind+name) — a different student
+// signing in on this same Mac must register their OWN row, or their
+// dispatcher would try to heartbeat/claim under a device id RLS hides from
+// them (their own heartbeat PATCHes would silently match zero rows, so their
+// phone would show "Mac offline" forever). Cleared on every sign-out.
+function clearCachedMissionDeviceId(): void {
+  try {
+    fs.rmSync(missionDeviceIdFile(), { force: true })
+  } catch (error) {
+    rememberLog(`[missions] could not clear this device's cached id: ${error?.message || error}`)
+  }
+}
+
 // Memoizes ensureDesktopDevice's own network round trip on top of its file
 // cache, since Task 2's dispatcher calls getDeviceId every 30s tick (claim +
 // heartbeat). Cleared on failure so a transient error doesn't wedge retries.
@@ -7331,6 +7345,10 @@ ipcMain.handle('nemesis:missions:sync-session', async (_event, payload) => {
     missionDispatcher.start(MISSION_POLL_INTERVAL_MS)
   } else {
     missionDispatcher.stop()
+    // Forget this device identity too — see clearCachedMissionDeviceId's
+    // comment. The next signed-in student re-registers their own row.
+    missionDeviceIdPromise = null
+    clearCachedMissionDeviceId()
   }
 
   return { ok: true }

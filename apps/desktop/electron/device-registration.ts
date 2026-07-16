@@ -24,6 +24,14 @@ export type DeviceRegistrationDeps = {
 
 type UpsertedDevice = { id: string }
 
+// RLS + the `not null` user_id column both require it on the insert; the
+// upsert's own on_conflict target (user_id,kind,name) needs it in the body
+// too, regardless of any default. Same one-liner as mission-dispatcher.ts's
+// userIdFromToken — decoding it here instead of threading it through as a
+// separate dep keeps this module's deps list matching the plan's shape.
+const userIdFromToken = (token: string): string =>
+  JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8')).sub
+
 /** This is Task 2's `getDeviceId`. */
 export async function ensureDesktopDevice(deps: DeviceRegistrationDeps): Promise<string> {
   const cached = deps.readCachedId()
@@ -44,6 +52,7 @@ export async function ensureDesktopDevice(deps: DeviceRegistrationDeps): Promise
       Prefer: 'return=representation,resolution=merge-duplicates'
     },
     body: JSON.stringify({
+      user_id: userIdFromToken(token),
       kind: 'desktop',
       name: deps.hostname(),
       last_seen_at: new Date().toISOString()

@@ -49,6 +49,11 @@ test('with no cached id, upserts a desktop devices row and caches the returned i
   assert.ok(upsert)
   assert.match(upsert!.url, /on_conflict=user_id,kind,name/)
   const body = JSON.parse(String(upsert!.init?.body))
+  // Load-bearing: devices.user_id is `not null` with no default, and it's
+  // also the upsert's own on_conflict target — omitting it 500s against real
+  // Postgres on every single call, which a body-agnostic fake response can't
+  // catch. Decoded from the same FAKE_JWT's `sub` used elsewhere in this repo.
+  assert.equal(body.user_id, 'user-1')
   assert.equal(body.kind, 'desktop')
   assert.equal(body.name, "Axel's MacBook Pro")
   const headers = upsert!.init?.headers as Record<string, string>

@@ -110,6 +110,32 @@ test('truncates the final summary to 500 characters', async () => {
   assert.equal(result.summary, long.slice(0, 500))
 })
 
+test('resolves from background.complete too — a headless session may route completion there instead of message.complete', async () => {
+  let backgroundCompleteHandler: ((event: any) => void) | undefined
+
+  const gateway: MissionGateway = {
+    connect: async () => {},
+    request: async <T = unknown>(method: string): Promise<T> => {
+      if (method === 'session.create') return { session_id: 's1' } as T
+      if (method === 'prompt.submit') {
+        queueMicrotask(() =>
+          backgroundCompleteHandler?.({ type: 'background.complete', session_id: 's1', payload: { text: 'done in the background' } })
+        )
+      }
+      return {} as T
+    },
+    on: (type, handler) => {
+      if (type === 'background.complete') backgroundCompleteHandler = handler
+      return () => {}
+    },
+    close: () => {}
+  }
+
+  const result = await createMissionRunner(gateway)('p', () => {})
+  assert.equal(result.ok, true)
+  assert.equal(result.summary, 'done in the background')
+})
+
 test('a mid-turn error event resolves { ok: false } instead of throwing', async () => {
   let errorHandler: ((event: any) => void) | undefined
 
