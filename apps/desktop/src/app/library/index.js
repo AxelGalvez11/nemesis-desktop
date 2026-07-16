@@ -14,8 +14,10 @@ import { Input } from '@/components/ui/input';
 import { SearchField } from '@/components/ui/search-field';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { setComposerDraft } from '@/store/composer';
-import { NEW_CHAT_ROUTE } from '../routes';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
+import { seedComposerDraft } from '@/store/composer';
+import { getRememberedSessionId } from '@/store/session';
+import { NEW_CHAT_ROUTE, sessionRoute } from '../routes';
 import { buildResolvableTitleSet, findLinkedNote, isWikilinkResolved, rewriteWikilinks } from './links';
 import { isPathWithin, remappedPath } from './nav-remap';
 import { NoteEditor } from './note-editor';
@@ -173,7 +175,11 @@ export function LibraryView() {
     const refresh = useCallback(async () => {
         try {
             let loaded = await loadVaultContents();
-            if (!loaded.notes.length && !loaded.files.length) {
+            // Student build: a fresh Library stays EMPTY — the agent fills it with the
+            // student's real material. Demo seeds read as mystery leftover notes on a
+            // fresh install (owner report, beta.14: "restarted fresh, still showed ACE
+            // inhibitors"). Dev builds keep the seeds so Library/Graph demo themselves.
+            if (!NEMESIS_STUDENT_BUILD && !loaded.notes.length && !loaded.files.length) {
                 for (const seed of SEED_NOTES) {
                     await saveNote(seed.title, seed.content);
                 }
@@ -339,16 +345,18 @@ export function LibraryView() {
     }, [activeTab, contents, tabs]);
     const activeNote = selection?.kind === 'note' ? selection.note : null;
     const navigate = useNavigate();
-    // Library's one line to the agent (same pattern as Study/Today): jump to chat,
-    // pre-filling the draft with whatever is open so the request lands anchored.
+    // Library's one line to the agent: land in the CURRENT conversation (owner
+    // call — no new session per click), pre-filling the composer with whatever
+    // is open so the request lands anchored.
     const askAgent = useCallback(() => {
+        const lastSession = getRememberedSessionId();
         if (selection?.kind === 'note') {
-            setComposerDraft(`About my note "${selection.note.title}": `);
+            seedComposerDraft(`About my note "${selection.note.title}": `, lastSession);
         }
         else if (selection?.kind === 'file') {
-            setComposerDraft(`About "${selection.file.name}" in my Library: `);
+            seedComposerDraft(`About "${selection.file.name}" in my Library: `, lastSession);
         }
-        navigate(NEW_CHAT_ROUTE);
+        navigate(lastSession ? sessionRoute(lastSession) : NEW_CHAT_ROUTE);
     }, [navigate, selection]);
     const scheduleSave = useCallback((note, content) => {
         setContents(current => current ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) } : current);

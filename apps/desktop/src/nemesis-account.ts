@@ -390,38 +390,88 @@ export async function adoptOAuthSession(refreshToken: string): Promise<void> {
   await applySession(session)
 }
 
-const OAUTH_STATE_KEY = 'nemesis.oauth.state'
+const OAUTH_STATE_KEY = 'nemesis.oauth.states.v2'
+const OAUTH_STATE_TTL_MS = 15 * 60_000
+const OAUTH_STATE_MAX = 5
 
-/** Browser URL that starts Google/Apple OAuth for the DESKTOP app: the account
- *  site finishes the provider flow, then hands the session back through the
- *  nemesis:// deep link. A one-shot random `state` rides the whole round trip so
- *  the deep-link handler only accepts sign-ins THIS app started (a malicious
- *  local page can't sign the student into an attacker's account). */
-export function desktopOAuthStartUrl(provider: 'apple' | 'google'): string {
-  const state = crypto.randomUUID()
+interface PendingOAuthState {
+  at: number
+  state: string
+}
 
+function loadPendingOAuthStates(): PendingOAuthState[] {
   try {
-    window.localStorage.setItem(OAUTH_STATE_KEY, state)
+    const raw = window.localStorage.getItem(OAUTH_STATE_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    const cutoff = Date.now() - OAUTH_STATE_TTL_MS
+
+    return parsed.filter(
+      (entry): entry is PendingOAuthState =>
+        Boolean(entry) &&
+        typeof (entry as PendingOAuthState).state === 'string' &&
+        typeof (entry as PendingOAuthState).at === 'number' &&
+        (entry as PendingOAuthState).at >= cutoff
+    )
+  } catch {
+    return []
+  }
+}
+
+function savePendingOAuthStates(states: PendingOAuthState[]): void {
+  try {
+    if (states.length === 0) {
+      window.localStorage.removeItem(OAUTH_STATE_KEY)
+    } else {
+      window.localStorage.setItem(OAUTH_STATE_KEY, JSON.stringify(states.slice(-OAUTH_STATE_MAX)))
+    }
   } catch {
     // Best-effort: without storage the state check below fails closed.
   }
+}
+
+/** Browser URL that starts Google/Apple OAuth for the DESKTOP app: the account
+ *  site finishes the provider flow, then hands the session back through the
+ *  nemesis:// deep link. A random `state` rides the whole round trip so the
+ *  deep-link handler only accepts sign-ins THIS app started (a malicious local
+ *  page can't sign the student into an attacker's account).
+ *
+ *  A small SET of recent states is kept (15-min TTL) instead of one slot: the
+ *  owner-reproduced beta.14 dead end was a second button click silently
+ *  overwriting the first tab's nonce, so whichever tab the student actually
+ *  finished in came back with a "stale" state and the dialog hung forever. */
+export function desktopOAuthStartUrl(provider: 'apple' | 'google'): string {
+  const state = crypto.randomUUID()
+
+  savePendingOAuthStates([...loadPendingOAuthStates(), { at: Date.now(), state }])
 
   return `${NEMESIS_ACCOUNT_SITE}/auth/desktop?provider=${provider}&state=${state}`
 }
 
-/** One-shot check that a returning OAuth deep link carries the state we issued.
- *  Consumes the stored value either way. */
+/** One-shot check that a returning OAuth deep link carries a state we issued
+ *  recently. On success ALL pending states are consumed (the round trip is
+ *  done); on failure the pending set is left for the genuine tab to finish. */
 export function consumeOAuthState(state: string | undefined): boolean {
-  let stored: null | string = null
-
-  try {
-    stored = window.localStorage.getItem(OAUTH_STATE_KEY)
-    window.localStorage.removeItem(OAUTH_STATE_KEY)
-  } catch {
+  if (!state) {
     return false
   }
 
-  return Boolean(state) && Boolean(stored) && state === stored
+  const pending = loadPendingOAuthStates()
+
+  if (!pending.some(entry => entry.state === state)) {
+    // Expired/foreign state: persist the TTL-pruned list so junk ages out.
+    savePendingOAuthStates(pending)
+
+    return false
+  }
+
+  savePendingOAuthStates([])
+
+  return true
 }
 
 export async function signOut(): Promise<void> {

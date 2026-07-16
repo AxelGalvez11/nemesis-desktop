@@ -24,7 +24,6 @@ import {
   accentSwatchHex,
   DEFAULT_ACCENT_ID,
   loadAccentSelection,
-  saveAccentCustomHue,
   saveAccentSwatch
 } from '@/themes/accent-tint'
 import { readableOn } from '@/themes/color'
@@ -251,10 +250,11 @@ function MarketplaceThemeResults({
   )
 }
 
-// Student build: the ONLY appearance control is the accent tint. A curated swatch row
-// plus one constrained custom-hue slider. Every color is contrast-checked at apply time
-// (accent-tint.ts), so the picker can't produce an unreadable UI, and semantic red/green
-// are never touched. Previews are shown in the currently-selected light/dark mode.
+// Student build: the ONLY appearance control is the accent tint — a curated swatch
+// row (the custom-hue slider was cut 2026-07-16, owner call: swatches only). Every
+// color is contrast-checked at apply time (accent-tint.ts), so the picker can't
+// produce an unreadable UI, and semantic red/green are never touched. A previously
+// saved custom hue keeps working until a swatch is tapped; it just has no slider UI.
 function AccentPicker() {
   const [selection, setSelection] = useState(() => loadAccentSelection())
 
@@ -264,10 +264,6 @@ function AccentPicker() {
 
     return () => window.removeEventListener(ACCENT_CHANGED_EVENT, sync)
   }, [])
-
-  const isCustom = selection.id === null
-  const customHue = isCustom ? selection.hue : 210
-  const customColor = accentSwatchHex(customHue)
 
   return (
     <div className="mt-3 flex flex-col gap-4">
@@ -302,33 +298,6 @@ function AccentPicker() {
             </button>
           )
         })}
-      </div>
-
-      <div className="flex items-center gap-3">
-        <span className="w-14 shrink-0 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
-          Custom
-        </span>
-        <input
-          aria-label="Custom accent hue"
-          className={cn(
-            'h-2 flex-1 cursor-pointer appearance-none rounded-full outline-none',
-            isCustom && 'ring-2 ring-(--theme-primary)/50'
-          )}
-          max={359}
-          min={0}
-          onChange={event => saveAccentCustomHue(Number(event.target.value))}
-          style={{
-            background:
-              'linear-gradient(to right, hsl(0 82% 50%), hsl(60 82% 50%), hsl(120 82% 50%), hsl(180 82% 50%), hsl(240 82% 50%), hsl(300 82% 50%), hsl(360 82% 50%))'
-          }}
-          type="range"
-          value={customHue}
-        />
-        <span
-          aria-hidden
-          className="size-7 shrink-0 rounded-full border border-(--ui-stroke-tertiary)"
-          style={{ backgroundColor: customColor, boxShadow: isCustom ? `0 0 0 2px ${customColor}` : undefined }}
-        />
       </div>
 
       <p className="text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">

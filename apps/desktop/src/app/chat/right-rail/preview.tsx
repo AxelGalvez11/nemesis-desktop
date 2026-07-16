@@ -221,7 +221,10 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
     >
       <div
         className={cn(
-          'relative z-10 flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) pr-3 [-webkit-app-region:no-drag]',
+          // pr-12 (not pr-3): the window-pinned sidebar-collapse toggle sits fixed in
+          // this same top-right band — the rail's own fullscreen/close buttons must
+          // stop short of it or the two clusters overlap (owner report, beta.14).
+          'relative z-10 flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) pr-12 [-webkit-app-region:no-drag]',
           fullscreen && IS_MACOS ? 'pl-[84px]' : 'pl-2'
         )}
         data-rail-chrome=""
