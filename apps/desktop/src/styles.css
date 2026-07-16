@@ -1947,3 +1947,34 @@ text-* variant utilities. */ .btn-arc {
   .nemesis-activity-phrase { animation: none; }
   .study-mindmap-host .map-container .map-canvas.mindmap-smooth-transform { transition: none; }
 }
+
+/* ── Sidebars stay strictly monochrome (owner call 2026-07-16) ──────────────
+   The theme derives surface fills, row/control states, and strokes by mixing
+   the ACCENT into neutrals at :root (3–24%), which washes the sidebars pink
+   when the accent is Crimson. Custom properties resolve where they are
+   DECLARED, so overriding --ui-accent alone would not reach the root-computed
+   derivations — each one is re-declared here so it re-derives inside the
+   sidebar scope with the accent neutralized. Formulas mirror :root exactly;
+   dark mode inherits the same formulas, so this covers both modes. The accent
+   keeps living everywhere else (chat, buttons, controls). */
+.bg-sidebar {
+  --ui-accent: var(--ui-base);
+  --ui-accent-secondary: var(--ui-base);
+  --ui-bg-card: color-mix(in srgb, var(--ui-accent) 4%, color-mix(in srgb, var(--ui-base) 4%, transparent));
+  --ui-bg-primary: color-mix(in srgb, var(--ui-accent) var(--theme-fill-primary-accent-mix), color-mix(in srgb, var(--ui-base) 10%, transparent));
+  --ui-bg-secondary: color-mix(in srgb, var(--ui-accent) var(--theme-fill-secondary-accent-mix), color-mix(in srgb, var(--ui-base) 7%, transparent));
+  --ui-bg-tertiary: color-mix(in srgb, var(--ui-accent) var(--theme-fill-tertiary-accent-mix), color-mix(in srgb, var(--ui-base) 5%, transparent));
+  --ui-bg-quaternary: color-mix(in srgb, var(--ui-accent) var(--theme-fill-quaternary-accent-mix), color-mix(in srgb, var(--ui-base) 4%, transparent));
+  --ui-bg-quinary: color-mix(in srgb, var(--ui-accent) var(--theme-fill-quinary-accent-mix), color-mix(in srgb, var(--ui-base) 3%, transparent));
+  --ui-row-hover-background: color-mix(in srgb, var(--ui-accent) var(--theme-row-hover-accent-mix), color-mix(in srgb, var(--ui-base) 3%, transparent));
+  --ui-row-active-background: color-mix(in srgb, var(--ui-accent) var(--theme-row-active-accent-mix), color-mix(in srgb, var(--ui-base) 5%, transparent));
+  --ui-control-hover-background: color-mix(in srgb, var(--ui-accent) var(--theme-control-hover-accent-mix), color-mix(in srgb, var(--ui-base) 4%, transparent));
+  --ui-control-active-background: color-mix(in srgb, var(--ui-accent) var(--theme-control-active-accent-mix), color-mix(in srgb, var(--ui-base) 5%, transparent));
+  --ui-stroke-primary: color-mix(in srgb, var(--ui-accent) var(--theme-stroke-primary-accent-mix), color-mix(in srgb, var(--ui-base) 10%, transparent));
+  --ui-stroke-secondary: color-mix(in srgb, var(--ui-accent) var(--theme-stroke-secondary-accent-mix), color-mix(in srgb, var(--ui-base) 7%, transparent));
+  --ui-stroke-tertiary: color-mix(in srgb, var(--ui-accent) var(--theme-stroke-tertiary-accent-mix), color-mix(in srgb, var(--ui-base) 5%, transparent));
+  --ui-stroke-quaternary: color-mix(in srgb, var(--ui-accent) var(--theme-stroke-quaternary-accent-mix), color-mix(in srgb, var(--ui-base) 3%, transparent));
+  --ui-sash-hover-border: color-mix(in srgb, var(--ui-accent) 18%, var(--ui-stroke-tertiary));
+  --sidebar-accent: var(--ui-control-active-background);
+  --chrome-action-hover: var(--ui-control-hover-background);
+}
