@@ -7,6 +7,7 @@ import { PANE_TOGGLE_REVEAL_EVENT } from '@/components/pane-shell'
 import { matchesQuery } from '@/hooks/use-media-query'
 import { PROFILE_SLOT_COUNT, SESSION_SLOT_COUNT } from '@/lib/keybinds/actions'
 import { comboAllowedInInput, comboFromEvent, isEditableTarget } from '@/lib/keybinds/combo'
+import { studentHidesKeybind } from '@/nemesis'
 import { $repoStatus } from '@/store/coding-status'
 import { toggleCommandPalette } from '@/store/command-palette'
 import { $capture, $comboIndex, endCapture, setBinding, toggleKeybindPanel } from '@/store/keybinds'
@@ -235,6 +236,13 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
       const actionId = $comboIndex.get().get(combo)
 
       if (!actionId) {
+        return
+      }
+
+      // Student build: chords for hidden/dev surfaces (terminal, review pane,
+      // command center, profile switching, hidden pages) fall through as if
+      // unbound — even if the user rebound them in the shortcuts panel.
+      if (studentHidesKeybind(actionId)) {
         return
       }
 

@@ -260,7 +260,9 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
     }
   ].filter(group => !NEMESIS_STUDENT_BUILD || STUDENT_SETTINGS_KEEP.has(group.id))
 
-  const navFooter = (
+  // Student build: raw JSON config export/import/reset is developer machinery —
+  // no footer at all (OverlayNav renders nothing for undefined).
+  const navFooter = NEMESIS_STUDENT_BUILD ? undefined : (
     <>
       <Tip label={t.settings.exportConfig}>
         <OverlayIconButton onClick={() => void exportConfig()}>

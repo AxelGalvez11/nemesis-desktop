@@ -194,7 +194,10 @@ export function AboutSettings() {
           />
         )}
 
-        <UninstallSection />
+        {/* Student build: the "Danger zone" uninstall flow talks about agents,
+            secrets, and log paths — testers who need a full cleanup ask the
+            owner (or drag the app to Trash); the section stays for dev builds. */}
+        {!NEMESIS_STUDENT_BUILD && <UninstallSection />}
       </div>
     </SettingsContent>
   )

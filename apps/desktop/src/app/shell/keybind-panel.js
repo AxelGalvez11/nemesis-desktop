@@ -10,6 +10,7 @@ import { useI18n } from '@/i18n';
 import { KEYBIND_ACTIONS, KEYBIND_CATEGORIES, KEYBIND_PANEL_ACTION, KEYBIND_READONLY } from '@/lib/keybinds/actions';
 import { formatCombo } from '@/lib/keybinds/combo';
 import { arraysEqual } from '@/lib/storage';
+import { studentHidesKeybind } from '@/nemesis';
 import { $bindings, $capture, $keybindPanelOpen, beginCapture, closeKeybindPanel, conflictsFor, endCapture, resetAllBindings, resetBinding } from '@/store/keybinds';
 // The full hotkey map. Quiet popover, click a row's chip to rebind.
 export function KeybindPanel() {
@@ -30,7 +31,10 @@ export function KeybindPanel() {
         return next;
     });
     return (_jsx(DialogPrimitive.Root, { onOpenChange: next => !next && closeKeybindPanel(), open: open, children: _jsxs(DialogPrimitive.Portal, { children: [_jsx(DialogPrimitive.Overlay, { className: "fixed inset-0 z-[200] bg-black/25 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0" }), _jsxs(DialogPrimitive.Content, { "aria-describedby": undefined, className: "fixed left-1/2 top-[9vh] z-[210] flex max-h-[82vh] w-[min(38rem,calc(100vw-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-(--stroke-nous) bg-(--ui-chat-bubble-background) shadow-nous duration-150 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95", children: [_jsxs("div", { className: "flex items-center justify-between gap-3 border-b border-(--ui-stroke-tertiary) px-4 py-3", children: [_jsxs("div", { className: "min-w-0", children: [_jsx(DialogPrimitive.Title, { className: "text-sm font-semibold text-foreground", children: k.title }), _jsx(DialogPrimitive.Description, { className: "mt-0.5 text-[0.72rem] text-muted-foreground", children: k.subtitle(openCombo ? formatCombo(openCombo) : '') })] }), _jsx(HeaderButton, { icon: "discard", label: k.resetAll, onClick: resetAllBindings })] }), _jsx("div", { className: "min-h-0 flex-1 overflow-y-auto px-2 py-1.5", children: KEYBIND_CATEGORIES.map(category => {
-                                const actions = KEYBIND_ACTIONS.filter(action => action.category === category && action.id !== KEYBIND_PANEL_ACTION);
+                                // Student build: shortcuts for hidden/dev surfaces are neither
+                                // dispatched (use-keybinds.ts) nor listed here — the row names
+                                // would otherwise advertise every hidden feature.
+                                const actions = KEYBIND_ACTIONS.filter(action => action.category === category && action.id !== KEYBIND_PANEL_ACTION && !studentHidesKeybind(action.id));
                                 const readonly = KEYBIND_READONLY.filter(shortcut => shortcut.category === category);
                                 if (actions.length === 0 && readonly.length === 0) {
                                     return null;

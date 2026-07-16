@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Codicon } from '@/components/ui/codicon';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { $statusItemsBySession, dismissBackgroundProcess, groupStatusItems, refreshBackgroundProcesses, stopBackgroundProcess } from '@/store/composer-status';
 import { $previewStatusBySession, dismissPreviewArtifact } from '@/store/preview-status';
 import { $threadScrolledUp } from '@/store/thread-scroll';
@@ -68,7 +69,14 @@ export function ComposerStatusStack({ queue, sessionId }) {
         return () => clearInterval(timer);
     }, [hasRunningBackground, sessionId]);
     const openAgents = () => navigate(AGENTS_ROUTE);
-    const openSubagent = (item) => item.sessionId ? void openSessionInNewWindow(item.sessionId, { watch: true }) : openAgents();
+    const openSubagent = (item) => {
+        if (item.sessionId) {
+            void openSessionInNewWindow(item.sessionId, { watch: true });
+        }
+        else if (!NEMESIS_STUDENT_BUILD) {
+            openAgents();
+        }
+    };
     // Preview links live as child rows of the background group — a localhost dev
     // server and its preview are the same thing — so they no longer float as an
     // odd, differently-indented standalone block under the stack.
@@ -81,7 +89,10 @@ export function ComposerStatusStack({ queue, sessionId }) {
     for (const group of groups) {
         sections.push({
             key: group.type,
-            node: (_jsx(StatusSection, { accessory: group.type === 'subagent' ? (_jsx(Button, { className: "text-muted-foreground/75 hover:text-foreground/90", onClick: openAgents, size: "micro", type: "button", variant: "text", children: t.statusStack.agents })) : undefined, defaultCollapsed: group.type !== 'todo', icon: _jsx(Codicon, { className: "text-muted-foreground/70", name: GROUP_ICON[group.type], size: "0.8rem" }), label: groupLabel(group, t.statusStack), children: group.items.map(item => (_jsx(StatusItemRow, { item: item, onDismiss: sessionId ? id => dismissBackgroundProcess(sessionId, id) : undefined, onOpen: () => openSubagent(item), onStop: sessionId ? id => void stopBackgroundProcess(sessionId, id) : undefined }, item.id))) }))
+            node: (_jsx(StatusSection, { accessory: 
+                // Student build: the Agents monitor page is a hidden dev surface —
+                // no jump link from the status stack (same call as CodingStatusRow).
+                group.type === 'subagent' && !NEMESIS_STUDENT_BUILD ? (_jsx(Button, { className: "text-muted-foreground/75 hover:text-foreground/90", onClick: openAgents, size: "micro", type: "button", variant: "text", children: t.statusStack.agents })) : undefined, defaultCollapsed: group.type !== 'todo', icon: _jsx(Codicon, { className: "text-muted-foreground/70", name: GROUP_ICON[group.type], size: "0.8rem" }), label: groupLabel(group, t.statusStack), children: group.items.map(item => (_jsx(StatusItemRow, { item: item, onDismiss: sessionId ? id => dismissBackgroundProcess(sessionId, id) : undefined, onOpen: () => openSubagent(item), onStop: sessionId ? id => void stopBackgroundProcess(sessionId, id) : undefined }, item.id))) }))
         });
         // Preview links belong to the background group (a localhost dev server and
         // its preview are the same thing), but they must stay VISIBLE even when that
