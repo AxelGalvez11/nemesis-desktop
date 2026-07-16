@@ -13,7 +13,7 @@ const file = (name: string, parent: string): FakeEntry => ({ isDirectory: false,
 
 // Fake vault. Root holds the three Study-owned folders (hidden from the Library),
 // a dot-folder (hidden), a real course folder, and loose files. The course folder
-// nests its own "Tests" — Study ownership is root-level only, so that one stays.
+// nests its own "Tests" — Study-owned names are hidden at ANY depth, so it hides too.
 const TREE: Record<string, FakeEntry[]> = {
   [VAULT_DIR]: [
     dir('Cardio Notes', VAULT_DIR),
@@ -47,10 +47,10 @@ beforeEach(() => {
 })
 
 describe('loadVaultContents', () => {
-  it('hides root-level Study folders (Flashcards, Mindmaps, Tests) and dot-folders', async () => {
+  it('hides Study folders (Flashcards, Mindmaps, Tests) and dot-folders', async () => {
     const contents = await loadVaultContents()
 
-    expect(contents.folders).toEqual(['Cardio Notes', 'Cardio Notes/Tests'])
+    expect(contents.folders).toEqual(['Cardio Notes'])
 
     const titles = contents.notes.map(n => n.title)
     expect(titles).not.toContain('sneaky')
@@ -61,14 +61,14 @@ describe('loadVaultContents', () => {
   it('keeps ordinary notes and previewable files, skipping unknown extensions', async () => {
     const contents = await loadVaultContents()
 
-    expect([...contents.notes.map(n => n.title)].sort()).toEqual(['HF', 'Syllabus', 'inner'].sort())
+    expect([...contents.notes.map(n => n.title)].sort()).toEqual(['HF', 'Syllabus'].sort())
     expect(contents.files).toEqual([{ folder: '', kind: 'image', name: 'anatomy.png', path: `${VAULT_DIR}/anatomy.png` }])
   })
 
-  it('keeps a course-level "Tests" subfolder — only root-level Study folders are owned', async () => {
+  it('hides Study-owned folder names at any depth, not just the vault root', async () => {
     const contents = await loadVaultContents()
 
-    expect(contents.folders).toContain('Cardio Notes/Tests')
-    expect(contents.notes.map(n => n.title)).toContain('inner')
+    expect(contents.folders).not.toContain('Cardio Notes/Tests')
+    expect(contents.notes.map(n => n.title)).not.toContain('inner')
   })
 })

@@ -118,9 +118,9 @@ function bridge() {
     return api;
 }
 const MAX_DEPTH = 5;
-/** Root-level folders owned by the Study page (agent-authored decks, mind-map outlines,
- *  practice tests). The Library hides them: their files render as rich Study surfaces,
- *  and surfacing the same markdown here again would show e.g. a mind map as a raw note. */
+/** Folders owned by the Study page (agent-authored decks, mind-map outlines, practice
+ *  tests), hidden at ANY depth — the Library is for notes and school files only, and
+ *  surfacing the same markdown here again would show e.g. a mind map as a raw note. */
 const STUDY_DIRS = new Set(['flashcards', 'mindmaps', 'tests']);
 async function walk(api, dirPath, rel, depth, out) {
     if (depth > MAX_DEPTH) {
@@ -133,7 +133,7 @@ async function walk(api, dirPath, rel, depth, out) {
     for (const entry of dir.entries) {
         const folderRel = rel ? `${rel}/${entry.name}` : entry.name;
         if (entry.isDirectory) {
-            if (entry.name.startsWith('.') || (rel === '' && STUDY_DIRS.has(entry.name.toLowerCase()))) {
+            if (entry.name.startsWith('.') || STUDY_DIRS.has(entry.name.toLowerCase())) {
                 continue;
             }
             out.folders.push(folderRel);
