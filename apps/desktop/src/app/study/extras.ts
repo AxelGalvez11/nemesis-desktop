@@ -7,6 +7,8 @@
 // degrade to "nothing to show" rather than an error — this is a purely additive feature
 // and Study already renders fine with zero mind maps/tests.
 
+import { mirrorTestAttempts } from './disk-state'
+
 export const MINDMAP_DIR = '~/Documents/Nemesis Library/Mindmaps'
 export const TEST_DIR = '~/Documents/Nemesis Library/Tests'
 
@@ -245,8 +247,17 @@ export function groupExtras(sections: string[], mindmaps: MindmapFile[], tests: 
 
 // --- Test attempts (localStorage persistence) ----------------------------------------
 
+/** One missed question inside an attempt: which question and what was picked
+ *  (both indices into the test file's arrays) — the agent turns repeat misses
+ *  into targeted flashcards. */
+export interface TestAttemptMiss {
+  q: number
+  selected: number
+}
+
 export interface TestAttempt {
   date: string
+  misses?: TestAttemptMiss[]
   score: number
   total: number
 }
@@ -312,6 +323,9 @@ export function saveTestAttempts(store: TestAttemptsStore): void {
   } catch {
     // Best-effort persistence — same as saveState in model.ts.
   }
+
+  // Agent-readable copy (and reinstall restore) — see disk-state.ts.
+  mirrorTestAttempts(store)
 }
 
 /** Append one attempt for a test file. Pure — returns a new store. */

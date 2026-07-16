@@ -78,15 +78,24 @@ export function TestSurface({
   }, [])
 
   // Persist the attempt exactly once, the moment the score screen first shows.
+  // Missed questions ride along (question + picked-option indices) so the agent
+  // can read the attempt file and build cards for exactly what was missed.
   useEffect(() => {
     if (!finished || recorded) {
       return
     }
 
     setRecorded(true)
-    saveTestAttempts(recordAttempt(loadTestAttempts(), file.fileName, { date: new Date().toISOString(), score, total }))
+
+    const misses = answers
+      .filter(answer => !answer.correct)
+      .map(answer => ({ q: answer.questionIndex, selected: answer.selected }))
+
+    saveTestAttempts(
+      recordAttempt(loadTestAttempts(), file.fileName, { date: new Date().toISOString(), misses, score, total })
+    )
     onComplete()
-  }, [file.fileName, finished, onComplete, recorded, score, total])
+  }, [answers, file.fileName, finished, onComplete, recorded, score, total])
 
   // Same muscle memory as the deck review surface: number keys answer, Enter advances,
   // Escape leaves — including from the score screen (the page chrome is hidden while

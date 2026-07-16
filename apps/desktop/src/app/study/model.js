@@ -6,6 +6,7 @@
 // the upgrade path is backend/vault storage once Nemesis accounts land.
 import { createEmptyCard, fsrs, Rating } from 'ts-fsrs';
 import { clozeIndexes, clozeScheduleKey } from './cloze';
+import { mirrorStudyState } from './disk-state';
 export const DEFAULT_STUDY_SETTINGS = {
     newPerDay: 20,
     reviewsPerDay: 0,
@@ -137,6 +138,8 @@ export function saveState(state) {
     catch {
         // quota/private-mode failures are non-fatal; the session keeps working in memory
     }
+    // Agent-readable copy (and reinstall restore) — see disk-state.ts.
+    mirrorStudyState(state);
 }
 // --- Study settings (daily caps, review order, flip, hints) ------------------
 /** Effective settings — always fully populated, even for old/partial blobs.

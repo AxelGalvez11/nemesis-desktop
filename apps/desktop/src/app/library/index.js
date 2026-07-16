@@ -3,9 +3,9 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 // Markdown, a prose-styled CodeMirror editor (middle, de-code-ified via .nemesis-prose-editor
 // CSS), and a collapsible Outline/Links rail (right). Non-markdown files (PDF/images inline;
 // slides/docs open externally) preview in place. Autosaves 800ms after typing.
-import { IconArrowLeft, IconArrowRight, IconChevronRight, IconFilePlus, IconFileText, IconFileTypePdf, IconFolder, IconFolderOpen, IconFolderPlus, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPaperclip, IconPencil, IconPhoto, IconPresentation, IconTrash, IconX } from '@tabler/icons-react';
+import { IconArrowLeft, IconArrowRight, IconChevronRight, IconFilePlus, IconFileText, IconFileTypePdf, IconFolder, IconFolderOpen, IconFolderPlus, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconPaperclip, IconPencil, IconPhoto, IconPresentation, IconSparkles, IconTrash, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -14,6 +14,8 @@ import { Input } from '@/components/ui/input';
 import { SearchField } from '@/components/ui/search-field';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { setComposerDraft } from '@/store/composer';
+import { NEW_CHAT_ROUTE } from '../routes';
 import { buildResolvableTitleSet, findLinkedNote, isWikilinkResolved, rewriteWikilinks } from './links';
 import { isPathWithin, remappedPath } from './nav-remap';
 import { NoteEditor } from './note-editor';
@@ -336,6 +338,18 @@ export function LibraryView() {
         return tab;
     }, [activeTab, contents, tabs]);
     const activeNote = selection?.kind === 'note' ? selection.note : null;
+    const navigate = useNavigate();
+    // Library's one line to the agent (same pattern as Study/Today): jump to chat,
+    // pre-filling the draft with whatever is open so the request lands anchored.
+    const askAgent = useCallback(() => {
+        if (selection?.kind === 'note') {
+            setComposerDraft(`About my note "${selection.note.title}": `);
+        }
+        else if (selection?.kind === 'file') {
+            setComposerDraft(`About "${selection.file.name}" in my Library: `);
+        }
+        navigate(NEW_CHAT_ROUTE);
+    }, [navigate, selection]);
     const scheduleSave = useCallback((note, content) => {
         setContents(current => current ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) } : current);
         if (saveTimer.current) {
@@ -568,7 +582,7 @@ export function LibraryView() {
                                     }, role: "tab", children: [i === activeTab && _jsx("span", { "aria-hidden": true, className: "absolute inset-x-0 top-0 h-px bg-(--theme-primary)" }), _jsxs("span", { className: "flex min-w-0 items-center gap-1.5 py-2 pl-3 pr-8", children: [tab.kind === 'note' ? (_jsx(IconFileText, { className: "shrink-0 opacity-60", size: 13 })) : (_jsx(FileGlyph, { kind: tab.file.kind })), _jsx("span", { className: "truncate", children: tabLabel(tab) })] }), _jsx("button", { "aria-label": "Close tab", className: "absolute right-1.5 grid size-5 place-items-center rounded opacity-0 transition-[opacity,color] duration-200 ease-out hover:bg-(--chrome-action-hover) group-hover/tab:opacity-100 group-focus-within/tab:opacity-100", onClick: event => {
                                                 event.stopPropagation();
                                                 closeTab(i);
-                                            }, type: "button", children: _jsx(IconX, { size: 11 }) })] }, tabKey(tab)))) })] })), selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "shrink-0 border-b border-(--ui-stroke-quaternary) px-7 pb-4 pt-6", children: _jsxs("div", { className: "flex items-end justify-between gap-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [_jsx("span", { children: "Library" }), selection.note.folder
+                                            }, type: "button", children: _jsx(IconX, { size: 11 }) })] }, tabKey(tab)))) }), _jsx("div", { className: "flex shrink-0 items-center border-l border-(--ui-stroke-quaternary) px-1.5", children: _jsx(Tip, { label: activeNote ? `Ask the agent about “${activeNote.title}”` : 'Ask the agent', children: _jsx(Button, { "aria-label": "Ask the agent", onClick: askAgent, size: "icon-xs", variant: "ghost", children: _jsx(IconSparkles, {}) }) }) })] })), selection?.kind === 'note' ? (_jsxs(_Fragment, { children: [_jsx("div", { className: "shrink-0 border-b border-(--ui-stroke-quaternary) px-7 pb-4 pt-6", children: _jsxs("div", { className: "flex items-end justify-between gap-6", children: [_jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "mb-2 flex min-w-0 items-center gap-1.5 text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)", children: [_jsx("span", { children: "Library" }), selection.note.folder
                                                             .split('/')
                                                             .filter(Boolean)
                                                             .map((part, index) => (_jsxs("span", { className: "contents", children: [_jsx(IconChevronRight, { className: "shrink-0 opacity-50", size: 11 }), _jsx("span", { className: "truncate", children: part })] }, `${part}-${index}`)))] }), _jsx("h2", { className: "truncate text-2xl font-semibold tracking-[-0.025em]", children: selection.note.title })] }), _jsxs("div", { className: "flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)", children: [_jsxs("span", { className: "tabular-nums", children: [countWords(selection.note.content), " words"] }), saving && _jsx("span", { className: "text-(--ui-text-quaternary)", children: "Saving\u2026" }), _jsx(Tip, { label: "Rename note", children: _jsx(Button, { "aria-label": "Rename note", onClick: () => setRenameTarget({ kind: 'note', note: selection.note }), size: "icon-xs", variant: "ghost", children: _jsx(IconPencil, {}) }) }), _jsx(Tip, { label: "Delete note", children: _jsx(Button, { "aria-label": "Delete note", onClick: () => setDeleteTarget({ kind: 'note', note: selection.note }), size: "icon-xs", variant: "ghost", children: _jsx(IconTrash, {}) }) })] })] }) }), _jsx("div", { className: "min-h-0 flex-1 overflow-hidden px-7 pb-3", children: _jsx(NoteEditor, { imageContext: { files: imageFiles, noteFolder: selection.note.folder, vaultDir: VAULT_DIR }, initialValue: selection.note.content, isResolved: target => isWikilinkResolved(target, resolvable), notes: contents.notes, onChange: value => scheduleSave(selection.note, value), onOpenWikilink: target => void openWikilink(target), ref: noteEditorRef }, selection.note.path) })] })) : selection?.kind === 'file' ? (_jsx(FilePreview, { file: selection.file })) : (_jsx("div", { className: "grid flex-1 place-items-center text-center", children: _jsxs("div", { className: "flex flex-col items-center gap-3", children: [_jsxs("div", { children: [_jsx("div", { className: "text-sm font-medium", children: "No note open" }), _jsx("div", { className: "mt-1 text-xs text-muted-foreground", children: "Pick a note on the left, or start a fresh one." })] }), _jsxs(Button, { onClick: () => startCreating('note'), size: "sm", variant: "secondary", children: [_jsx(IconFilePlus, { size: 15 }), "New note"] })] }) }))] }), activeNote && index && (_jsx(NoteRail, { activeNote: activeNote, index: index, notes: contents.notes, onCreateUnresolved: target => void openWikilink(target), onOpenNote: note => openInPlace({ kind: 'note', note }), onSelectHeading: handleSelectHeading })), _jsx(RenameDialog, { initialValue: renameTarget ? (renameTarget.kind === 'note' ? renameTarget.note.title : renameTarget.name) : '', label: renameTarget?.kind === 'folder' ? 'folder' : 'note', onClose: () => setRenameTarget(null), onSubmit: submitRename, open: Boolean(renameTarget) }), _jsx(ConfirmDialog, { busyLabel: "Moving to Trash\u2026", confirmLabel: "Move to Trash", description: deleteTarget

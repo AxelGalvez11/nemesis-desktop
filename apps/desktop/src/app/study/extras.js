@@ -6,6 +6,7 @@
 // A missing folder, missing desktop bridge, or a single unreadable/malformed file all
 // degrade to "nothing to show" rather than an error — this is a purely additive feature
 // and Study already renders fine with zero mind maps/tests.
+import { mirrorTestAttempts } from './disk-state';
 export const MINDMAP_DIR = '~/Documents/Nemesis Library/Mindmaps';
 export const TEST_DIR = '~/Documents/Nemesis Library/Tests';
 const MINDMAP_COURSE_COMMENT = /^\s*<!--\s*course:\s*(.+?)\s*-->\s*\n?/i;
@@ -206,6 +207,8 @@ export function saveTestAttempts(store) {
     catch {
         // Best-effort persistence — same as saveState in model.ts.
     }
+    // Agent-readable copy (and reinstall restore) — see disk-state.ts.
+    mirrorTestAttempts(store);
 }
 /** Append one attempt for a test file. Pure — returns a new store. */
 export function recordAttempt(store, fileName, attempt) {
