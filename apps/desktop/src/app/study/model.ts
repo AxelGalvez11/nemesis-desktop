@@ -8,6 +8,7 @@ import { createEmptyCard, fsrs, type Card as FsrsCard, type Grade, Rating } from
 
 import { clozeIndexes, clozeScheduleKey } from './cloze'
 import type { DeckFileCandidate } from './deck-files'
+import { mirrorStudyState } from './disk-state'
 
 export interface StudyCard {
   id: string
@@ -238,6 +239,9 @@ export function saveState(state: StudyState): void {
   } catch {
     // quota/private-mode failures are non-fatal; the session keeps working in memory
   }
+
+  // Agent-readable copy (and reinstall restore) — see disk-state.ts.
+  mirrorStudyState(state)
 }
 
 // --- Study settings (daily caps, review order, flip, hints) ------------------

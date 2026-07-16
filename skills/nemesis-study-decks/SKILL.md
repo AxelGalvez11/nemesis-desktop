@@ -145,3 +145,30 @@ When the student asks for a test, quiz, or practice exam on a topic or section:
    double-check the `answer` index before writing.
 4. Validate the JSON after writing (`python3 -c "import json;json.load(open('<path>'))"`).
 5. Don't overwrite an existing file; check first.
+
+## Student performance (READ-ONLY — build for weakness, not in bulk)
+
+The Study app mirrors the student's real performance to disk. READ these to decide WHAT
+to build; NEVER write or delete them — the app owns both files, and your copy would be
+clobbered by its next save anyway. Both are `{ "version": 1, "updatedAt": ..., "data": ... }`
+envelopes; everything below is inside `data`.
+
+1. `~/Documents/Nemesis Library/.study/state.json` — flashcard mastery.
+   - `decks[]`: every deck (`name`, `course`, `cards[]` with `id`/`front`/`back`/`tags`).
+   - `schedule{}`: cardId → FSRS entry. Weakness signals: high `lapses`, low `stability`,
+     `due` in the past. A card with `lapses ≥ 3` (leech territory) needs a DIFFERENT card —
+     reformulate the concept (new angle, cloze, scenario), don't duplicate it.
+   - `reviews[]`: append-only review log (grade per review) — recent `again` streaks show
+     what's actively failing this week.
+2. `~/Documents/Nemesis Library/.study/test-attempts.json` — quiz/test performance.
+   - Keyed by test file name: `attempts[]` of `{ date, score, total, misses[] }`.
+   - `misses[]` = `{ q, selected }`, 0-based indices into that test file's `questions` —
+     join against the JSON in `Tests/` to see exactly which question was missed and which
+     wrong option the student picked. A question missed on ≥2 attempts is a flashcard
+     candidate; the picked distractor tells you the specific confusion to target.
+
+When asked to "build cards for my weak spots" (or the Study page sends that request):
+read both files first, name the 3–8 weakest concepts in one line each, then build ONE
+tight deck (or extend the right existing deck file) for those — grounded in the original
+material, never invented from the schedule data alone. Files may be absent on a fresh
+install: fall back to asking what felt hard.

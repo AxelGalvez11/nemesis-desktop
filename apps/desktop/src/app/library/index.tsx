@@ -18,11 +18,12 @@ import {
   IconPencil,
   IconPhoto,
   IconPresentation,
+  IconSparkles,
   IconTrash,
   IconX
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -32,7 +33,9 @@ import { Input } from '@/components/ui/input'
 import { SearchField } from '@/components/ui/search-field'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { setComposerDraft } from '@/store/composer'
 
+import { NEW_CHAT_ROUTE } from '../routes'
 import { buildResolvableTitleSet, findLinkedNote, isWikilinkResolved, rewriteWikilinks } from './links'
 import { isPathWithin, remappedPath } from './nav-remap'
 import { NoteEditor, type NoteEditorHandle } from './note-editor'
@@ -475,6 +478,20 @@ export function LibraryView() {
   }, [activeTab, contents, tabs])
 
   const activeNote = selection?.kind === 'note' ? selection.note : null
+
+  const navigate = useNavigate()
+
+  // Library's one line to the agent (same pattern as Study/Today): jump to chat,
+  // pre-filling the draft with whatever is open so the request lands anchored.
+  const askAgent = useCallback(() => {
+    if (selection?.kind === 'note') {
+      setComposerDraft(`About my note "${selection.note.title}": `)
+    } else if (selection?.kind === 'file') {
+      setComposerDraft(`About "${selection.file.name}" in my Library: `)
+    }
+
+    navigate(NEW_CHAT_ROUTE)
+  }, [navigate, selection])
 
   const scheduleSave = useCallback((note: VaultNote, content: string) => {
     setContents(current =>
@@ -946,6 +963,13 @@ export function LibraryView() {
                 </button>
               </div>
             ))}
+            </div>
+            <div className="flex shrink-0 items-center border-l border-(--ui-stroke-quaternary) px-1.5">
+              <Tip label={activeNote ? `Ask the agent about “${activeNote.title}”` : 'Ask the agent'}>
+                <Button aria-label="Ask the agent" onClick={askAgent} size="icon-xs" variant="ghost">
+                  <IconSparkles />
+                </Button>
+              </Tip>
             </div>
           </div>
         )}

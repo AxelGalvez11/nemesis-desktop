@@ -56,11 +56,13 @@ import { NEW_CHAT_ROUTE } from '../routes'
 
 import { hasClozeMarker, renderClozeAnswer, renderClozePrompt } from './cloze'
 import { DECK_DIR, importedDeckFileNames, scanAllDeckFiles } from './deck-files'
+import { readDiskStudyState, readDiskTestAttempts } from './disk-state'
 import {
   bestAttempt,
   groupExtras,
   lastAttempt,
   loadTestAttempts,
+  saveTestAttempts,
   type MindmapFile,
   scanMindmapFiles,
   scanTestFiles,
@@ -316,9 +318,40 @@ export function StudyView() {
   useEffect(() => {
     let cancelled = false
     let lastRun = 0
+    let restoreChecked = false
 
     const reconcile = async () => {
       lastRun = Date.now()
+
+      // One-shot on mount: a fresh install starts with empty localStorage, but the
+      // vault's .study/ mirror may hold review history from a previous install —
+      // adopt it BEFORE the first deck-file scan so FSRS schedules survive.
+      if (!restoreChecked) {
+        restoreChecked = true
+
+        const [diskState, diskAttempts] = await Promise.all([readDiskStudyState(), readDiskTestAttempts()])
+
+        if (cancelled) {
+          return
+        }
+
+        const local = loadState()
+
+        if (
+          diskState &&
+          local.decks.length === 0 &&
+          local.reviews.length === 0 &&
+          Object.keys(local.schedule).length === 0
+        ) {
+          saveState(diskState)
+          setState(diskState)
+        }
+
+        if (diskAttempts && Object.keys(diskAttempts).length > 0 && Object.keys(loadTestAttempts()).length === 0) {
+          saveTestAttempts(diskAttempts)
+          setTestAttempts(diskAttempts)
+        }
+      }
 
       const [candidates, mindmapFiles, testFiles] = await Promise.all([
         scanAllDeckFiles(),
