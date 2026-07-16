@@ -32,6 +32,9 @@ function countWords(value) {
     return value.trim().match(/\S+/g)?.length ?? 0;
 }
 const SIDEBAR_KEY = 'nemesis.library.sidebar.v1';
+// Folder-tree expansion, persisted. Folders start COLLAPSED (empty set) so a big vault
+// opens tidy; only folders the student explicitly opened stay open across sessions.
+const EXPANDED_KEY = 'nemesis.library.expanded.v1';
 export function recordNavVisit(current, next) {
     const atCursor = current.pos >= 0 ? current.stack[current.pos] : undefined;
     if (atCursor && tabKey(atCursor) === tabKey(next)) {
@@ -83,7 +86,15 @@ export function LibraryView() {
     // Obsidian-style tabs: every opened note/file gets (or refocuses) a tab.
     const [tabs, setTabs] = useState([]);
     const [activeTab, setActiveTab] = useState(0);
-    const [collapsed, setCollapsed] = useState(new Set());
+    const [expanded, setExpanded] = useState(() => {
+        try {
+            const raw = window.localStorage.getItem(EXPANDED_KEY);
+            return new Set(raw ? JSON.parse(raw) : []);
+        }
+        catch {
+            return new Set();
+        }
+    });
     const [creating, setCreating] = useState(null);
     const [draft, setDraft] = useState('');
     const [saving, setSaving] = useState(false);
@@ -539,9 +550,15 @@ export function LibraryView() {
                                     if (event.key === 'Escape') {
                                         setCreating(null);
                                     }
-                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("div", { className: "px-3 pb-2", children: _jsx(SearchField, { "aria-label": "Search notes", containerClassName: "w-full rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2 opacity-100", inputClassName: "w-full", onChange: onSearchChange, onClear: clearSearch, placeholder: "Search notes\u2026", value: searchInput }) }), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: isSearching ? (_jsx(SearchResults, { hits: searchHits, onSelect: note => openSelection({ kind: 'note', note }) })) : (_jsx(TreeLevel, { collapsed: collapsed, depth: 0, node: tree, onRequestDelete: setDeleteTarget, onRequestRename: setRenameTarget, onSelect: next => next && openSelection(next), onToggle: path => setCollapsed(current => {
+                                }, placeholder: creating === 'folder' ? 'Folder name' : 'Note title', value: draft }), targetFolder && _jsxs("p", { className: "px-1 pt-1.5 text-[10px] text-muted-foreground", children: ["in ", targetFolder] })] })), _jsx("div", { className: "px-3 pb-2", children: _jsx(SearchField, { "aria-label": "Search notes", containerClassName: "w-full rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2 opacity-100", inputClassName: "w-full", onChange: onSearchChange, onClear: clearSearch, placeholder: "Search notes\u2026", value: searchInput }) }), _jsx("nav", { className: "min-h-0 flex-1 overflow-y-auto px-2.5 pb-4", children: isSearching ? (_jsx(SearchResults, { hits: searchHits, onSelect: note => openSelection({ kind: 'note', note }) })) : (_jsx(TreeLevel, { depth: 0, expanded: expanded, node: tree, onRequestDelete: setDeleteTarget, onRequestRename: setRenameTarget, onSelect: next => next && openSelection(next), onToggle: path => setExpanded(current => {
                                 const next = new Set(current);
                                 next.has(path) ? next.delete(path) : next.add(path);
+                                try {
+                                    window.localStorage.setItem(EXPANDED_KEY, JSON.stringify([...next]));
+                                }
+                                catch {
+                                    // persistence is best-effort
+                                }
                                 return next;
                             }), selection: selection })) })] })), _jsxs("main", { className: "flex min-w-0 flex-1 flex-col bg-(--ui-bg-editor)", children: [(tabs.length > 0 || !sidebarOpen) && (_jsxs("div", { className: "relative z-10 flex h-(--titlebar-height) shrink-0 items-stretch border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) [-webkit-app-region:no-drag]", children: [_jsxs("div", { className: "flex shrink-0 items-center gap-0.5 border-r border-(--ui-stroke-quaternary) px-1.5", children: [!sidebarOpen && (_jsx(Tip, { label: "Show file list", children: _jsx(Button, { "aria-label": "Show file list", onClick: () => setSidebar(true), size: "icon-xs", variant: "ghost", children: _jsx(IconLayoutSidebarLeftExpand, {}) }) })), _jsx(Tip, { label: "Back (\u2318[)", children: _jsx(Button, { "aria-label": "Back", disabled: nav.pos <= 0, onClick: () => goHistory(-1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowLeft, {}) }) }), _jsx(Tip, { label: "Forward (\u2318])", children: _jsx(Button, { "aria-label": "Forward", disabled: nav.pos >= nav.stack.length - 1, onClick: () => goHistory(1), size: "icon-xs", variant: "ghost", children: _jsx(IconArrowRight, {}) }) })] }), _jsx("div", { className: "flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: tabs.map((tab, i) => (_jsxs("div", { className: cn('group/tab relative flex h-full min-w-0 max-w-48 shrink-0 cursor-pointer items-center border-r border-(--ui-stroke-quaternary) text-[0.6875rem] font-medium transition-colors duration-200 ease-out', i === activeTab
                                         ? 'bg-(--ui-bg-editor) text-foreground'
@@ -580,14 +597,14 @@ function SearchResults({ hits, onSelect }) {
     }
     return (_jsx("div", { className: "space-y-0.5", children: hits.map(hit => (_jsxs("button", { className: "flex w-full flex-col items-start gap-0.5 rounded-lg px-2 py-1.5 text-left transition-[transform,color,background-color] duration-200 ease-out hover:bg-(--ui-row-hover-background) active:scale-[0.98]", onClick: () => onSelect(hit.note), type: "button", children: [_jsxs("span", { className: "flex w-full min-w-0 items-center gap-2 text-[0.8125rem] text-(--ui-text-secondary)", children: [_jsx(IconFileText, { className: "shrink-0 opacity-55", size: 14 }), _jsx("span", { className: "truncate font-medium", children: hit.note.title }), hit.note.folder && _jsx("span", { className: "shrink-0 truncate text-[0.65rem] text-(--ui-text-quaternary)", children: hit.note.folder })] }), hit.snippet && (_jsx("span", { className: "w-full truncate pl-[1.375rem] text-[0.6875rem] text-(--ui-text-tertiary)", children: hit.snippet }))] }, hit.note.path))) }));
 }
-function TreeLevel({ collapsed, depth, node, onRequestDelete, onRequestRename, onSelect, onToggle, selection }) {
+function TreeLevel({ depth, expanded, node, onRequestDelete, onRequestRename, onSelect, onToggle, selection }) {
     return (_jsxs("div", { className: cn('space-y-0.5', depth > 0 && 'ml-3 border-l border-(--ui-stroke-quaternary) pl-1.5'), children: [node.folders
                 .slice()
                 .sort((a, b) => a.name.localeCompare(b.name))
                 .map(folder => {
-                const isCollapsed = collapsed.has(folder.path);
+                const isCollapsed = !expanded.has(folder.path);
                 const folderTarget = { kind: 'folder', name: folder.name, path: folder.path };
-                return (_jsxs("div", { className: "pb-0.5", children: [_jsxs(ContextMenu, { children: [_jsx(ContextMenuTrigger, { asChild: true, children: _jsxs("button", { className: "group/folder flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[0.68rem] font-semibold uppercase tracking-[0.075em] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]", onClick: () => onToggle(folder.path), type: "button", children: [_jsx(IconChevronRight, { className: cn('shrink-0 transition-transform duration-200 ease-out', !isCollapsed && 'rotate-90'), size: 12 }), isCollapsed ? (_jsx(IconFolder, { className: "shrink-0 text-(--ui-text-tertiary) group-hover/folder:text-(--theme-primary)", size: 14 })) : (_jsx(IconFolderOpen, { className: "shrink-0 text-(--theme-primary)", size: 14 })), _jsx("span", { className: "truncate", children: folder.name })] }) }), _jsxs(ContextMenuContent, { children: [_jsxs(ContextMenuItem, { onSelect: () => onRequestRename(folderTarget), children: [_jsx(IconPencil, {}), "Rename"] }), _jsxs(ContextMenuItem, { onSelect: () => onRequestDelete(folderTarget), variant: "destructive", children: [_jsx(IconTrash, {}), "Delete"] })] })] }), !isCollapsed && (_jsx(TreeLevel, { collapsed: collapsed, depth: depth + 1, node: folder, onRequestDelete: onRequestDelete, onRequestRename: onRequestRename, onSelect: onSelect, onToggle: onToggle, selection: selection }))] }, folder.path));
+                return (_jsxs("div", { className: "pb-0.5", children: [_jsxs(ContextMenu, { children: [_jsx(ContextMenuTrigger, { asChild: true, children: _jsxs("button", { className: "group/folder flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[0.68rem] font-semibold uppercase tracking-[0.075em] text-(--ui-text-secondary) transition-[transform,color,background-color] duration-200 ease-out hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]", onClick: () => onToggle(folder.path), type: "button", children: [_jsx(IconChevronRight, { className: cn('shrink-0 transition-transform duration-200 ease-out', !isCollapsed && 'rotate-90'), size: 12 }), isCollapsed ? (_jsx(IconFolder, { className: "shrink-0 text-(--ui-text-tertiary) group-hover/folder:text-(--theme-primary)", size: 14 })) : (_jsx(IconFolderOpen, { className: "shrink-0 text-(--theme-primary)", size: 14 })), _jsx("span", { className: "truncate", children: folder.name })] }) }), _jsxs(ContextMenuContent, { children: [_jsxs(ContextMenuItem, { onSelect: () => onRequestRename(folderTarget), children: [_jsx(IconPencil, {}), "Rename"] }), _jsxs(ContextMenuItem, { onSelect: () => onRequestDelete(folderTarget), variant: "destructive", children: [_jsx(IconTrash, {}), "Delete"] })] })] }), !isCollapsed && (_jsx(TreeLevel, { depth: depth + 1, expanded: expanded, node: folder, onRequestDelete: onRequestDelete, onRequestRename: onRequestRename, onSelect: onSelect, onToggle: onToggle, selection: selection }))] }, folder.path));
             }), node.notes
                 .slice()
                 .sort((a, b) => a.title.localeCompare(b.title))
