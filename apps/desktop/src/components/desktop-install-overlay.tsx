@@ -500,6 +500,10 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
             </ol>
           )}
 
+          {/* Student build: no raw installer log on the happy path — the step list
+              above narrates progress. On failure the details return, because a
+              tester's screenshot of those lines is how the owner debugs. */}
+          {(!NEMESIS_STUDENT_BUILD || failed) && (
           <div className="pt-3">
             <Button
               className="-ml-2 text-muted-foreground hover:text-foreground"
@@ -531,6 +535,7 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
               </LogView>
             )}
           </div>
+          )}
         </div>
 
         {/* Active footer: let the user actually cancel a running install. */}

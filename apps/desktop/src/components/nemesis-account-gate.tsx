@@ -152,7 +152,9 @@ export const NemesisAccountGate: FC = () => {
                 }}
                 variant="secondary"
               >
-                Continue with {provider === 'google' ? 'Google' : 'Apple'}
+                {oauthStarted === provider
+                  ? 'Browser opened — finish there, or click to reopen'
+                  : `Continue with ${provider === 'google' ? 'Google' : 'Apple'}`}
               </Button>
             ))}
             {oauthStarted && (

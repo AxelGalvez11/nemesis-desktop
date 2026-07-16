@@ -103,6 +103,14 @@ export function setComposerDraft(value: string) {
   $composerDraft.set(value)
 }
 
+/** Seed the composer for a chat you're about to navigate to (scope = session id,
+ *  null = the new-chat composer). Pages like Study/Library/Today pre-fill a task
+ *  this way. Uses the same stash the composer restores on mount/session-swap —
+ *  the `$composerDraft` atom alone has no reader, so writes to it never appear. */
+export function seedComposerDraft(value: string, scope: string | null = null) {
+  stashSessionDraft(scope, value, [])
+}
+
 export function appendComposerDraft(value: string) {
   const text = value.trim()
 

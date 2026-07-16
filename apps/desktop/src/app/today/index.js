@@ -6,7 +6,7 @@ import { Codicon } from '@/components/ui/codicon';
 import { courseTitle, dueSoon, emptyGraph, eventsOnDay, loadAcademicGraph, recentChanges, scoreNextAction } from '@/lib/academic-graph';
 import { ensurePortalsMirrored, PORTALS_CHANGED_EVENT } from '@/lib/school-portals';
 import { cn } from '@/lib/utils';
-import { setComposerDraft } from '@/store/composer';
+import { seedComposerDraft } from '@/store/composer';
 import { dateKey, loadCalendarState, parseDateKey } from '../calendar/model';
 import { CALENDAR_ROUTE, LEDGER_ROUTE, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../routes';
 import { dueSlot, loadCadence, portalSignInStatus, readLastNudge, saveCadence, schoolPortals, writeLastNudge } from './school-sync-schedule';
@@ -358,15 +358,15 @@ export function TodayView() {
         if (!nextAction) {
             return;
         }
-        setComposerDraft(`Help me study ${nextAction.object.title} — quiz me and find my weak spots.`);
+        seedComposerDraft(`Help me study ${nextAction.object.title} — quiz me and find my weak spots.`);
         navigate(NEW_CHAT_ROUTE);
     };
     const startSchoolSync = () => {
-        setComposerDraft('Sync my school — run your school-sync pipeline: sweep Blackboard and Outlook for anything new, capture the files, write lecture notes and flashcards for new material, and update my calendar and Home page. Report what changed.');
+        seedComposerDraft('Sync my school — run your school-sync pipeline: sweep Blackboard and Outlook for anything new, capture the files, write lecture notes and flashcards for new material, and update my calendar and Home page. Report what changed.');
         navigate(NEW_CHAT_ROUTE);
     };
     const startSemesterScaffold = () => {
-        setComposerDraft('Set up my semester — run your semester-scaffold skill: find my course syllabi, and for each course build the skeleton (weekly topic schedule, every exam and assignment with its date and grade weight, the grading breakdown) into my graph and a per-course overview note. Frame the whole term first; I\'ll pull materials after. Report what you set up.');
+        seedComposerDraft('Set up my semester — run your semester-scaffold skill: find my course syllabi, and for each course build the skeleton (weekly topic schedule, every exam and assignment with its date and grade weight, the grading breakdown) into my graph and a per-course overview note. Frame the whole term first; I\'ll pull materials after. Report what you set up.');
         navigate(NEW_CHAT_ROUTE);
     };
     const [cadence, setCadence] = useState(() => loadCadence());

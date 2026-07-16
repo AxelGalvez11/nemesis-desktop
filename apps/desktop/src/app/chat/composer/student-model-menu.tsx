@@ -23,14 +23,11 @@ export function answerModeLabel(mode: AnswerMode): string {
   return mode === 'instant' ? 'Instant' : mode === 'high' ? 'High' : 'Medium'
 }
 
-const MODES: ReadonlyArray<{ description: string; label: string; mode: AnswerMode }> = [
-  { description: 'Fastest answers for quick questions.', label: 'Instant', mode: 'instant' },
-  { description: 'Thinks it through first — the everyday default.', label: 'Medium', mode: 'medium' },
-  {
-    description: 'Deepest reasoning for hard problems. Slower and uses more of your daily allowance.',
-    label: 'High',
-    mode: 'high'
-  }
+// Labels only — no explanations (owner call 2026-07-16: the box read too big).
+const MODES: ReadonlyArray<{ label: string; mode: AnswerMode }> = [
+  { label: 'Instant', mode: 'instant' },
+  { label: 'Medium', mode: 'medium' },
+  { label: 'High', mode: 'high' }
 ]
 
 function applyAnswerMode(mode: AnswerMode) {
@@ -50,23 +47,19 @@ export function StudentModelMenu() {
   const active = currentAnswerMode(fast, effort)
 
   return (
-    <div className="w-72 p-1">
-      <div className="px-3 pb-1 pt-2 text-xs font-medium text-muted-foreground">Answer mode</div>
-      <div className="flex flex-col gap-0.5 px-1 pb-1">
-        {MODES.map(({ description, label, mode }) => (
+    <div className="w-32 p-1">
+      <div className="flex flex-col gap-0.5">
+        {MODES.map(({ label, mode }) => (
           <button
             className={cn(
-              'flex flex-col items-start gap-0.5 rounded-md px-2.5 py-2 text-left transition-colors',
+              'rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors',
               active === mode ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent'
             )}
             key={mode}
             onClick={() => applyAnswerMode(mode)}
             type="button"
           >
-            <span className="text-sm font-medium">{label}</span>
-            <span className={cn('text-xs', active === mode ? 'text-primary-foreground/75' : 'text-muted-foreground')}>
-              {description}
-            </span>
+            {label}
           </button>
         ))}
       </div>

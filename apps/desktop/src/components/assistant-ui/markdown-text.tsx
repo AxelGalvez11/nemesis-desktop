@@ -27,7 +27,10 @@ import { normalizeExternalUrl, openExternalLink, PrettyLink } from '@/lib/extern
 import { createMemoizedMathPlugin } from '@/lib/katex-memo'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { openBrowserRail } from '@/store/browser-rail'
+import { focusSourceInRail } from '@/store/source-focus'
 import { preprocessMarkdown } from '@/lib/markdown-preprocess'
+
+import { isCitationHref, linkifyCitations } from './citation-chips'
 import {
   downloadGatewayMediaFile,
   filePathFromMediaPath,
@@ -62,9 +65,11 @@ const mathPlugin = createMemoizedMathPlugin({ singleDollarTextMath: true })
 // Replaces Streamdown's `parseIncompleteMarkdown` (full-text remend per
 // flush) with a tail-bounded repair — see lib/remend-tail.ts. Must stay
 // module-scope so the prop identity is stable across renders.
+// Citation linkify runs first: plain-text PMID/NCT tokens become short links
+// that MarkdownLink renders as inline chips (student citation receipts).
 function preprocessWithTailRepair(text: string): string {
   try {
-    return tailBoundedRemend(preprocessMarkdown(text))
+    return tailBoundedRemend(preprocessMarkdown(linkifyCitations(text)))
   } catch {
     return text
   }
@@ -297,6 +302,22 @@ function MarkdownLink({ children, className, href, ...props }: ComponentProps<'a
   }
 
   const target = href ? normalizeExternalUrl(href) : href
+
+  // Citation links (PubMed / trials / DOIs) render as compact inline chips
+  // that focus the right-rail Sources panel — the in-sentence receipt the
+  // footer pill summarizes (owner ask 2026-07-16: inline citations).
+  if (NEMESIS_STUDENT_BUILD && target && isCitationHref(target)) {
+    return (
+      <button
+        className="mx-0.5 inline-flex -translate-y-px items-center rounded-full bg-muted px-1.5 align-middle text-[10px] font-medium leading-[1.05rem] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onClick={() => focusSourceInRail(target)}
+        title={target}
+        type="button"
+      >
+        {childrenToText(children) || 'source'}
+      </button>
+    )
+  }
 
   if (!target || !/^https?:\/\//i.test(target)) {
     return (

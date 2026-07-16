@@ -19,6 +19,7 @@ import { isFocusWithin } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { adoptOAuthSession, consumeOAuthState } from '@/nemesis-account'
+import { notifyError } from '@/store/notifications'
 import { startTelemetry } from '@/nemesis-telemetry'
 import { useSkinCommand } from '@/themes/use-skin-command'
 
@@ -397,14 +398,19 @@ export function DesktopController() {
         return
       }
 
-      // Reject links this app didn't initiate (state must match the one-shot
-      // nonce minted when the student clicked Continue with Google/Apple).
+      // Reject links this app didn't initiate (state must match a nonce minted
+      // when the student clicked Continue with Google/Apple). Say so out loud —
+      // the beta.14 dead end was this branch failing with zero feedback while
+      // the dialog sat on "Still waiting on the browser…" forever.
       if (!consumeOAuthState(payload.params?.state)) {
+        notifyError(null, 'That sign-in link is stale. Click "Continue with Google" again and use the newest tab.')
+
         return
       }
 
       void adoptOAuthSession(refreshToken).catch(() => {
-        // Expired or forged link: the sign-in gate stays up; the student can retry.
+        // Expired/already-used token: the gate stays up — tell the student why.
+        notifyError(null, "That sign-in expired before it reached the app — try again, it's quick the second time.")
       })
     })
 
@@ -1301,6 +1307,11 @@ export function DesktopController() {
         !browserSurfaceOpen ||
         (!welcomeOpen && !NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen)
       }
+      // Narrow window: collapse to a hover-reveal overlay like the other side
+      // panes — docked at its min width it collided with the chat column and
+      // looked like the rail "disappeared" (owner report, beta.14).
+      forceCollapsed={narrowViewport}
+      hoverReveal
       id={PREVIEW_PANE_ID}
       key="preview"
       maxWidth={PREVIEW_RAIL_MAX_WIDTH}

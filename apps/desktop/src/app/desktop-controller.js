@@ -19,6 +19,7 @@ import { isFocusWithin } from '@/lib/keybinds/combo';
 import { cn } from '@/lib/utils';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { adoptOAuthSession, consumeOAuthState } from '@/nemesis-account';
+import { notifyError } from '@/store/notifications';
 import { startTelemetry } from '@/nemesis-telemetry';
 import { useSkinCommand } from '@/themes/use-skin-command';
 import { formatRefValue } from '../components/assistant-ui/directive-text';
@@ -276,13 +277,17 @@ export function DesktopController() {
             if (typeof refreshToken !== 'string' || !refreshToken) {
                 return;
             }
-            // Reject links this app didn't initiate (state must match the one-shot
-            // nonce minted when the student clicked Continue with Google/Apple).
+            // Reject links this app didn't initiate (state must match a nonce minted
+            // when the student clicked Continue with Google/Apple). Say so out loud —
+            // the beta.14 dead end was this branch failing with zero feedback while
+            // the dialog sat on "Still waiting on the browser…" forever.
             if (!consumeOAuthState(payload.params?.state)) {
+                notifyError(null, 'That sign-in link is stale. Click "Continue with Google" again and use the newest tab.');
                 return;
             }
             void adoptOAuthSession(refreshToken).catch(() => {
-                // Expired or forged link: the sign-in gate stays up; the student can retry.
+                // Expired/already-used token: the gate stays up — tell the student why.
+                notifyError(null, "That sign-in expired before it reached the app — try again, it's quick the second time.");
             });
         });
         return () => unsubscribe?.();
@@ -861,7 +866,11 @@ export function DesktopController() {
     // full-width row beneath them rather than cramming in one more skinny column.
     const terminalAsRow = terminalSidebarOpen && railColumnOpen;
     const previewPane = (_jsx(Pane, { disabled: !browserSurfaceOpen ||
-            (!welcomeOpen && !NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen), id: PREVIEW_PANE_ID, maxWidth: PREVIEW_RAIL_MAX_WIDTH, minWidth: PREVIEW_RAIL_MIN_WIDTH, resizable: true, side: railSide, width: PREVIEW_RAIL_PANE_WIDTH, children: browserSurfaceOpen ? (_jsx(ChatPreviewRail, { onRestartServer: restartPreviewServer, setTitlebarToolGroup: setTitlebarToolGroup })) : null }, "preview"));
+            (!welcomeOpen && !NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen), 
+        // Narrow window: collapse to a hover-reveal overlay like the other side
+        // panes — docked at its min width it collided with the chat column and
+        // looked like the rail "disappeared" (owner report, beta.14).
+        forceCollapsed: narrowViewport, hoverReveal: true, id: PREVIEW_PANE_ID, maxWidth: PREVIEW_RAIL_MAX_WIDTH, minWidth: PREVIEW_RAIL_MIN_WIDTH, resizable: true, side: railSide, width: PREVIEW_RAIL_PANE_WIDTH, children: browserSurfaceOpen ? (_jsx(ChatPreviewRail, { onRestartServer: restartPreviewServer, setTitlebarToolGroup: setTitlebarToolGroup })) : null }, "preview"));
     // Student build has exactly ONE right panel — the tabbed rail (Sources |
     // Browser | Preview). The developer file-browser column never mounts.
     const fileBrowserPane = NEMESIS_STUDENT_BUILD ? null : (_jsx(Pane, { defaultOpen: false, disabled: !chatOpen, forceCollapsed: narrowViewport, hoverReveal: true, id: "file-browser", maxWidth: FILE_BROWSER_MAX_WIDTH, minWidth: FILE_BROWSER_MIN_WIDTH, resizable: true, side: railSide, width: FILE_BROWSER_DEFAULT_WIDTH, children: _jsx(RightSidebarPane, { onActivateFile: path => composer.insertContextPathInlineRef(path), onActivateFolder: path => composer.insertContextPathInlineRef(path, true) }, currentCwd || 'no-cwd') }, "file-browser"));

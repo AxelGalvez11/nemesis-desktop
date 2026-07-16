@@ -42,32 +42,15 @@ export const MessageSources: FC<{ text: string }> = ({ text }) => {
     return null
   }
 
+  // ONE footer pill (owner call 2026-07-16): inline chips inside the answer are
+  // the per-claim receipts now (markdown-text renders citation links as chips),
+  // so the foot carries a single stacked-favicon "Sources · N" into the rail.
   return (
     <div className="mt-3 flex flex-wrap items-center gap-1.5" data-slot="nemesis_message-sources">
-      {groups.map(group => (
-        <button
-          className={SOURCE_CHIP_CLASS_NAME}
-          key={group.primary.url}
-          onClick={() => focusSourceInRail(group.primary.url)}
-          title={group.items.map(item => item.title).join('\n')}
-          type="button"
-        >
-          <SourceFavicon domain={group.primary.domain} />
-          <span className="max-w-[11rem] truncate text-foreground/80">
-            {group.items.length > 1 ? group.primary.badge : group.primary.title}
-          </span>
-          {group.items.length > 1 && (
-            <span className="shrink-0 text-[10px] font-medium text-muted-foreground/55">
-              +{group.items.length - 1}
-            </span>
-          )}
-        </button>
-      ))}
-      {/* ChatGPT-style footer affordance: stacked favicons + "Sources" → the rail. */}
       <button
-        className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] leading-none text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+        className={SOURCE_CHIP_CLASS_NAME}
         onClick={() => focusSourceInRail(sources[0].url)}
-        title="Open the Sources panel"
+        title={groups.map(group => group.primary.title).join('\n')}
         type="button"
       >
         <span className="flex -space-x-1.5">
@@ -77,7 +60,8 @@ export const MessageSources: FC<{ text: string }> = ({ text }) => {
             </span>
           ))}
         </span>
-        Sources
+        <span className="text-foreground/80">Sources</span>
+        <span className="shrink-0 text-[10px] font-medium text-muted-foreground/55">{sources.length}</span>
       </button>
     </div>
   )

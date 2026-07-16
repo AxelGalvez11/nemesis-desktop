@@ -50,9 +50,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { renameDesktopPath } from '@/lib/desktop-fs'
 import { cn } from '@/lib/utils'
-import { setComposerDraft } from '@/store/composer'
+import { seedComposerDraft } from '@/store/composer'
+import { getRememberedSessionId } from '@/store/session'
 
-import { NEW_CHAT_ROUTE } from '../routes'
+import { NEW_CHAT_ROUTE, sessionRoute } from '../routes'
 
 import { hasClozeMarker, renderClozeAnswer, renderClozePrompt } from './cloze'
 import { DECK_DIR, importedDeckFileNames, scanAllDeckFiles } from './deck-files'
@@ -261,16 +262,6 @@ export function StudyView() {
   )
 
   const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state])
-
-  const todayCounts = useMemo(
-    () => countQueueCategories(todayQueue, state),
-    [state, todayQueue]
-  )
-
-  const scheduledDue = todayCounts.learning + todayCounts.review
-
-  const estimatedReviewMinutes =
-    todayQueue.length > 0 ? Math.max(1, Math.ceil((todayQueue.length * 20) / 60)) : 0
 
   const totals = deckStats(state, null, now)
 
@@ -535,15 +526,18 @@ export function StudyView() {
 
   const navigate = useNavigate()
 
-  // The page's one ambient line to the agent: optionally pre-fill the chat
-  // composer with a study task, then jump to chat. (Same pattern Today uses.)
+  // The page's one ambient line to the agent: land in the CURRENT conversation
+  // (owner call — a fresh session per click scattered chats), pre-filling the
+  // composer through the draft stash it actually restores from on arrival.
   const askAgent = useCallback(
     (draft?: string) => {
+      const lastSession = getRememberedSessionId()
+
       if (draft) {
-        setComposerDraft(draft)
+        seedComposerDraft(draft, lastSession)
       }
 
-      navigate(NEW_CHAT_ROUTE)
+      navigate(lastSession ? sessionRoute(lastSession) : NEW_CHAT_ROUTE)
     },
     [navigate]
   )
@@ -772,16 +766,6 @@ export function StudyView() {
         </nav>
       )}
 
-      {tab === 'cards' && !inSubSurface && !reviewing && (
-        <TodaysReviewBrief
-          counts={todayCounts}
-          estimatedMinutes={estimatedReviewMinutes}
-          hasScheduledDue={scheduledDue > 0}
-          onStart={() => startReview(null)}
-          total={todayQueue.length}
-        />
-      )}
-
       {autoImported.length > 0 && !reviewing && !browseDeckId && tab === 'cards' && (
         <div className="mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs">
           <span>
@@ -827,6 +811,11 @@ export function StudyView() {
       ) : tab === 'cards' ? (
         <>
           <div className="mx-6 mb-1 flex items-center gap-4">
+            {todayQueue.length > 0 && (
+              <Button onClick={() => startReview(null)} size="inline" variant="textStrong">
+                Study all due ({todayQueue.length})
+              </Button>
+            )}
             <Button onClick={() => setNewDeckSection('')} size="inline" variant="text">
               <IconPlus size={13} />
               New deck
@@ -897,63 +886,6 @@ export function StudyView() {
         settings={settings}
       />
     </div>
-  )
-}
-
-function TodaysReviewBrief({
-  counts,
-  estimatedMinutes,
-  hasScheduledDue,
-  onStart,
-  total
-}: {
-  counts: ReviewCategoryCounts
-  estimatedMinutes: number
-  hasScheduledDue: boolean
-  onStart: () => void
-  total: number
-}) {
-  const hasFreshCards = counts.new > 0
-
-  return (
-    <section className="mx-6 mb-3 flex items-center justify-between gap-5 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-3">
-      <div className="min-w-0">
-        <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-tertiary)">
-          Today&rsquo;s review
-        </p>
-
-        {hasScheduledDue ? (
-          <p className="mt-1 text-base font-semibold tracking-tight">
-            {total} card{total === 1 ? '' : 's'}{' '}
-            <span className="font-normal text-muted-foreground">· about {estimatedMinutes} min</span>
-          </p>
-        ) : (
-          <p className="mt-1 text-base font-semibold tracking-tight">You&rsquo;re caught up</p>
-        )}
-
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem] tabular-nums text-muted-foreground">
-          <span>
-            <span className="font-semibold text-foreground">{counts.new}</span> New
-          </span>
-          <span>
-            <span className="font-semibold text-foreground">{counts.learning}</span> Learning
-          </span>
-          <span>
-            <span className="font-semibold text-foreground">{counts.review}</span> Review
-          </span>
-        </div>
-      </div>
-
-      {hasScheduledDue ? (
-        <Button onClick={onStart} size="sm">
-          Start review →
-        </Button>
-      ) : hasFreshCards ? (
-        <Button onClick={onStart} size="sm">
-          Practice new cards
-        </Button>
-      ) : null}
-    </section>
   )
 }
 

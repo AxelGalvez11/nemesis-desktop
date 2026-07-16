@@ -17,7 +17,7 @@ import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/p
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view';
 import { $translucency, setTranslucency } from '@/store/translucency';
 import { $zoomPercent, setZoomPercent } from '@/store/zoom';
-import { ACCENT_CHANGED_EVENT, ACCENT_SWATCHES, accentSwatchHex, DEFAULT_ACCENT_ID, loadAccentSelection, saveAccentCustomHue, saveAccentSwatch } from '@/themes/accent-tint';
+import { ACCENT_CHANGED_EVENT, ACCENT_SWATCHES, accentSwatchHex, DEFAULT_ACCENT_ID, loadAccentSelection, saveAccentSwatch } from '@/themes/accent-tint';
 import { readableOn } from '@/themes/color';
 import { getBaseColors, useTheme } from '@/themes/context';
 import { installVscodeThemeFromMarketplace } from '@/themes/install';
@@ -121,10 +121,11 @@ function MarketplaceThemeResults({ query, installs, onInstalled }) {
                     return (_jsxs("button", { className: cn('flex items-center gap-2.5 px-2.5 py-2 text-left disabled:opacity-60', selectableCardClass({ prominent: done })), disabled: Boolean(installingId) && !busy, onClick: () => select(item), type: "button", children: [_jsx(Palette, { className: "size-4 shrink-0 text-(--ui-text-tertiary)" }), _jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate text-[length:var(--conversation-text-font-size)] font-medium", children: item.displayName }), _jsxs("span", { className: "block truncate text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)", children: [item.publisher, item.installs > 0 ? ` · ${copy.installs(compactNumber.format(item.installs))}` : ''] })] }), _jsx("span", { className: "shrink-0 text-(--ui-text-tertiary)", children: busy ? (_jsx(Loader2, { className: "size-4 animate-spin" })) : done ? (_jsx(Check, { className: "size-4 text-(--ui-green)" })) : (_jsx(Download, { className: "size-4" })) })] }, item.extensionId));
                 }) })] }));
 }
-// Student build: the ONLY appearance control is the accent tint. A curated swatch row
-// plus one constrained custom-hue slider. Every color is contrast-checked at apply time
-// (accent-tint.ts), so the picker can't produce an unreadable UI, and semantic red/green
-// are never touched. Previews are shown in the currently-selected light/dark mode.
+// Student build: the ONLY appearance control is the accent tint — a curated swatch
+// row (the custom-hue slider was cut 2026-07-16, owner call: swatches only). Every
+// color is contrast-checked at apply time (accent-tint.ts), so the picker can't
+// produce an unreadable UI, and semantic red/green are never touched. A previously
+// saved custom hue keeps working until a swatch is tapped; it just has no slider UI.
 function AccentPicker() {
     const [selection, setSelection] = useState(() => loadAccentSelection());
     useEffect(() => {
@@ -132,9 +133,6 @@ function AccentPicker() {
         window.addEventListener(ACCENT_CHANGED_EVENT, sync);
         return () => window.removeEventListener(ACCENT_CHANGED_EVENT, sync);
     }, []);
-    const isCustom = selection.id === null;
-    const customHue = isCustom ? selection.hue : 210;
-    const customColor = accentSwatchHex(customHue);
     return (_jsxs("div", { className: "mt-3 flex flex-col gap-4", children: [_jsx("div", { className: "flex flex-wrap gap-2.5", children: ACCENT_SWATCHES.map(swatch => {
                     const active = selection.id === swatch.id;
                     const color = swatch.id === DEFAULT_ACCENT_ID ? '#ff2740' : accentSwatchHex(swatch.hue);
@@ -145,9 +143,7 @@ function AccentPicker() {
                             backgroundColor: color,
                             boxShadow: active ? `0 0 0 2px var(--ui-bg-card), 0 0 0 4px ${color}` : undefined
                         }, title: swatch.label, type: "button", children: active && (_jsx(Check, { className: "absolute inset-0 m-auto size-4", strokeWidth: 3, style: { color: readableOn(color) } })) }, swatch.id));
-                }) }), _jsxs("div", { className: "flex items-center gap-3", children: [_jsx("span", { className: "w-14 shrink-0 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)", children: "Custom" }), _jsx("input", { "aria-label": "Custom accent hue", className: cn('h-2 flex-1 cursor-pointer appearance-none rounded-full outline-none', isCustom && 'ring-2 ring-(--theme-primary)/50'), max: 359, min: 0, onChange: event => saveAccentCustomHue(Number(event.target.value)), style: {
-                            background: 'linear-gradient(to right, hsl(0 82% 50%), hsl(60 82% 50%), hsl(120 82% 50%), hsl(180 82% 50%), hsl(240 82% 50%), hsl(300 82% 50%), hsl(360 82% 50%))'
-                        }, type: "range", value: customHue }), _jsx("span", { "aria-hidden": true, className: "size-7 shrink-0 rounded-full border border-(--ui-stroke-tertiary)", style: { backgroundColor: customColor, boxShadow: isCustom ? `0 0 0 2px ${customColor}` : undefined } })] }), _jsx("p", { className: "text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)", children: "One monochrome look, your accent. Every color is auto-adjusted so it stays readable in both light and dark \u2014 and alert red and success green never change, so warnings always read as warnings." })] }));
+                }) }), _jsx("p", { className: "text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)", children: "One monochrome look, your accent. Every color is auto-adjusted so it stays readable in both light and dark \u2014 and alert red and success green never change, so warnings always read as warnings." })] }));
 }
 export function AppearanceSettings() {
     const { t, isSavingLocale } = useI18n();
