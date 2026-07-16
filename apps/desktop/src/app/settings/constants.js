@@ -1,4 +1,5 @@
 import { Box, Brain, Lock, MessageCircle, Mic, Monitor, Moon, Palette, Sun, Wrench } from '@/lib/icons';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { defineFieldCopy } from './field-copy';
 export const EMPTY_SELECT_VALUE = '__hermes_empty__';
 export const CONTROL_TEXT = 'text-xs';
@@ -394,11 +395,11 @@ export const FIELD_DESCRIPTIONS = defineFieldCopy({
     fallbackProviders: 'Backup provider:model entries to try if the default model fails.',
     display: {
         personality: 'Default assistant style for new sessions.',
-        showReasoning: 'Show reasoning sections when the backend provides them.'
+        showReasoning: "Show Nemesis's thinking sections when they're available."
     },
     timezone: 'Used when Nemesis needs local time context. Blank uses the system timezone.',
     agent: {
-        imageInputMode: 'Controls how image attachments are sent to the model.',
+        imageInputMode: 'Controls how Nemesis reads image attachments.',
         maxTurns: 'Upper bound for tool-calling turns before Nemesis stops a run.'
     },
     terminal: {
@@ -493,17 +494,22 @@ export const SECTIONS = [
         id: 'safety',
         label: 'Safety',
         icon: Lock,
-        keys: [
-            'approvals.mode',
-            'approvals.timeout',
-            'approvals.mcp_reload_confirm',
-            'command_allowlist',
-            'security.redact_secrets',
-            'security.allow_private_urls',
-            'browser.allow_private_urls',
-            'browser.auto_local_for_private_urls',
-            'checkpoints.enabled'
-        ]
+        // Student build trims the fields that only make sense to a developer
+        // (MCP reload confirms, command allowlists, private-URL plumbing) —
+        // approvals + secret redaction + checkpoints are the student-facing set.
+        keys: NEMESIS_STUDENT_BUILD
+            ? ['approvals.mode', 'approvals.timeout', 'security.redact_secrets', 'checkpoints.enabled']
+            : [
+                'approvals.mode',
+                'approvals.timeout',
+                'approvals.mcp_reload_confirm',
+                'command_allowlist',
+                'security.redact_secrets',
+                'security.allow_private_urls',
+                'browser.allow_private_urls',
+                'browser.auto_local_for_private_urls',
+                'checkpoints.enabled'
+            ]
     },
     {
         id: 'memory',

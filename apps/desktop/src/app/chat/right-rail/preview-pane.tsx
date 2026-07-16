@@ -8,6 +8,7 @@ import { type Translations, useI18n } from '@/i18n'
 import { isDesktopFsRemoteMode } from '@/lib/desktop-fs'
 import { Bug } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { notify, notifyError } from '@/store/notifications'
 import { $previewServerRestart, failPreviewServerRestart, type PreviewTarget } from '@/store/preview'
 
@@ -287,8 +288,10 @@ export function PreviewPane({
       return
     }
 
+    // Student build: no JS console, no Chromium DevTools — a student previewing
+    // an agent-built page should see the page, not web-dev tooling.
     const tools: TitlebarTool[] = [
-      ...(isWebPreview
+      ...(isWebPreview && !NEMESIS_STUDENT_BUILD
         ? [
             {
               active: consoleOpen,

@@ -17,6 +17,7 @@ import {
 } from '@/lib/keybinds/actions'
 import { formatCombo } from '@/lib/keybinds/combo'
 import { arraysEqual } from '@/lib/storage'
+import { studentHidesKeybind } from '@/nemesis'
 import {
   $bindings,
   $capture,
@@ -74,8 +75,12 @@ export function KeybindPanel() {
           {/* Body */}
           <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
             {KEYBIND_CATEGORIES.map(category => {
+              // Student build: shortcuts for hidden/dev surfaces are neither
+              // dispatched (use-keybinds.ts) nor listed here — the row names
+              // would otherwise advertise every hidden feature.
               const actions = KEYBIND_ACTIONS.filter(
-                action => action.category === category && action.id !== KEYBIND_PANEL_ACTION
+                action =>
+                  action.category === category && action.id !== KEYBIND_PANEL_ACTION && !studentHidesKeybind(action.id)
               )
 
               const readonly = KEYBIND_READONLY.filter(shortcut => shortcut.category === category)

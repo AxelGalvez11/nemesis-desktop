@@ -221,7 +221,9 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
             onSelect: () => setActiveView('about')
         }
     ].filter(group => !NEMESIS_STUDENT_BUILD || STUDENT_SETTINGS_KEEP.has(group.id));
-    const navFooter = (_jsxs(_Fragment, { children: [_jsx(Tip, { label: t.settings.exportConfig, children: _jsx(OverlayIconButton, { onClick: () => void exportConfig(), children: _jsx(Download, {}) }) }), _jsx(Tip, { label: t.settings.importConfig, children: _jsx(OverlayIconButton, { onClick: () => {
+    // Student build: raw JSON config export/import/reset is developer machinery —
+    // no footer at all (OverlayNav renders nothing for undefined).
+    const navFooter = NEMESIS_STUDENT_BUILD ? undefined : (_jsxs(_Fragment, { children: [_jsx(Tip, { label: t.settings.exportConfig, children: _jsx(OverlayIconButton, { onClick: () => void exportConfig(), children: _jsx(Download, {}) }) }), _jsx(Tip, { label: t.settings.importConfig, children: _jsx(OverlayIconButton, { onClick: () => {
                         triggerHaptic('open');
                         importInputRef.current?.click();
                     }, children: _jsx(Upload, {}) }) }), _jsx(Tip, { label: t.settings.resetToDefaults, children: _jsx(OverlayIconButton, { className: "hover:text-destructive", onClick: () => {

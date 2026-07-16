@@ -1,11 +1,17 @@
 import { useStore } from '@nanostores/react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { type Translations, useI18n } from '@/i18n'
 import { CheckCircle2, ExternalLink, Loader2, RefreshCw } from '@/lib/icons'
+import {
+  fetchLatestReleaseTag,
+  isNewerVersion,
+  normalizeVersion,
+  UPDATE_DOWNLOAD_URL
+} from '@/lib/nemesis-update-check'
 import { cn } from '@/lib/utils'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import {
@@ -109,23 +115,13 @@ export function AboutSettings() {
       <div className="mx-auto mt-4 w-full max-w-2xl">
         <SectionHeading icon={RefreshCw} title={a.updates} />
 
-        {/* Student build: the source self-updater is DISABLED. It tracks the
-            upstream Nemesis main branch — running it swaps the Nemesis build
-            (UI reskin, school browser, study pipeline, agent patches) for
-            stock Nemesis and discards local work. Nemesis updates ship as new
-            app versions instead. */}
+        {/* Student build: the source self-updater is DISABLED (it tracks the
+            upstream main branch — running it would swap the Nemesis build for
+            stock upstream). Student releases ship via electron-updater instead,
+            so this card drives THAT: a manual "Check for updates" that works
+            even after the lower-corner update banner was dismissed. */}
         {NEMESIS_STUDENT_BUILD ? (
-          <div className="rounded-xl border border-border/70 bg-muted/20 px-4 py-3 text-sm">
-            <div className="flex items-start gap-2">
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-              <div className="min-w-0">
-                <p className="font-medium">You&apos;re running Nemesis {version?.appVersion || ''}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Updates are delivered with new Nemesis releases — nothing to do here.
-                </p>
-              </div>
-            </div>
-          </div>
+          <StudentUpdateCard version={version?.appVersion} />
         ) : (
         <div
           className={cn(
@@ -198,8 +194,157 @@ export function AboutSettings() {
           />
         )}
 
-        <UninstallSection />
+        {/* Student build: the "Danger zone" uninstall flow talks about agents,
+            secrets, and log paths — testers who need a full cleanup ask the
+            owner (or drag the app to Trash); the section stays for dev builds. */}
+        {!NEMESIS_STUDENT_BUILD && <UninstallSection />}
       </div>
     </SettingsContent>
+  )
+}
+
+type SilentUpdaterStatus = 'downloaded' | 'error' | 'unavailable' | 'working'
+
+/** Student-build update card. Same machinery as the lower-corner update banner
+ *  (GitHub latest-release check + the silent electron-updater), but reachable
+ *  on purpose — dismissing the banner hides that version's toast forever, and
+ *  this card is the promised second door. Copy is deliberately plain English. */
+function StudentUpdateCard({ version }: { version: string | undefined }) {
+  const [checking, setChecking] = useState(false)
+  const [checkFailed, setCheckFailed] = useState(false)
+  const [checkedOnce, setCheckedOnce] = useState(false)
+  const [latestTag, setLatestTag] = useState<null | string>(null)
+  const [updater, setUpdater] = useState<SilentUpdaterStatus>('unavailable')
+
+  const check = useCallback(async () => {
+    if (!version || checking) {
+      return
+    }
+
+    setChecking(true)
+    setCheckFailed(false)
+
+    const latest = await fetchLatestReleaseTag()
+
+    setChecking(false)
+    setCheckedOnce(true)
+
+    if (!latest) {
+      setCheckFailed(true)
+
+      return
+    }
+
+    setLatestTag(isNewerVersion(latest, version) ? latest : null)
+  }, [checking, version])
+
+  // Check once when the card opens; the button re-checks on demand.
+  useEffect(() => {
+    void check()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
+
+  // While an update is known, watch the silent updater so the action flips to
+  // "Restart now" the moment the background download lands (banner parity).
+  useEffect(() => {
+    if (!latestTag) {
+      return
+    }
+
+    let cancelled = false
+
+    const poll = async () => {
+      const status = await window.hermesDesktop?.nemesisUpdaterStatus?.().catch(() => 'unavailable' as const)
+
+      if (!cancelled && status) {
+        setUpdater(status)
+      }
+    }
+
+    void poll()
+    const timer = setInterval(() => void poll(), 4000)
+
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [latestTag])
+
+  const restart = () => {
+    void window.hermesDesktop?.nemesisUpdaterInstall?.().catch(() => {})
+  }
+
+  const download = () => {
+    if (window.hermesDesktop?.openExternal) {
+      void window.hermesDesktop.openExternal(UPDATE_DOWNLOAD_URL)
+    } else {
+      window.open(UPDATE_DOWNLOAD_URL, '_blank', 'noopener,noreferrer')
+    }
+  }
+
+  const updateAvailable = Boolean(latestTag)
+
+  const statusLine = !version
+    ? 'Version unavailable in this build.'
+    : updateAvailable
+      ? updater === 'downloaded'
+        ? `Nemesis ${normalizeVersion(latestTag ?? '')} is ready to install`
+        : `Nemesis ${normalizeVersion(latestTag ?? '')} is available`
+      : checkFailed
+        ? "Couldn't reach the update server — try again in a bit."
+        : checkedOnce
+          ? "You're on the latest version"
+          : 'Checking for updates…'
+
+  const detailLine = updateAvailable
+    ? updater === 'downloaded'
+      ? 'The update is downloaded. Restart to use it now — or it installs itself when you quit.'
+      : updater === 'working'
+        ? 'Downloading in the background — you can keep working. Your notes, decks, and settings stay put.'
+        : 'Download the new version and drag it into Applications. Your notes, decks, and settings stay put.'
+    : 'Updates download in the background and install when you restart.'
+
+  return (
+    <div
+      className={cn(
+        'rounded-xl border px-4 py-3 text-sm',
+        updateAvailable
+          ? 'border-primary/30 bg-primary/5 text-foreground'
+          : checkFailed
+            ? 'border-destructive/35 bg-destructive/5'
+            : 'border-border/70 bg-muted/20 text-foreground'
+      )}
+    >
+      <div className="flex items-start gap-2">
+        {updateAvailable ? (
+          <Codicon className="mt-0.5 size-4 shrink-0 text-primary" name="cloud-download" size="1rem" />
+        ) : checkFailed ? null : (
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        )}
+        <div className="min-w-0">
+          <p className="font-medium">{statusLine}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{detailLine}</p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-4">
+        <Button disabled={checking || !version} onClick={() => void check()} size="sm" variant="textStrong">
+          {checking ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+          {checking ? 'Checking…' : 'Check for updates'}
+        </Button>
+
+        {updateAvailable && updater === 'downloaded' && (
+          <Button onClick={restart} size="sm">
+            Restart now
+          </Button>
+        )}
+
+        {updateAvailable && (updater === 'error' || updater === 'unavailable') && (
+          <Button onClick={download} size="sm">
+            Download update
+          </Button>
+        )}
+      </div>
+    </div>
   )
 }

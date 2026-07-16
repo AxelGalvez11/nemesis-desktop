@@ -47,13 +47,18 @@ export const STUDENT_HIDDEN_STATUSBAR: ReadonlySet<string> = new Set([
 ])
 
 /** ⌘K palette entries hidden for students, beyond STUDENT_HIDDEN_PALETTE — the whole
- *  command-center / gateway / dev-nav surface. Matched by id prefix OR exact id. */
+ *  command-center / gateway / dev-nav surface plus the granular technical lists
+ *  (capability tabs, per-field settings search, MCP servers). Matched by id prefix
+ *  OR exact id. */
 export const STUDENT_HIDDEN_PALETTE_PREFIXES: readonly string[] = [
   'cc-',
   'nav-cron',
   'nav-profiles',
   'nav-agents',
-  'nav-starmap'
+  'nav-starmap',
+  'cap-',
+  'field-',
+  'mcp-'
 ]
 
 /** True when this palette item id should be hidden in the student build. */
@@ -62,5 +67,58 @@ export function studentHidesPaletteId(id: string | undefined): boolean {
     return false
   }
 
-  return STUDENT_HIDDEN_PALETTE.has(id) || STUDENT_HIDDEN_PALETTE_PREFIXES.some(prefix => id.startsWith(prefix))
+  if (STUDENT_HIDDEN_PALETTE.has(id) || STUDENT_HIDDEN_PALETTE_PREFIXES.some(prefix => id.startsWith(prefix))) {
+    return true
+  }
+
+  // Settings entries mirror STUDENT_SETTINGS_KEEP: `set-config-chat` ↔ 'config:chat',
+  // `set-about` ↔ 'about', `set-providers&pview=keys` ↔ 'providers'. Anything not in
+  // the keep-set (Gateway, Providers, Keys, hidden config sections) stays out of ⌘K.
+  if (id.startsWith('set-config-')) {
+    return !STUDENT_SETTINGS_KEEP.has(`config:${id.slice('set-config-'.length)}`)
+  }
+
+  if (id.startsWith('set-')) {
+    return !STUDENT_SETTINGS_KEEP.has(id.slice('set-'.length).split('&')[0])
+  }
+
+  return false
+}
+
+/** Keyboard shortcuts disabled for students — every default-bound (or rebindable)
+ *  chord that opens a hidden or developer surface: command center (⌘.), the terminal
+ *  family (Ctrl+`…), the git review pane (⌘G), worktrees (⌘⇧B), the raw model picker,
+ *  silent profile switching (⌘1-9 with the profile rail hidden), and hidden pages.
+ *  use-keybinds.ts skips registering these; the Shortcuts panel hides their rows. */
+export const STUDENT_HIDDEN_KEYBINDS: ReadonlySet<string> = new Set([
+  'composer.modelPicker',
+  'workspace.newWorktree',
+  'nav.commandCenter',
+  'nav.profiles',
+  'nav.skills',
+  'nav.messaging',
+  'nav.artifacts',
+  'nav.cron',
+  'nav.agents',
+  'view.toggleReview',
+  'view.showFiles',
+  'view.showTerminal',
+  'view.newTerminal',
+  'view.nextTerminal',
+  'view.prevTerminal',
+  'view.closeTerminal',
+  'profile.default',
+  'profile.next',
+  'profile.prev',
+  'profile.toggleAll',
+  'profile.create'
+])
+
+/** True when this keybind action is disabled in the student build. */
+export function studentHidesKeybind(actionId: string | undefined): boolean {
+  if (!NEMESIS_STUDENT_BUILD || !actionId) {
+    return false
+  }
+
+  return STUDENT_HIDDEN_KEYBINDS.has(actionId) || actionId.startsWith('profile.switch.')
 }

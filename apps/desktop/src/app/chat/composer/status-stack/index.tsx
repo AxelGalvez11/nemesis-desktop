@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { type Translations, useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import {
   $statusItemsBySession,
   type ComposerStatusItem,
@@ -103,8 +104,13 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
 
   const openAgents = () => navigate(AGENTS_ROUTE)
 
-  const openSubagent = (item: ComposerStatusItem) =>
-    item.sessionId ? void openSessionInNewWindow(item.sessionId, { watch: true }) : openAgents()
+  const openSubagent = (item: ComposerStatusItem) => {
+    if (item.sessionId) {
+      void openSessionInNewWindow(item.sessionId, { watch: true })
+    } else if (!NEMESIS_STUDENT_BUILD) {
+      openAgents()
+    }
+  }
 
   // Preview links live as child rows of the background group — a localhost dev
   // server and its preview are the same thing — so they no longer float as an
@@ -128,7 +134,9 @@ export function ComposerStatusStack({ queue, sessionId }: ComposerStatusStackPro
       node: (
         <StatusSection
           accessory={
-            group.type === 'subagent' ? (
+            // Student build: the Agents monitor page is a hidden dev surface —
+            // no jump link from the status stack (same call as CodingStatusRow).
+            group.type === 'subagent' && !NEMESIS_STUDENT_BUILD ? (
               <Button
                 className="text-muted-foreground/75 hover:text-foreground/90"
                 onClick={openAgents}

@@ -555,7 +555,19 @@ export function CommandPalette() {
         settingsSectionLabel,
         t
     ]);
-    const groups = useMemo(() => [...baseGroups, ...searchGroups], [baseGroups, searchGroups]);
+    // Student build: one central sweep over EVERYTHING the palette can show —
+    // base groups and search-time groups alike — so hidden settings sections,
+    // capability tabs, per-field entries, and MCP servers can't leak past the
+    // per-group filters above (which only ever covered nav/command-center ids).
+    const groups = useMemo(() => {
+        const merged = [...baseGroups, ...searchGroups];
+        if (!NEMESIS_STUDENT_BUILD) {
+            return merged;
+        }
+        return merged
+            .map(group => ({ ...group, items: group.items.filter(item => !studentHidesPaletteId(item.id)) }))
+            .filter(group => group.items.length > 0);
+    }, [baseGroups, searchGroups]);
     // Nested palette pages (VS Code-style submenus). Reusable: add an entry here
     // and point a root item at it via `to`.
     const subPages = useMemo(() => ({

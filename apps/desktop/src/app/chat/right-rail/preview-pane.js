@@ -6,6 +6,7 @@ import { useI18n } from '@/i18n';
 import { isDesktopFsRemoteMode } from '@/lib/desktop-fs';
 import { Bug } from '@/lib/icons';
 import { cn } from '@/lib/utils';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { notify, notifyError } from '@/store/notifications';
 import { $previewServerRestart, failPreviewServerRestart } from '@/store/preview';
 import { clampConsoleHeight, compactUrl, formatLogLine, isNearConsoleBottom, PreviewConsolePanel, PreviewConsoleTitlebarIcon } from './preview-console';
@@ -169,8 +170,10 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
         if (!setTitlebarToolGroup) {
             return;
         }
+        // Student build: no JS console, no Chromium DevTools — a student previewing
+        // an agent-built page should see the page, not web-dev tooling.
         const tools = [
-            ...(isWebPreview
+            ...(isWebPreview && !NEMESIS_STUDENT_BUILD
                 ? [
                     {
                         active: consoleOpen,

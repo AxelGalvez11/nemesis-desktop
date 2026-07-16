@@ -1180,7 +1180,12 @@ export function DesktopController() {
         </Suspense>
       )}
 
-      {commandCenterOpen && (
+      {/* Student build: these overlay routes are developer surfaces (raw logs,
+          subagent internals, cron CRUD, soul editing, memory starmap). The nav,
+          palette, and keybind layers already hide their entry points — this is
+          the belt-and-suspenders render gate so no future entry point can leak
+          them by accident. */}
+      {commandCenterOpen && !NEMESIS_STUDENT_BUILD && (
         <Suspense fallback={null}>
           <CommandCenterView
             initialSection={commandCenterInitialSection}
@@ -1192,13 +1197,13 @@ export function DesktopController() {
         </Suspense>
       )}
 
-      {agentsOpen && (
+      {agentsOpen && !NEMESIS_STUDENT_BUILD && (
         <Suspense fallback={null}>
           <AgentsView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
       )}
 
-      {cronOpen && (
+      {cronOpen && !NEMESIS_STUDENT_BUILD && (
         <Suspense fallback={null}>
           <CronView
             onClose={closeOverlayToPreviousRoute}
@@ -1207,13 +1212,13 @@ export function DesktopController() {
         </Suspense>
       )}
 
-      {profilesOpen && (
+      {profilesOpen && !NEMESIS_STUDENT_BUILD && (
         <Suspense fallback={null}>
           <ProfilesView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
       )}
 
-      {starmapOpen && (
+      {starmapOpen && !NEMESIS_STUDENT_BUILD && (
         <Suspense fallback={null}>
           <StarmapView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
@@ -1346,7 +1351,7 @@ export function DesktopController() {
       // gate so the pane stays mounted as a collapsed overlay — `toggleReview`
       // then slides it in/out via the forced-reveal pin, exactly like ⌘B for the
       // sidebar. Still requires a repo (no diffs to show otherwise).
-      disabled={!chatOpen || !currentCwd.trim() || (!narrowViewport && !reviewOpen)}
+      disabled={NEMESIS_STUDENT_BUILD || !chatOpen || !currentCwd.trim() || (!narrowViewport && !reviewOpen)}
       forceCollapsed={narrowViewport}
       hoverReveal
       id={REVIEW_PANE_ID}
@@ -1367,7 +1372,7 @@ export function DesktopController() {
     <Pane
       bottomRow={terminalAsRow}
       defaultOpen
-      disabled={!terminalSidebarOpen}
+      disabled={NEMESIS_STUDENT_BUILD || !terminalSidebarOpen}
       divider
       height="38vh"
       id="terminal-sidebar"
