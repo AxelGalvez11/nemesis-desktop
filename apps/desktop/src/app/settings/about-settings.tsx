@@ -1,5 +1,6 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,9 @@ import {
   refreshDesktopVersion,
   startActiveUpdate
 } from '@/store/updates'
+
+import { WELCOME_ROUTE } from '../routes'
+import { resetOnboarding } from '../welcome/onboarding'
 
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
 import { UninstallSection } from './uninstall-section'
@@ -49,6 +53,7 @@ function relativeTime(ms: number | undefined, a: Translations['settings']['about
 export function AboutSettings() {
   const { t } = useI18n()
   const a = t.settings.about
+  const navigate = useNavigate()
   const version = useStore($desktopVersion)
   const status = useStore($updateStatus)
   const apply = useStore($updateApply)
@@ -197,6 +202,26 @@ export function AboutSettings() {
             title={a.automaticUpdates}
           />
         )}
+
+        <div>
+          <SectionHeading icon={RefreshCw} title="Setup" />
+          <div className="mt-3">
+            <Button
+              onClick={() => {
+                resetOnboarding()
+                navigate(WELCOME_ROUTE)
+              }}
+              size="sm"
+              variant="textStrong"
+            >
+              <RefreshCw className="size-3" />
+              Replay the welcome walkthrough
+            </Button>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Re-open the first-run setup flow from the beginning.
+            </p>
+          </div>
+        </div>
 
         <UninstallSection />
       </div>
