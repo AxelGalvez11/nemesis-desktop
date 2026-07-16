@@ -3,22 +3,23 @@
 // as muscle memory from Anki: deck browser with due badges → flip card (Space) →
 // Again/Hard/Good/Easy (1-4), with the next-interval hint under each grade button.
 import {
+  IconArrowLeft,
   IconCards,
   IconChecklist,
   IconChevronDown,
   IconDots,
   IconFileImport,
   IconFolderPlus,
-  IconLayoutGrid,
-  IconList,
   IconPencil,
   IconPlayerPause,
   IconPlus,
   IconSettings,
   IconSitemap,
+  IconSparkles,
   IconTrash
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -49,6 +50,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { renameDesktopPath } from '@/lib/desktop-fs'
 import { cn } from '@/lib/utils'
+import { setComposerDraft } from '@/store/composer'
+
+import { NEW_CHAT_ROUTE } from '../routes'
 
 import { hasClozeMarker, renderClozeAnswer, renderClozePrompt } from './cloze'
 import { DECK_DIR, importedDeckFileNames, scanAllDeckFiles } from './deck-files'
@@ -73,7 +77,6 @@ import {
   assignDeckSection,
   buildQueue,
   deckStats,
-  type DeckStats,
   DEFAULT_STUDY_SETTINGS,
   deleteCard,
   deleteDeck,
@@ -104,7 +107,6 @@ import {
   undoLastGrade,
   updateCard
 } from './model'
-import { deckRetentionCurve, type RetentionPoint } from './retention'
 import { TestSurface } from './test-mode'
 
 const GRADES: { key: string; label: string; rating: StudyRating }[] = [
@@ -114,10 +116,17 @@ const GRADES: { key: string; label: string; rating: StudyRating }[] = [
   { key: '4', label: 'Easy', rating: 'easy' }
 ]
 
-type DeckViewMode = 'cards' | 'list'
+/** Top-level Study lanes: flashcard decks, practice tests, mind maps. */
+type StudyTab = 'cards' | 'maps' | 'tests'
 
-const VIEW_MODE_KEY = 'nemesis.study.view'
+const TAB_KEY = 'nemesis.study.tab.v1'
 const COLLAPSED_SECTIONS_KEY = 'nemesis.study.sections.collapsed.v1'
+
+const STUDY_TABS: { icon: React.ReactNode; id: StudyTab; label: string }[] = [
+  { icon: <IconCards size={13} />, id: 'cards', label: 'Cards' },
+  { icon: <IconChecklist size={13} />, id: 'tests', label: 'Tests' },
+  { icon: <IconSitemap size={13} />, id: 'maps', label: 'Mind maps' }
+]
 
 const ORDER_OPTIONS: SegmentedControlOption<ReviewOrder>[] = [
   { id: 'due', label: 'Due first' },
@@ -175,11 +184,13 @@ function countQueueCategories(queue: QueueItem[], state: StudyState): ReviewCate
   )
 }
 
-function loadViewMode(): DeckViewMode {
+function loadTab(): StudyTab {
   try {
-    return window.localStorage.getItem(VIEW_MODE_KEY) === 'cards' ? 'cards' : 'list'
+    const stored = window.localStorage.getItem(TAB_KEY)
+
+    return stored === 'tests' || stored === 'maps' ? stored : 'cards'
   } catch {
-    return 'list'
+    return 'cards'
   }
 }
 
@@ -216,7 +227,7 @@ export function StudyView() {
   const [newDeckSection, setNewDeckSection] = useState<null | string>(null)
   const [newSectionOpen, setNewSectionOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [view, setView] = useState<DeckViewMode>(() => loadViewMode())
+  const [tab, setTab] = useState<StudyTab>(() => loadTab())
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => loadCollapsedSections())
   const [reducedMotion] = useState(() => prefersReducedMotion())
   const [matchDeckId, setMatchDeckId] = useState<null | string>(null)
@@ -479,15 +490,44 @@ export function StudyView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [current, exitReview, grade, lastUndo, revealed, reviewing, undoGrade])
 
-  const setViewMode = useCallback((mode: DeckViewMode) => {
-    setView(mode)
+  const switchTab = useCallback((next: StudyTab) => {
+    setTab(next)
 
     try {
-      window.localStorage.setItem(VIEW_MODE_KEY, mode)
+      window.localStorage.setItem(TAB_KEY, next)
     } catch {
       // persistence is best-effort
     }
   }, [])
+
+  const navigate = useNavigate()
+
+  // The page's one ambient line to the agent: optionally pre-fill the chat
+  // composer with a study task, then jump to chat. (Same pattern Today uses.)
+  const askAgent = useCallback(
+    (draft?: string) => {
+      if (draft) {
+        setComposerDraft(draft)
+      }
+
+      navigate(NEW_CHAT_ROUTE)
+    },
+    [navigate]
+  )
+
+  // Anki-style per-deck NEW/LEARN/DUE — bucketed from the same capped queue the
+  // "Start review" button studies, so the numbers always agree with the session.
+  const queueCountsByDeck = useMemo(() => {
+    const counts = new Map<string, ReviewCategoryCounts>()
+
+    for (const item of todayQueue) {
+      const bucket = counts.get(item.deckId) ?? { learning: 0, new: 0, review: 0 }
+      bucket[categoryForQueueItem(item, state)]++
+      counts.set(item.deckId, bucket)
+    }
+
+    return counts
+  }, [state, todayQueue])
 
   const startMatch = useCallback(
     (deckId: string) => {
@@ -587,6 +627,47 @@ export function StudyView() {
     [state, update]
   )
 
+  const inSubSurface = Boolean(browseDeckId || matchDeckId)
+
+  // Taking a test is fullscreen, same as reviewing a deck: no header, no tabs.
+  // TestSurface carries its own back button, progress bar, and Esc handling.
+  if (takingTest) {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+        <TestSurface
+          file={takingTest}
+          onComplete={() => setTestAttempts(loadTestAttempts())}
+          onExit={() => setTakingTest(null)}
+        />
+      </div>
+    )
+  }
+
+  // Entering a deck is fullscreen: the whole page becomes the card — no header,
+  // no tabs, nothing but the review. Esc (or the back button) returns.
+  if (reviewing && current) {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+        <ReviewSurface
+          activeCategory={categoryForQueueItem(current, state)}
+          flip={flip}
+          intervals={previewIntervals(state, current.scheduleKey, now)}
+          item={current}
+          onExit={exitReview}
+          onGrade={grade}
+          onReveal={() => setRevealed(true)}
+          onUndo={lastUndo ? undoGrade : null}
+          position={Math.min(done + 1, sessionTotal)}
+          progress={sessionTotal > 0 ? done / sessionTotal : 0}
+          remainingCounts={remainingCounts}
+          revealed={revealed}
+          sessionTotal={sessionTotal}
+          showIntervalHints={settings.showIntervalHints}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       <header className="flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5">
@@ -597,14 +678,13 @@ export function StudyView() {
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
-          {reviewing || browseDeckId || matchDeckId || takingTest ? (
+        <div className="flex shrink-0 items-center gap-1.5">
+          {inSubSurface || reviewing ? (
             <Button
               onClick={() => {
                 exitReview()
                 setBrowseDeckId(null)
                 setMatchDeckId(null)
-                setTakingTest(null)
               }}
               size="sm"
               variant="outline"
@@ -613,27 +693,10 @@ export function StudyView() {
             </Button>
           ) : (
             <>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button aria-label="Add study material" size="icon-xs" title="Add study material" variant="ghost">
-                    <IconPlus />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuItem onSelect={() => setNewDeckSection('')}>
-                    <IconCards />
-                    New deck
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setNewSectionOpen(true)}>
-                    <IconFolderPlus />
-                    New section
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => setImportOpen(true)}>
-                    <IconFileImport />
-                    Import cards
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button onClick={() => askAgent()} size="sm" variant="outline">
+                <span aria-hidden="true" className="size-1.5 rounded-full bg-(--theme-primary)" />
+                Ask the agent
+              </Button>
 
               <Tip label="Study settings">
                 <Button
@@ -650,7 +713,33 @@ export function StudyView() {
         </div>
       </header>
 
-      {!reviewing && !browseDeckId && !matchDeckId && !takingTest && (
+      {!inSubSurface && !reviewing && (
+        <nav aria-label="Study sections" className="mx-6 mb-3 flex items-center gap-1 border-b border-(--ui-stroke-tertiary)">
+          {STUDY_TABS.map(option => {
+            const count =
+              option.id === 'cards' ? todayQueue.length : option.id === 'tests' ? tests.length : mindmaps.length
+
+            return (
+              <button
+                aria-current={tab === option.id ? 'page' : undefined}
+                className={cn(
+                  'relative -mb-px flex items-center gap-1.5 border-b-2 border-transparent px-2.5 pb-2 pt-1 text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50',
+                  tab === option.id && 'border-(--theme-primary) text-foreground'
+                )}
+                key={option.id}
+                onClick={() => switchTab(option.id)}
+                type="button"
+              >
+                {option.icon}
+                {option.label}
+                {count > 0 && <span className="tabular-nums text-(--ui-text-quaternary)">{count}</span>}
+              </button>
+            )
+          })}
+        </nav>
+      )}
+
+      {tab === 'cards' && !inSubSurface && !reviewing && (
         <TodaysReviewBrief
           counts={todayCounts}
           estimatedMinutes={estimatedReviewMinutes}
@@ -660,7 +749,7 @@ export function StudyView() {
         />
       )}
 
-      {autoImported.length > 0 && !reviewing && !browseDeckId && (
+      {autoImported.length > 0 && !reviewing && !browseDeckId && tab === 'cards' && (
         <div className="mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs">
           <span>
             Nemesis added {autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`}:{' '}
@@ -677,32 +766,15 @@ export function StudyView() {
       )}
 
       {reviewing ? (
-        current ? (
-          <ReviewSurface
-            activeCategory={categoryForQueueItem(current, state)}
-            flip={flip}
-            intervals={previewIntervals(state, current.scheduleKey, now)}
-            item={current}
-            onGrade={grade}
-            onReveal={() => setRevealed(true)}
-            onUndo={lastUndo ? undoGrade : null}
-            position={Math.min(done + 1, sessionTotal)}
-            remainingCounts={remainingCounts}
-            revealed={revealed}
-            sessionTotal={sessionTotal}
-            showIntervalHints={settings.showIntervalHints}
-          />
-        ) : (
-          <EmptyState
-            className="flex-1"
-            description={
-              done > 0
-                ? `${sessionRecapLine(done, sessionGrades)} Come back when the next ones are due.`
-                : 'Nothing is due right now.'
-            }
-            title="All caught up"
-          />
-        )
+        <EmptyState
+          className="flex-1"
+          description={
+            done > 0
+              ? `${sessionRecapLine(done, sessionGrades)} Come back when the next ones are due.`
+              : 'Nothing is due right now.'
+          }
+          title="All caught up"
+        />
       ) : matchDeckId ? (
         <MatchGame
           deck={state.decks.find(deck => deck.id === matchDeckId) ?? null}
@@ -719,31 +791,56 @@ export function StudyView() {
           sections={sections}
           state={state}
         />
-      ) : takingTest ? (
-        <TestSurface
-          file={takingTest}
-          onComplete={() => setTestAttempts(loadTestAttempts())}
-          onExit={() => setTakingTest(null)}
-        />
-      ) : (
-        <DeckBrowser
+      ) : tab === 'cards' ? (
+        <>
+          <div className="mx-6 mb-1 flex items-center gap-4">
+            <Button onClick={() => setNewDeckSection('')} size="inline" variant="text">
+              <IconPlus size={13} />
+              New deck
+            </Button>
+            <Button onClick={() => setImportOpen(true)} size="inline" variant="text">
+              <IconFileImport size={13} />
+              Import
+            </Button>
+            <Button onClick={() => setNewSectionOpen(true)} size="inline" variant="text">
+              <IconFolderPlus size={13} />
+              New section
+            </Button>
+          </div>
+          <DeckBrowser
+            collapsedSections={collapsedSections}
+            onBrowse={setBrowseDeckId}
+            onCreateDeck={setNewDeckSection}
+            onDeleteDeck={removeDeck}
+            onDeleteSection={course => update(deleteSection(state, course))}
+            onMatch={startMatch}
+            onMoveDeck={moveDeck}
+            onStudy={startReview}
+            onToggleSection={toggleSection}
+            queueCounts={queueCountsByDeck}
+            state={state}
+          />
+        </>
+      ) : tab === 'tests' ? (
+        <TestsBrowser
           collapsedSections={collapsedSections}
           mindmaps={mindmaps}
-          onBrowse={setBrowseDeckId}
-          onCreateDeck={setNewDeckSection}
-          onDeleteDeck={removeDeck}
-          onDeleteSection={course => update(deleteSection(state, course))}
-          onMatch={startMatch}
-          onMoveDeck={moveDeck}
-          onOpenMindmap={setViewingMindmap}
+          onAskAgent={askAgent}
           onStartTest={setTakingTest}
-          onStudy={startReview}
           onToggleSection={toggleSection}
-          onViewChange={setViewMode}
           state={state}
           testAttempts={testAttempts}
           tests={tests}
-          view={view}
+        />
+      ) : (
+        <MindmapsBrowser
+          collapsedSections={collapsedSections}
+          mindmaps={mindmaps}
+          onAskAgent={askAgent}
+          onOpenMindmap={setViewingMindmap}
+          onToggleSection={toggleSection}
+          state={state}
+          tests={tests}
         />
       )}
 
@@ -1159,105 +1256,78 @@ function StudySettingsDialog({
   )
 }
 
-// DeckGroup, widened with the section's mind maps/tests (see extras.ts's groupExtras) —
-// a section can now have content even with zero decks, so the "no decks" placard below
-// is suppressed whenever there's something else to show.
-interface StudySectionGroup {
-  course: string
-  decks: StudyDeck[]
-  extras?: { mindmaps: MindmapFile[]; tests: TestFile[] }
-  stats: DeckStats
+/** Shared grid for the Anki-style deck table: name | New | Learn | Due | row menu. */
+const DECK_GRID = 'grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_3.25rem_2.25rem] items-center gap-x-2'
+
+const ZERO_COUNTS: ReviewCategoryCounts = { learning: 0, new: 0, review: 0 }
+
+function CountCell({ tone, value }: { tone: ReviewCategory; value: number }) {
+  return (
+    <span
+      className={cn(
+        'text-right text-xs tabular-nums',
+        value === 0
+          ? 'text-(--ui-text-quaternary)'
+          : tone === 'review'
+            ? 'font-semibold text-(--theme-primary)'
+            : tone === 'learning'
+              ? 'text-foreground'
+              : 'text-muted-foreground'
+      )}
+    >
+      {value}
+    </span>
+  )
+}
+
+function DeckColumnHeader() {
+  return (
+    <div className={cn(DECK_GRID, 'px-3 pb-1')}>
+      <span />
+      {(['New', 'Learn', 'Due'] as const).map(label => (
+        <span
+          className="text-right text-[0.6rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)"
+          key={label}
+        >
+          {label}
+        </span>
+      ))}
+      <span />
+    </div>
+  )
 }
 
 function DeckBrowser({
   collapsedSections,
-  mindmaps,
   onBrowse,
   onCreateDeck,
   onDeleteDeck,
   onDeleteSection,
   onMatch,
   onMoveDeck,
-  onOpenMindmap,
-  onStartTest,
   onStudy,
   onToggleSection,
-  onViewChange,
-  state,
-  testAttempts,
-  tests,
-  view
+  queueCounts,
+  state
 }: {
   collapsedSections: Set<string>
-  mindmaps: MindmapFile[]
   onBrowse: (deckId: string) => void
   onCreateDeck: (section: string) => void
   onDeleteDeck: (deckId: string) => void
   onDeleteSection: (course: string) => void
   onMatch: (deckId: string) => void
   onMoveDeck: (deckId: string, section: string) => void
-  onOpenMindmap: (file: MindmapFile) => void
-  onStartTest: (file: TestFile) => void
   onStudy: (deckId: string) => void
   onToggleSection: (course: string) => void
-  onViewChange: (view: DeckViewMode) => void
+  /** Per-deck NEW/LEARN/DUE from today's capped queue (see queueCountsByDeck). */
+  queueCounts: Map<string, ReviewCategoryCounts>
   state: StudyState
-  testAttempts: TestAttemptsStore
-  tests: TestFile[]
-  view: DeckViewMode
 }) {
   const [deleteDeckTarget, setDeleteDeckTarget] = useState<StudyDeck | null>(null)
   const [deleteSectionTarget, setDeleteSectionTarget] = useState<null | string>(null)
 
-  const { curvesByDeck, now } = useMemo(() => {
-    const calculationTime = new Date()
-
-    const curves = new Map(
-      state.decks.map(deck => [
-        deck.id,
-        deckRetentionCurve(
-          deck.cards.flatMap(card => {
-            const schedule = state.schedule[card.id]
-
-            return schedule ? [schedule] : []
-          }),
-          calculationTime
-        )
-      ])
-    )
-
-    return { curvesByDeck: curves, now: calculationTime }
-  }, [state])
-
-  const deckGroups = groupDecks(state, now)
-
-  const extrasByCourse = useMemo(
-    () => groupExtras(state.sections, mindmaps, tests),
-    [mindmaps, state.sections, tests]
-  )
-
-  const extraOnlyCourses = [...extrasByCourse.keys()]
-    .filter(course => !deckGroups.some(group => group.course === course))
-    .sort((a, b) => a.localeCompare(b))
-
-  const groups: StudySectionGroup[] = [
-    ...deckGroups.map(group => ({ ...group, extras: extrasByCourse.get(group.course) })),
-    ...extraOnlyCourses.map(course => ({
-      course,
-      decks: [],
-      extras: extrasByCourse.get(course),
-      stats: { due: 0, fresh: 0, total: 0 }
-    }))
-  ].sort((a, b) => {
-    const aIsOther = a.course.toLocaleLowerCase() === 'other'
-    const bIsOther = b.course.toLocaleLowerCase() === 'other'
-
-    if (aIsOther !== bIsOther) {
-      return aIsOther ? 1 : -1
-    }
-
-    return b.stats.due - a.stats.due || a.course.localeCompare(b.course)
-  })
+  const now = useMemo(() => new Date(), [state])
+  const groups = groupDecks(state, now)
 
   if (!groups.length) {
     return (
@@ -1267,46 +1337,29 @@ function DeckBrowser({
 
   return (
     <div className="pb-10">
-      <div className="flex justify-end px-8 pt-1">
-        <div className="flex items-center rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-0.5">
-          <Tip label="List view">
-            <Button
-              aria-label="List view"
-              aria-pressed={view === 'list'}
-              className={cn(view === 'list' && 'bg-(--ui-control-active-background) text-foreground')}
-              onClick={() => onViewChange('list')}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <IconList />
-            </Button>
-          </Tip>
-          <Tip label="Card view">
-            <Button
-              aria-label="Card view"
-              aria-pressed={view === 'cards'}
-              className={cn(view === 'cards' && 'bg-(--ui-control-active-background) text-foreground')}
-              onClick={() => onViewChange('cards')}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <IconLayoutGrid />
-            </Button>
-          </Tip>
-        </div>
+      <div className="px-8 pt-3">
+        <DeckColumnHeader />
       </div>
 
       {groups.map(group => {
-        const groupMindmaps = group.extras?.mindmaps ?? []
-        const groupTests = group.extras?.tests ?? []
-        const hasExtras = groupMindmaps.length > 0 || groupTests.length > 0
-        const hasResources = group.decks.length > 0 || hasExtras
         const isCollapsed = collapsedSections.has(group.course)
+        const rollup = group.decks.reduce<ReviewCategoryCounts>(
+          (sum, deck) => {
+            const counts = queueCounts.get(deck.id) ?? ZERO_COUNTS
+
+            return {
+              learning: sum.learning + counts.learning,
+              new: sum.new + counts.new,
+              review: sum.review + counts.review
+            }
+          },
+          { learning: 0, new: 0, review: 0 }
+        )
 
         return (
-          <section className="px-8 pt-5" key={group.course}>
-            <div className="mb-2 flex items-baseline justify-between gap-4">
-              <h2 className="min-w-0 text-sm font-semibold tracking-tight">
+          <section className="px-8 pt-3" key={group.course}>
+            <div className={cn(DECK_GRID, 'group/section rounded-md px-3 py-1.5')}>
+              <h2 className="min-w-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 <button
                   aria-expanded={!isCollapsed}
                   className="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -1316,21 +1369,22 @@ function DeckBrowser({
                   <IconChevronDown
                     aria-hidden="true"
                     className={cn('shrink-0 transition-transform', isCollapsed && '-rotate-90')}
-                    size={14}
+                    size={13}
                   />
                   <span className="truncate">{group.course}</span>
+                  <span className="font-normal normal-case tracking-normal text-(--ui-text-quaternary)">
+                    {group.decks.length} deck{group.decks.length === 1 ? '' : 's'}
+                  </span>
                 </button>
               </h2>
-              <span className="flex shrink-0 items-center gap-2 text-[0.6875rem] tabular-nums text-muted-foreground">
-                {group.stats.due} due · {group.decks.length} deck{group.decks.length === 1 ? '' : 's'} ·{' '}
-                {group.stats.total} cards
-                {groupMindmaps.length > 0 &&
-                  ` · ${groupMindmaps.length} mind map${groupMindmaps.length === 1 ? '' : 's'}`}
-                {groupTests.length > 0 && ` · ${groupTests.length} test${groupTests.length === 1 ? '' : 's'}`}
+              <CountCell tone="new" value={rollup.new} />
+              <CountCell tone="learning" value={rollup.learning} />
+              <CountCell tone="review" value={rollup.review} />
+              <span className="flex justify-end">
                 {group.course.toLocaleLowerCase() !== 'other' && (
                   <button
                     aria-label={`Delete section ${group.course}`}
-                    className="rounded-sm p-0.5 text-muted-foreground/70 outline-none hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className="rounded-sm p-0.5 text-muted-foreground/70 opacity-0 outline-none transition-opacity hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 group-hover/section:opacity-100"
                     onClick={() => setDeleteSectionTarget(group.course)}
                     title="Delete section"
                     type="button"
@@ -1342,84 +1396,22 @@ function DeckBrowser({
             </div>
 
             {!isCollapsed &&
-              (hasResources ? (
-                view === 'list' ? (
-                  <div className="divide-y divide-(--ui-stroke-tertiary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
-                    {group.decks.map(deck => (
-                      <DeckRow
-                        curve={curvesByDeck.get(deck.id) ?? []}
-                        deck={deck}
-                        key={deck.id}
-                        now={now}
-                        onBrowse={onBrowse}
-                        onDelete={() => setDeleteDeckTarget(deck)}
-                        onMatch={onMatch}
-                        onMove={section => onMoveDeck(deck.id, section)}
-                        onStudy={onStudy}
-                        sections={state.sections}
-                        state={state}
-                      />
-                    ))}
-                    {groupMindmaps.map(mindmap => (
-                      <MindmapRow key={mindmap.fileName} mindmap={mindmap} onOpen={() => onOpenMindmap(mindmap)} />
-                    ))}
-                    {groupTests.map(test => (
-                      <TestRow
-                        attempts={testAttempts[test.fileName]?.attempts ?? []}
-                        key={test.fileName}
-                        onStart={() => onStartTest(test)}
-                        test={test}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <>
-                    {group.decks.length > 0 && (
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {group.decks.map(deck => (
-                          <DeckCard
-                            curve={curvesByDeck.get(deck.id) ?? []}
-                            deck={deck}
-                            key={deck.id}
-                            now={now}
-                            onBrowse={onBrowse}
-                            onDelete={() => setDeleteDeckTarget(deck)}
-                            onMatch={onMatch}
-                            onMove={section => onMoveDeck(deck.id, section)}
-                            onStudy={onStudy}
-                            sections={state.sections}
-                            state={state}
-                          />
-                        ))}
-                      </div>
-                    )}
-
-                    {hasExtras && (
-                      <div
-                        className={cn(
-                          'divide-y divide-(--ui-stroke-tertiary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)',
-                          group.decks.length > 0 && 'mt-3'
-                        )}
-                      >
-                        {groupMindmaps.map(mindmap => (
-                          <MindmapRow
-                            key={mindmap.fileName}
-                            mindmap={mindmap}
-                            onOpen={() => onOpenMindmap(mindmap)}
-                          />
-                        ))}
-                        {groupTests.map(test => (
-                          <TestRow
-                            attempts={testAttempts[test.fileName]?.attempts ?? []}
-                            key={test.fileName}
-                            onStart={() => onStartTest(test)}
-                            test={test}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )
+              (group.decks.length > 0 ? (
+                <div className="divide-y divide-(--ui-stroke-quaternary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
+                  {group.decks.map(deck => (
+                    <DeckTableRow
+                      counts={queueCounts.get(deck.id) ?? ZERO_COUNTS}
+                      deck={deck}
+                      key={deck.id}
+                      onBrowse={onBrowse}
+                      onDelete={() => setDeleteDeckTarget(deck)}
+                      onMatch={onMatch}
+                      onMove={section => onMoveDeck(deck.id, section)}
+                      onStudy={onStudy}
+                      sections={state.sections}
+                    />
+                  ))}
+                </div>
               ) : (
                 <div className="rounded-md border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-card) px-4 py-4">
                   <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">
@@ -1478,23 +1470,239 @@ function ResourceIcon({ children }: { children: React.ReactNode }) {
   )
 }
 
-function MindmapRow({ mindmap, onOpen }: { mindmap: MindmapFile; onOpen: () => void }) {
+/** Rough node count for a mind-map card: outline headings + bullets. */
+function countOutlineNodes(outline: string): number {
+  return outline.split('\n').filter(line => /^\s*(?:[-*+]|#{1,6})\s/.test(line)).length
+}
+
+function ExtrasSectionHeader({
+  collapsed,
+  course,
+  meta,
+  onToggle
+}: {
+  collapsed: boolean
+  course: string
+  meta: string
+  onToggle: () => void
+}) {
   return (
-    <div className="flex w-full items-center gap-3 px-3 py-2.5">
-      <ResourceIcon>
-        <IconSitemap size={15} />
-      </ResourceIcon>
+    <div className="mb-2 flex items-baseline justify-between gap-4">
+      <h2 className="min-w-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <button
+          aria-expanded={!collapsed}
+          className="flex min-w-0 items-center gap-1.5 rounded-sm text-left outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+          onClick={onToggle}
+          type="button"
+        >
+          <IconChevronDown
+            aria-hidden="true"
+            className={cn('shrink-0 transition-transform', collapsed && '-rotate-90')}
+            size={13}
+          />
+          <span className="truncate">{course}</span>
+        </button>
+      </h2>
+      <span className="shrink-0 text-[0.6875rem] tabular-nums text-muted-foreground">{meta}</span>
+    </div>
+  )
+}
 
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{mindmap.title}</div>
-        <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground">Mind map · visual outline</div>
+/** Empty state with the one agent CTA these tabs earn — the agent authors this material. */
+function AgentEmptyState({
+  cta,
+  description,
+  onAsk,
+  title
+}: {
+  cta: string
+  description: string
+  onAsk: () => void
+  title: string
+}) {
+  return (
+    <div className="grid flex-1 place-items-center px-6 py-16 text-center">
+      <div>
+        <div className="text-sm font-medium">{title}</div>
+        <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">{description}</p>
+        <Button className="mt-4" onClick={onAsk} size="sm" variant="outline">
+          <IconSparkles size={14} />
+          {cta}
+        </Button>
       </div>
+    </div>
+  )
+}
 
-      <span className="hidden w-40 shrink-0 text-right text-xs text-muted-foreground sm:block">Visual outline</span>
+function TestsBrowser({
+  collapsedSections,
+  mindmaps,
+  onAskAgent,
+  onStartTest,
+  onToggleSection,
+  state,
+  testAttempts,
+  tests
+}: {
+  collapsedSections: Set<string>
+  mindmaps: MindmapFile[]
+  onAskAgent: (draft?: string) => void
+  onStartTest: (file: TestFile) => void
+  onToggleSection: (course: string) => void
+  state: StudyState
+  testAttempts: TestAttemptsStore
+  tests: TestFile[]
+}) {
+  const extrasByCourse = useMemo(
+    () => groupExtras(state.sections, mindmaps, tests),
+    [mindmaps, state.sections, tests]
+  )
 
-      <Button onClick={onOpen} size="sm" variant="outline">
-        Open
-      </Button>
+  const courses = [...extrasByCourse.entries()]
+    .filter(([, extras]) => extras.tests.length > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  if (!courses.length) {
+    return (
+      <AgentEmptyState
+        cta="Ask the agent for one"
+        description="Practice tests live here, grouped by course. The agent builds them from your lectures and grades your attempts."
+        onAsk={() =>
+          onAskAgent(
+            'Build me a practice test from my recent lectures — multiple choice with an explanation for every answer, saved to my Tests folder.'
+          )
+        }
+        title="No practice tests yet"
+      />
+    )
+  }
+
+  return (
+    <div className="pb-10">
+      {courses.map(([course, extras]) => {
+        const isCollapsed = collapsedSections.has(course)
+        const bestPct = extras.tests.reduce<null | number>((best, test) => {
+          const attempt = bestAttempt(testAttempts[test.fileName]?.attempts ?? [])
+
+          if (!attempt || attempt.total === 0) {
+            return best
+          }
+
+          const pct = Math.round((attempt.score / attempt.total) * 100)
+
+          return best === null ? pct : Math.max(best, pct)
+        }, null)
+
+        return (
+          <section className="px-8 pt-4" key={course}>
+            <ExtrasSectionHeader
+              collapsed={isCollapsed}
+              course={course}
+              meta={`${extras.tests.length} test${extras.tests.length === 1 ? '' : 's'}${bestPct === null ? '' : ` · best ${bestPct}%`}`}
+              onToggle={() => onToggleSection(course)}
+            />
+            {!isCollapsed && (
+              <div className="divide-y divide-(--ui-stroke-quaternary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
+                {extras.tests.map(test => (
+                  <TestRow
+                    attempts={testAttempts[test.fileName]?.attempts ?? []}
+                    key={test.fileName}
+                    onStart={() => onStartTest(test)}
+                    test={test}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+function MindmapCard({ mindmap, onOpen }: { mindmap: MindmapFile; onOpen: () => void }) {
+  const nodes = countOutlineNodes(mindmap.outline)
+
+  return (
+    <button
+      className="flex flex-col items-start rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4 text-left outline-none transition-colors hover:border-(--ui-stroke-secondary) focus-visible:ring-2 focus-visible:ring-ring/50"
+      onClick={onOpen}
+      type="button"
+    >
+      <IconSitemap className="text-(--ui-text-tertiary)" size={16} />
+      <span className="mt-2 w-full truncate text-sm font-medium">{mindmap.title}</span>
+      <span className="mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
+        {nodes} node{nodes === 1 ? '' : 's'} · opens the interactive map
+      </span>
+    </button>
+  )
+}
+
+function MindmapsBrowser({
+  collapsedSections,
+  mindmaps,
+  onAskAgent,
+  onOpenMindmap,
+  onToggleSection,
+  state,
+  tests
+}: {
+  collapsedSections: Set<string>
+  mindmaps: MindmapFile[]
+  onAskAgent: (draft?: string) => void
+  onOpenMindmap: (file: MindmapFile) => void
+  onToggleSection: (course: string) => void
+  state: StudyState
+  tests: TestFile[]
+}) {
+  const extrasByCourse = useMemo(
+    () => groupExtras(state.sections, mindmaps, tests),
+    [mindmaps, state.sections, tests]
+  )
+
+  const courses = [...extrasByCourse.entries()]
+    .filter(([, extras]) => extras.mindmaps.length > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  if (!courses.length) {
+    return (
+      <AgentEmptyState
+        cta="Ask the agent for one"
+        description="Mind maps live here, grouped by course — the big picture of each topic as an interactive map the agent draws from your material."
+        onAsk={() =>
+          onAskAgent(
+            'Build a mind map of the big picture from my recent lectures — a markdown outline saved to my Mindmaps folder.'
+          )
+        }
+        title="No mind maps yet"
+      />
+    )
+  }
+
+  return (
+    <div className="pb-10">
+      {courses.map(([course, extras]) => {
+        const isCollapsed = collapsedSections.has(course)
+        const nodeTotal = extras.mindmaps.reduce((sum, mindmap) => sum + countOutlineNodes(mindmap.outline), 0)
+
+        return (
+          <section className="px-8 pt-4" key={course}>
+            <ExtrasSectionHeader
+              collapsed={isCollapsed}
+              course={course}
+              meta={`${extras.mindmaps.length} map${extras.mindmaps.length === 1 ? '' : 's'} · ${nodeTotal} nodes`}
+              onToggle={() => onToggleSection(course)}
+            />
+            {!isCollapsed && (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {extras.mindmaps.map(mindmap => (
+                  <MindmapCard key={mindmap.fileName} mindmap={mindmap} onOpen={() => onOpenMindmap(mindmap)} />
+                ))}
+              </div>
+            )}
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -1529,175 +1737,6 @@ function TestRow({ attempts, onStart, test }: { attempts: TestAttempt[]; onStart
   )
 }
 
-function DuePill({ due }: { due: number }) {
-  return (
-    <span className="shrink-0 rounded-full bg-(--theme-primary)/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-(--theme-primary)">
-      {due} due
-    </span>
-  )
-}
-
-const RETENTION_DAY_MS = 24 * 60 * 60 * 1000
-
-function RetentionSparkline({ curve, now }: { curve: RetentionPoint[]; now: Date }) {
-  const [activeIndex, setActiveIndex] = useState(0)
-  const [inspecting, setInspecting] = useState(false)
-
-  if (!curve.length) {
-    return (
-      <div>
-        <svg aria-hidden="true" className="h-9 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
-          <line
-            stroke="var(--ui-stroke-secondary)"
-            strokeDasharray="3 4"
-            strokeLinecap="round"
-            strokeWidth="1"
-            vectorEffect="non-scaling-stroke"
-            x1="2"
-            x2="98"
-            y1="12"
-            y2="28"
-          />
-        </svg>
-        <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">
-          <span className="font-medium text-foreground">No recall estimate yet</span>
-          <span> · Review a card to begin</span>
-        </p>
-      </div>
-    )
-  }
-
-  const finalDay = curve.at(-1)?.day ?? 1
-
-  const coordinates = curve.map(point => {
-    const x = 2 + (point.day / Math.max(1, finalDay)) * 96
-    const y = 4 + (1 - point.retention) * 30
-
-    return [x, y] as const
-  })
-
-  const points = coordinates.map(([x, y]) => `${x},${y}`).join(' ')
-  const first = curve[0]
-  const last = curve.at(-1) ?? first
-  const safeIndex = Math.min(activeIndex, curve.length - 1)
-  const activePoint = curve[safeIndex]
-  const [activeX, activeY] = coordinates[safeIndex]
-
-  const activeDate = new Date(now.getTime() + activePoint.day * RETENTION_DAY_MS).toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short'
-  })
-
-  const activeLabel = `${activeDate} · estimated recall ${Math.round(activePoint.retention * 100)}%`
-
-  const tooltipTransform =
-    activeX < 22
-      ? 'translate(0, calc(-100% - 8px))'
-      : activeX > 78
-        ? 'translate(-100%, calc(-100% - 8px))'
-        : 'translate(-50%, calc(-100% - 8px))'
-
-  return (
-    <div
-      aria-label={`${Math.round(first.retention * 100)}% recall now. Projected ${Math.round(last.retention * 100)}% in ${finalDay} days. Use the arrow keys to inspect the curve.`}
-      className="relative outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-      onBlur={() => setInspecting(false)}
-      onFocus={() => setInspecting(true)}
-      onKeyDown={event => {
-        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
-          return
-        }
-
-        event.preventDefault()
-        setInspecting(true)
-        setActiveIndex(index =>
-          event.key === 'ArrowLeft'
-            ? Math.max(0, index - 1)
-            : Math.min(curve.length - 1, index + 1)
-        )
-      }}
-      onPointerLeave={event => {
-        if (document.activeElement !== event.currentTarget) {
-          setInspecting(false)
-        }
-      }}
-      onPointerMove={event => {
-        const rect = event.currentTarget.getBoundingClientRect()
-        const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)))
-
-        setActiveIndex(Math.round(ratio * (curve.length - 1)))
-        setInspecting(true)
-      }}
-      role="img"
-      tabIndex={0}
-    >
-      <svg aria-hidden="true" className="h-9 w-full" preserveAspectRatio="none" viewBox="0 0 100 40">
-        <polyline
-          fill="none"
-          points={points}
-          stroke="var(--ui-stroke-secondary)"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1"
-          vectorEffect="non-scaling-stroke"
-        />
-
-        {inspecting && (
-          <>
-            <line
-              stroke="var(--ui-text-secondary)"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-              x1={activeX - 3}
-              x2={activeX + 3}
-              y1={activeY}
-              y2={activeY}
-            />
-            <line
-              stroke="var(--ui-text-secondary)"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-              x1={activeX}
-              x2={activeX}
-              y1={activeY - 3}
-              y2={activeY + 3}
-            />
-          </>
-        )}
-
-        <circle
-          cx={coordinates[coordinates.length - 1][0]}
-          cy={coordinates[coordinates.length - 1][1]}
-          fill="var(--theme-primary)"
-          r="1.7"
-        />
-      </svg>
-
-      {inspecting && (
-        <span
-          className="pointer-events-none absolute z-20 whitespace-nowrap bg-foreground px-1.5 py-1 text-[11px] font-bold leading-none text-background"
-          style={{
-            left: `${activeX}%`,
-            top: `${(activeY / 40) * 100}%`,
-            transform: tooltipTransform
-          }}
-        >
-          {activeLabel}
-        </span>
-      )}
-
-      <Tip label="FSRS estimate based on cards you’ve reviewed in this deck." side="bottom">
-        <p className="mt-0.5 cursor-help text-[0.6875rem] tabular-nums">
-          <span className="font-semibold text-foreground">{Math.round(first.retention * 100)}% recall now</span>
-          <span className="text-muted-foreground">
-            {' '}
-            · Projected {Math.round(last.retention * 100)}% in {finalDay} days
-          </span>
-        </p>
-      </Tip>
-    </div>
-  )
-}
 
 function DeckActionsMenu({
   deck,
@@ -1764,116 +1803,46 @@ function DeckActionsMenu({
   )
 }
 
-function DeckRow({
-  curve,
+function DeckTableRow({
+  counts,
   deck,
-  now,
   onBrowse,
   onDelete,
   onMatch,
   onMove,
   onStudy,
-  sections,
-  state
+  sections
 }: {
-  curve: RetentionPoint[]
+  counts: ReviewCategoryCounts
   deck: StudyDeck
-  now: Date
   onBrowse: (deckId: string) => void
   onDelete: () => void
   onMatch: (deckId: string) => void
   onMove: (section: string) => void
   onStudy: (deckId: string) => void
   sections: string[]
-  state: StudyState
 }) {
-  const stats = deckStats(state, deck.id, now)
   const matchableCount = deck.cards.filter(card => !hasClozeMarker(card.front)).length
 
   return (
-    <div className="flex w-full items-center gap-3 px-3 py-2.5">
-      <ResourceIcon>
-        <IconCards size={15} />
-      </ResourceIcon>
-
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium">{deck.name}</span>
-          {stats.due > 0 && <DuePill due={stats.due} />}
-        </div>
-        <p className="mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
-          {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
-        </p>
-      </div>
-
-      <div className="hidden w-52 shrink-0 lg:block">
-        <RetentionSparkline curve={curve} now={now} />
-      </div>
-
-      <Button onClick={() => onStudy(deck.id)} size="sm" variant="outline">
-        Study
-      </Button>
-
-      <DeckActionsMenu
-        deck={deck}
-        matchableCount={matchableCount}
-        onBrowse={() => onBrowse(deck.id)}
-        onDelete={onDelete}
-        onMatch={() => onMatch(deck.id)}
-        onMove={onMove}
-        sections={sections}
-      />
-    </div>
-  )
-}
-
-function DeckCard({
-  curve,
-  deck,
-  now,
-  onBrowse,
-  onDelete,
-  onMatch,
-  onMove,
-  onStudy,
-  sections,
-  state
-}: {
-  curve: RetentionPoint[]
-  deck: StudyDeck
-  now: Date
-  onBrowse: (deckId: string) => void
-  onDelete: () => void
-  onMatch: (deckId: string) => void
-  onMove: (section: string) => void
-  onStudy: (deckId: string) => void
-  sections: string[]
-  state: StudyState
-}) {
-  const stats = deckStats(state, deck.id, now)
-  const matchableCount = deck.cards.filter(card => !hasClozeMarker(card.front)).length
-
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-4">
-      <div className="flex items-start gap-2.5">
-        <ResourceIcon>
-          <IconCards size={15} />
-        </ResourceIcon>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold">{deck.name}</h3>
-          <p className="mt-0.5 text-[0.6875rem] tabular-nums text-muted-foreground">
-            {stats.total} card{stats.total === 1 ? '' : 's'} · {stats.fresh} new
-          </p>
-        </div>
-        {stats.due > 0 && <DuePill due={stats.due} />}
-      </div>
-
-      <RetentionSparkline curve={curve} now={now} />
-
-      <div className="mt-auto flex items-center justify-end gap-1">
-        <Button onClick={() => onStudy(deck.id)} size="sm" variant="outline">
-          Study
-        </Button>
+    <div className={cn(DECK_GRID, 'group/deck px-3 py-2 transition-colors hover:bg-(--ui-row-hover-background)')}>
+      <button
+        className="flex min-w-0 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={() => onStudy(deck.id)}
+        type="button"
+      >
+        <span className="truncate text-sm">{deck.name}</span>
+        <span
+          aria-hidden="true"
+          className="shrink-0 text-[0.6875rem] font-medium text-(--theme-primary) opacity-0 transition-opacity group-hover/deck:opacity-100"
+        >
+          study ›
+        </span>
+      </button>
+      <CountCell tone="new" value={counts.new} />
+      <CountCell tone="learning" value={counts.learning} />
+      <CountCell tone="review" value={counts.review} />
+      <span className="flex justify-end opacity-0 transition-opacity focus-within:opacity-100 group-hover/deck:opacity-100">
         <DeckActionsMenu
           deck={deck}
           matchableCount={matchableCount}
@@ -1883,7 +1852,7 @@ function DeckCard({
           onMove={onMove}
           sections={sections}
         />
-      </div>
+      </span>
     </div>
   )
 }
@@ -2607,10 +2576,12 @@ function ReviewSurface({
   flip,
   intervals,
   item,
+  onExit,
   onGrade,
   onReveal,
   onUndo,
   position,
+  progress,
   remainingCounts,
   revealed,
   sessionTotal,
@@ -2620,11 +2591,15 @@ function ReviewSurface({
   flip: boolean
   intervals: Record<StudyRating, string>
   item: QueueItem
+  /** Leave the fullscreen session (back button; Esc does the same). */
+  onExit: () => void
   onGrade: (rating: StudyRating) => void
   onReveal: () => void
   /** Take back the previous grade; null hides the affordance (nothing graded yet). */
   onUndo: (() => void) | null
   position: number
+  /** Session completion 0..1 for the hairline progress bar. */
+  progress: number
   remainingCounts: ReviewCategoryCounts
   revealed: boolean
   sessionTotal: number
@@ -2644,10 +2619,22 @@ function ReviewSurface({
   const answerNote = isCloze && item.card.back.trim() ? item.card.back : null
 
   return (
-    <div className="flex flex-1 flex-col items-center px-6 pb-8">
+    <div className="flex flex-1 flex-col items-center px-6 pb-8 pt-5">
       <div className="flex w-full max-w-2xl flex-1 flex-col">
         <div className="flex items-center justify-between gap-4 pb-2 text-xs text-muted-foreground">
-          <span className="min-w-0 truncate">
+          <span className="flex min-w-0 items-center gap-2 truncate">
+            <button
+              aria-label="Leave review"
+              className="flex shrink-0 items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+              onClick={onExit}
+              type="button"
+            >
+              <IconArrowLeft size={13} />
+              back
+            </button>
+            <span aria-hidden="true" className="text-(--ui-text-quaternary)">
+              ·
+            </span>
             {item.deckName}
             {item.isNew && (
               <Badge className="ml-2" variant="outline">
@@ -2686,6 +2673,13 @@ function ReviewSurface({
               ))}
             </span>
           </div>
+        </div>
+
+        <div aria-hidden="true" className="mb-4 h-0.5 overflow-hidden rounded-full bg-(--ui-bg-quaternary)">
+          <div
+            className="h-full rounded-full bg-(--theme-primary) transition-[width] duration-300 ease-out"
+            style={{ width: `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%` }}
+          />
         </div>
 
         {flip ? (
@@ -2765,6 +2759,10 @@ function ReviewSurface({
             </Button>
           )}
         </div>
+
+        <p className="pt-3 text-center text-[10px] text-(--ui-text-quaternary)">
+          Space to flip · 1–4 to grade · u undo · Esc exit
+        </p>
       </div>
     </div>
   )

@@ -1,7 +1,9 @@
-// Test mode: full-page quiz flow for an agent-written test file (see extras.ts), styled
+// Test mode: FULLSCREEN quiz flow for an agent-written test file (see extras.ts), styled
 // like the deck ReviewSurface in index.tsx — one question at a time, immediate feedback,
-// then a score screen. Attempts persist to localStorage so the section row can show a
-// best/last score without re-opening the test.
+// then a score screen. The page hides its header/tabs while a test runs, so this surface
+// carries its own back affordance. Attempts persist to localStorage so the section row
+// can show a best/last score without re-opening the test.
+import { IconArrowLeft } from '@tabler/icons-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -87,12 +89,9 @@ export function TestSurface({
   }, [file.fileName, finished, onComplete, recorded, score, total])
 
   // Same muscle memory as the deck review surface: number keys answer, Enter advances,
-  // Escape leaves. Skipped once the score screen is up (no question to key into).
+  // Escape leaves — including from the score screen (the page chrome is hidden while
+  // a test runs, so Esc must always be a way out).
   useEffect(() => {
-    if (finished || !question) {
-      return
-    }
-
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
 
@@ -103,6 +102,10 @@ export function TestSurface({
       if (event.key === 'Escape') {
         onExit()
 
+        return
+      }
+
+      if (finished || !question) {
         return
       }
 
@@ -139,10 +142,24 @@ export function TestSurface({
   const progress = total > 0 ? ((index + (revealed ? 1 : 0)) / total) * 100 : 0
 
   return (
-    <div className="flex flex-1 flex-col items-center px-6 pb-8">
+    <div className="flex flex-1 flex-col items-center px-6 pb-8 pt-5">
       <div className="flex w-full max-w-2xl flex-1 flex-col">
-        <div className="flex items-center justify-between pb-2 text-xs text-muted-foreground">
-          <span className="truncate">{file.title}</span>
+        <div className="flex items-center justify-between gap-4 pb-2 text-xs text-muted-foreground">
+          <span className="flex min-w-0 items-center gap-2 truncate">
+            <button
+              aria-label="Leave test"
+              className="flex shrink-0 items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+              onClick={onExit}
+              type="button"
+            >
+              <IconArrowLeft size={13} />
+              back
+            </button>
+            <span aria-hidden="true" className="text-(--ui-text-quaternary)">
+              ·
+            </span>
+            {file.title}
+          </span>
           <span className="tabular-nums">
             {index + 1}/{total}
           </span>

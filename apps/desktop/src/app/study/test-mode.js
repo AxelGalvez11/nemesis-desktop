@@ -1,8 +1,10 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-// Test mode: full-page quiz flow for an agent-written test file (see extras.ts), styled
+// Test mode: FULLSCREEN quiz flow for an agent-written test file (see extras.ts), styled
 // like the deck ReviewSurface in index.tsx — one question at a time, immediate feedback,
-// then a score screen. Attempts persist to localStorage so the section row can show a
-// best/last score without re-opening the test.
+// then a score screen. The page hides its header/tabs while a test runs, so this surface
+// carries its own back affordance. Attempts persist to localStorage so the section row
+// can show a best/last score without re-opening the test.
+import { IconArrowLeft } from '@tabler/icons-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -55,11 +57,9 @@ export function TestSurface({ file, onComplete, onExit }) {
         onComplete();
     }, [file.fileName, finished, onComplete, recorded, score, total]);
     // Same muscle memory as the deck review surface: number keys answer, Enter advances,
-    // Escape leaves. Skipped once the score screen is up (no question to key into).
+    // Escape leaves — including from the score screen (the page chrome is hidden while
+    // a test runs, so Esc must always be a way out).
     useEffect(() => {
-        if (finished || !question) {
-            return;
-        }
         const onKey = (event) => {
             const target = event.target;
             if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -67,6 +67,9 @@ export function TestSurface({ file, onComplete, onExit }) {
             }
             if (event.key === 'Escape') {
                 onExit();
+                return;
+            }
+            if (finished || !question) {
                 return;
             }
             if (!revealed) {
@@ -92,7 +95,7 @@ export function TestSurface({ file, onComplete, onExit }) {
         return null;
     }
     const progress = total > 0 ? ((index + (revealed ? 1 : 0)) / total) * 100 : 0;
-    return (_jsx("div", { className: "flex flex-1 flex-col items-center px-6 pb-8", children: _jsxs("div", { className: "flex w-full max-w-2xl flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between pb-2 text-xs text-muted-foreground", children: [_jsx("span", { className: "truncate", children: file.title }), _jsxs("span", { className: "tabular-nums", children: [index + 1, "/", total] })] }), _jsx("div", { className: "mb-4 h-1 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,theme(colors.muted.DEFAULT))", children: _jsx("div", { className: "h-full bg-(--theme-primary) transition-[width]", style: { width: `${progress}%` } }) }), _jsx("div", { className: "flex min-h-40 flex-1 flex-col justify-center gap-5 rounded-xl border border-border bg-card p-8", children: _jsx("div", { className: "text-lg leading-relaxed", children: question.q }) }), _jsx("div", { className: "grid grid-cols-1 gap-2 pt-4", children: question.options.map((option, optionIndex) => {
+    return (_jsx("div", { className: "flex flex-1 flex-col items-center px-6 pb-8 pt-5", children: _jsxs("div", { className: "flex w-full max-w-2xl flex-1 flex-col", children: [_jsxs("div", { className: "flex items-center justify-between gap-4 pb-2 text-xs text-muted-foreground", children: [_jsxs("span", { className: "flex min-w-0 items-center gap-2 truncate", children: [_jsxs("button", { "aria-label": "Leave test", className: "flex shrink-0 items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50", onClick: onExit, type: "button", children: [_jsx(IconArrowLeft, { size: 13 }), "back"] }), _jsx("span", { "aria-hidden": "true", className: "text-(--ui-text-quaternary)", children: "\u00B7" }), file.title] }), _jsxs("span", { className: "tabular-nums", children: [index + 1, "/", total] })] }), _jsx("div", { className: "mb-4 h-1 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary,theme(colors.muted.DEFAULT))", children: _jsx("div", { className: "h-full bg-(--theme-primary) transition-[width]", style: { width: `${progress}%` } }) }), _jsx("div", { className: "flex min-h-40 flex-1 flex-col justify-center gap-5 rounded-xl border border-border bg-card p-8", children: _jsx("div", { className: "text-lg leading-relaxed", children: question.q }) }), _jsx("div", { className: "grid grid-cols-1 gap-2 pt-4", children: question.options.map((option, optionIndex) => {
                         const isSelected = selected === optionIndex;
                         const isAnswer = optionIndex === question.answer;
                         return (_jsxs("button", { className: cn('flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors', !revealed && 'border-border bg-card hover:border-(--theme-primary)/50', revealed && isAnswer && 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300', revealed && isSelected && !isAnswer && 'nemesis-shake border-destructive bg-destructive/10 text-destructive', revealed && !isSelected && !isAnswer && 'border-border opacity-60'), disabled: revealed, onClick: () => selectOption(optionIndex), type: "button", children: [_jsx("span", { className: "flex size-5 shrink-0 items-center justify-center rounded-full border border-current text-[10px] font-semibold", children: optionIndex + 1 }), _jsx("span", { children: option })] }, optionIndex));
