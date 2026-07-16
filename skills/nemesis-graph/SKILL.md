@@ -81,7 +81,7 @@ The dashboard shows a provenance tag on every fact. Tag truthfully:
   headline the student most needs to see).
 - A syllabus → a `syllabus` object + `assignment`/`exam` objects for each dated item +
   `professor` + `course`.
-- A recorded lecture (recorder) → a `lecture` object; the concepts it introduced →
+- A lecture recording → a `lecture` object; the concepts it introduced →
   `concept` objects with `covers` relationships; if it's prerequisite for a weak area,
   note it.
 - An email about a research position, internship, scholarship, or rotation → an

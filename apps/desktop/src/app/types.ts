@@ -131,7 +131,6 @@ export type SidebarNavId =
   | 'ledger'
   | 'messaging'
   | 'new-session'
-  | 'recorder'
   | 'settings'
   | 'skills'
   | 'study'

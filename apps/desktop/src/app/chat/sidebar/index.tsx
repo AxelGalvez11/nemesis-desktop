@@ -105,7 +105,6 @@ import {
   GRAPH_ROUTE,
   LIBRARY_ROUTE,
   MESSAGING_ROUTE,
-  RECORDER_ROUTE,
   SETTINGS_ROUTE,
   SKILLS_ROUTE,
   STUDY_ROUTE,
@@ -164,7 +163,6 @@ const SIDEBAR_NAV_ALL: SidebarNavItem[] = [
   { id: 'study', label: 'Study', icon: props => <Codicon name="mortar-board" {...props} />, route: STUDY_ROUTE },
   { id: 'library', label: 'Library', icon: props => <Codicon name="book" {...props} />, route: LIBRARY_ROUTE },
   { id: 'graph', label: 'Graph', icon: props => <Codicon name="type-hierarchy-sub" {...props} />, route: GRAPH_ROUTE },
-  { id: 'recorder', label: 'Recorder', icon: props => <Codicon name="record" {...props} />, route: RECORDER_ROUTE },
   { id: 'calendar', label: 'Calendar', icon: props => <Codicon name="calendar" {...props} />, route: CALENDAR_ROUTE }
 ]
 
