@@ -266,6 +266,65 @@ async function syncBackendLlm(): Promise<void> {
   }
 }
 
+// iOS companion: main process (electron/mission-dispatcher.ts) polls
+// agent_missions with this token under RLS, so it needs to stay current.
+// Best-effort and fire-and-forget everywhere it's called — a missed sync just
+// means the dispatcher keeps using whatever it already has (or stays paused
+// until the next successful push).
+function pushMissionSession(accessToken: string | null): void {
+  try {
+    void window.hermesDesktop?.nemesisMissionsSyncSession?.(accessToken)?.catch(() => {})
+  } catch {
+    // ignore
+  }
+}
+
+const MISSION_SESSION_RESYNC_MS = 20 * 60_000
+
+let missionSessionSyncTimer: ReturnType<typeof setInterval> | null = null
+
+/** Idempotent: safe to call from every place a session becomes "current".
+ *  A Supabase access token is short-lived (~1h) and nothing else re-checks it
+ *  on a long-running app — without this, leaving the Mac open longer than
+ *  that would silently stop the mission dispatcher (it would keep polling
+ *  with a stale token and 401ing) until the next sign-in-shaped event. This
+ *  re-validates/re-pushes well inside that window instead. */
+function startMissionSessionSync(): void {
+  if (missionSessionSyncTimer) {
+    return
+  }
+
+  missionSessionSyncTimer = setInterval(() => {
+    void (async () => {
+      const stored = loadSession()
+
+      if (!stored) {
+        return
+      }
+
+      try {
+        const fresh = await refreshIfNeeded(stored)
+
+        if (fresh !== stored) {
+          saveSession(fresh)
+        }
+
+        pushMissionSession(fresh.accessToken)
+      } catch {
+        // Offline, or the refresh itself was rejected — leave the timer
+        // running; the next tick (or the next sign-in-shaped event) retries.
+      }
+    })()
+  }, MISSION_SESSION_RESYNC_MS)
+}
+
+function stopMissionSessionSync(): void {
+  if (missionSessionSyncTimer) {
+    clearInterval(missionSessionSyncTimer)
+    missionSessionSyncTimer = null
+  }
+}
+
 async function applySession(session: StoredSession): Promise<void> {
   const entitlement = await fetchPlan(session)
 
@@ -294,6 +353,11 @@ async function applySession(session: StoredSession): Promise<void> {
   // to the metering proxy. Fire-and-forget so account state never waits on it.
   void syncBackendLlm()
 
+  // iOS companion: give the mission dispatcher this session's access token and
+  // make sure the periodic re-sync (JWT staleness guard) is running.
+  pushMissionSession(session.accessToken)
+  startMissionSessionSync()
+
   // No-op unless telemetry is running (consent-gated); uses the uuid, never the email.
   telemetryIdentify(session.userId)
 }
@@ -315,6 +379,12 @@ function applyUnavailableSession(session: StoredSession, previous?: AccountState
     trialEnd,
     userId: session.userId
   })
+
+  // The entitlement check failed (offline/rate-limited/5xx), but the session
+  // itself is still valid — the dispatcher's RLS calls only need identity, not
+  // plan status, so it should keep working through an unavailable entitlement.
+  pushMissionSession(session.accessToken)
+  startMissionSessionSync()
 }
 
 export async function initAccount(): Promise<void> {
@@ -497,6 +567,12 @@ export async function signOut(): Promise<void> {
   $deviceKey.set(null)
 
   resetTelemetryIdentity()
+
+  // iOS companion: stop the mission dispatcher immediately — a different
+  // student signing in on this Mac must never have missions dispatched under
+  // the previous account's session.
+  stopMissionSessionSync()
+  pushMissionSession(null)
 
   saveSession(null)
 

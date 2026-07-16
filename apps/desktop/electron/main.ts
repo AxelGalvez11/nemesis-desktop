@@ -64,7 +64,9 @@ import {
   shouldRemoveAppBundle,
   uninstallArgsForMode
 } from './desktop-uninstall'
+import { ensureDesktopDevice } from './device-registration'
 import { installEmbedReferer } from './embed-referer'
+import { createPhoneNotifier } from './expo-push'
 import { readDirForIpc } from './fs-read-dir'
 import { probeGatewayWebSocket } from './gateway-ws-probe'
 import { scanGitRepos } from './git-repo-scan'
@@ -95,6 +97,9 @@ import {
   TEXT_PREVIEW_SOURCE_MAX_BYTES
 } from './hardening'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
+import { createMissionDispatcher } from './mission-dispatcher'
+import { createWebSocketMissionGateway } from './mission-gateway'
+import { createMissionRunner } from './mission-runner'
 import { registerNemesisAsr } from './nemesis-asr'
 import {
   APP_ID,
@@ -7215,6 +7220,140 @@ ipcMain.handle('nemesis:llm:sync', async (_event, payload) => {
     return { ok: false, error: err.message }
   }
 })
+
+// Mission dispatcher (iOS companion). Phone-dispatched work is queued in
+// Supabase (agent_missions); this Mac polls, claims one, runs it through its
+// own agent gateway, and reports back — electron/mission-dispatcher.ts /
+// mission-runner.ts / expo-push.ts / device-registration.ts. Gated on a
+// signed-in session: the renderer pushes its Supabase access token here at
+// the same points nemesis-account.ts already treats the account as
+// established (sign-in, OAuth adopt, boot restore, periodic re-sync) and
+// clears it on sign-out. The agent never auto-submits schoolwork — missions
+// only ever produce drafts/results left in needs_review for the student.
+//
+// MISSION_SUPABASE_URL/ANON_KEY duplicate the public constants in
+// src/nemesis-account.ts rather than importing them: electron/ and src/ are
+// separate esbuild entry points (this file is bundled standalone), and both
+// values are public client credentials already shipped to every browser —
+// safe to embed twice. Keep them in sync if either ever rotates.
+const MISSION_SUPABASE_URL = 'https://qyjmivntajbigjswhahb.supabase.co'
+const MISSION_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF5am1pdm50YWpiaWdqc3doYWhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0NjcyMDEsImV4cCI6MjA5NjA0MzIwMX0.N305XZXSciym2q6c6UMoNwdmCIUZWPgW_3jMIVnIPHk'
+const MISSION_POLL_INTERVAL_MS = 30_000
+
+// In-memory only — never persisted. Set by nemesis:missions:sync-session,
+// cleared on sign-out. A real Supabase JWT (RLS needs auth.uid()), NOT the
+// nmk_ metering key nemesis:llm:sync handles above.
+let missionAccessToken: string | null = null
+
+function missionDeviceIdFile(): string {
+  return path.join(app.getPath('userData'), 'device-id.json')
+}
+
+function readCachedMissionDeviceId(): string | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(missionDeviceIdFile(), 'utf8'))
+
+    return typeof parsed?.id === 'string' && parsed.id ? parsed.id : null
+  } catch {
+    return null
+  }
+}
+
+function writeCachedMissionDeviceId(id: string): void {
+  try {
+    fs.mkdirSync(path.dirname(missionDeviceIdFile()), { recursive: true })
+    fs.writeFileSync(missionDeviceIdFile(), JSON.stringify({ id }), 'utf8')
+  } catch (error) {
+    rememberLog(`[missions] could not cache this device's id: ${error?.message || error}`)
+  }
+}
+
+// A cached device id is scoped to the user who registered it (devices'
+// unique key is user_id+kind+name, not just kind+name) — a different student
+// signing in on this same Mac must register their OWN row, or their
+// dispatcher would try to heartbeat/claim under a device id RLS hides from
+// them (their own heartbeat PATCHes would silently match zero rows, so their
+// phone would show "Mac offline" forever). Cleared on every sign-out.
+function clearCachedMissionDeviceId(): void {
+  try {
+    fs.rmSync(missionDeviceIdFile(), { force: true })
+  } catch (error) {
+    rememberLog(`[missions] could not clear this device's cached id: ${error?.message || error}`)
+  }
+}
+
+// Memoizes ensureDesktopDevice's own network round trip on top of its file
+// cache, since Task 2's dispatcher calls getDeviceId every 30s tick (claim +
+// heartbeat). Cleared on failure so a transient error doesn't wedge retries.
+let missionDeviceIdPromise: Promise<string> | null = null
+
+function getMissionDeviceId(): Promise<string> {
+  if (!missionDeviceIdPromise) {
+    missionDeviceIdPromise = ensureDesktopDevice({
+      supabaseUrl: MISSION_SUPABASE_URL,
+      anonKey: MISSION_SUPABASE_ANON_KEY,
+      getAccessToken: async () => missionAccessToken,
+      hostname: () => os.hostname(),
+      readCachedId: readCachedMissionDeviceId,
+      writeCachedId: writeCachedMissionDeviceId
+    }).catch(error => {
+      missionDeviceIdPromise = null
+
+      throw error
+    })
+  }
+
+  return missionDeviceIdPromise
+}
+
+// One MissionGateway, reused across missions. connect()/close() happen fresh
+// per mission — never held open between dispatcher ticks — because an OAuth
+// gateway connection carries a single-use, ~30s-TTL WS ticket minted by
+// freshGatewayWsUrl (see the ticket comment above it); getWsUrl below re-mints
+// on every connect() call, and ensureBackend(null) (inside freshGatewayWsUrl)
+// transparently boots the local agent backend if it isn't already running.
+// Hand-rolled client (electron/mission-gateway.ts), not the renderer's
+// JsonRpcGatewayClient — see that file's header for why.
+const missionGateway = createWebSocketMissionGateway({
+  getWsUrl: () => freshGatewayWsUrl(null),
+  createSocket: (u: string) => new WebSocket(u)
+})
+
+const missionDispatcher = createMissionDispatcher({
+  supabaseUrl: MISSION_SUPABASE_URL,
+  anonKey: MISSION_SUPABASE_ANON_KEY,
+  getAccessToken: async () => missionAccessToken,
+  getDeviceId: getMissionDeviceId,
+  runMission: createMissionRunner(missionGateway),
+  notifyPhone: createPhoneNotifier({
+    supabaseUrl: MISSION_SUPABASE_URL,
+    anonKey: MISSION_SUPABASE_ANON_KEY,
+    getAccessToken: async () => missionAccessToken
+  })
+})
+
+// The renderer calls this at every point nemesis-account.ts treats the
+// session as current (see that file's applySession/startMissionSessionSync);
+// null/empty stops the dispatcher immediately (sign-out).
+ipcMain.handle('nemesis:missions:sync-session', async (_event, payload) => {
+  const accessToken = typeof payload?.accessToken === 'string' && payload.accessToken.trim() ? payload.accessToken.trim() : null
+
+  missionAccessToken = accessToken
+
+  if (accessToken) {
+    missionDispatcher.start(MISSION_POLL_INTERVAL_MS)
+  } else {
+    missionDispatcher.stop()
+    // Forget this device identity too — see clearCachedMissionDeviceId's
+    // comment. The next signed-in student re-registers their own row.
+    missionDeviceIdPromise = null
+    clearCachedMissionDeviceId()
+  }
+
+  return { ok: true }
+})
+
 ipcMain.handle('hermes:gateway:ws-url', async (_event, profile) => freshGatewayWsUrl(profile))
 ipcMain.handle('hermes:window:openSession', async (_event, sessionId, opts) => {
   if (typeof sessionId !== 'string' || !sessionId.trim()) {

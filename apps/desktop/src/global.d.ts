@@ -27,6 +27,9 @@ declare global {
       // Student build: hand the metering-proxy device key to main, which points
       // the agent backend at the Nemesis LLM proxy and restarts it if needed.
       nemesisLlmSync?: (deviceKey: string) => Promise<{ ok: boolean; changed?: boolean; error?: string }>
+      // iOS companion mission dispatcher: current Supabase access token (or
+      // null on sign-out) so main can start/stop polling agent_missions.
+      nemesisMissionsSyncSession?: (accessToken: string | null) => Promise<{ ok: boolean }>
       // On-device speech engine (recorder accuracy pass). Model downloads once
       // (~480 MB) on first use; progress events stream via onNemesisAsrProgress.
       nemesisAsrTranscribe?: (samples: Float32Array, sampleRate: number) => Promise<{ ok: boolean; text?: string; error?: string }>
