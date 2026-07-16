@@ -627,7 +627,21 @@ export function StudyView() {
     [state, update]
   )
 
-  const inSubSurface = Boolean(browseDeckId || matchDeckId || takingTest)
+  const inSubSurface = Boolean(browseDeckId || matchDeckId)
+
+  // Taking a test is fullscreen, same as reviewing a deck: no header, no tabs.
+  // TestSurface carries its own back button, progress bar, and Esc handling.
+  if (takingTest) {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+        <TestSurface
+          file={takingTest}
+          onComplete={() => setTestAttempts(loadTestAttempts())}
+          onExit={() => setTakingTest(null)}
+        />
+      </div>
+    )
+  }
 
   // Entering a deck is fullscreen: the whole page becomes the card — no header,
   // no tabs, nothing but the review. Esc (or the back button) returns.
@@ -671,7 +685,6 @@ export function StudyView() {
                 exitReview()
                 setBrowseDeckId(null)
                 setMatchDeckId(null)
-                setTakingTest(null)
               }}
               size="sm"
               variant="outline"
@@ -777,12 +790,6 @@ export function StudyView() {
           onRename={renameBrowsedDeck}
           sections={sections}
           state={state}
-        />
-      ) : takingTest ? (
-        <TestSurface
-          file={takingTest}
-          onComplete={() => setTestAttempts(loadTestAttempts())}
-          onExit={() => setTakingTest(null)}
         />
       ) : tab === 'cards' ? (
         <>
