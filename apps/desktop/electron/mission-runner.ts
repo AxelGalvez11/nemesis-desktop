@@ -114,7 +114,12 @@ export function createMissionRunner(gateway: MissionGateway, options: MissionRun
           })
         )
 
-        gateway.request('prompt.submit', { session_id: sessionId, text: `${STANDING_HEADER}\n\n${prompt}` }).catch((err) => {
+        // Explicit timeoutMs so a concrete gateway's own shorter default
+        // request timeout can't cut this short: prompt.submit's ack itself
+        // (not just the turn) can legitimately be slow under backend load
+        // (see the recon comment above), so it shares the same ceiling as
+        // waiting for message.complete rather than a generic short default.
+        gateway.request('prompt.submit', { session_id: sessionId, text: `${STANDING_HEADER}\n\n${prompt}` }, completionTimeoutMs).catch((err) => {
           settle({ ok: false, summary: err instanceof Error ? err.message : 'could not submit the mission prompt' })
         })
       })
