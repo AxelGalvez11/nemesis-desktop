@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // Student build: hand the metering-proxy device key to main so the agent
   // backend gets pointed at the Nemesis LLM proxy (zero-setup model access).
   nemesisLlmSync: deviceKey => ipcRenderer.invoke('nemesis:llm:sync', { deviceKey }),
+  // iOS companion mission dispatcher: hand main the current Supabase access
+  // token (or null on sign-out) so it can start/stop polling agent_missions.
+  nemesisMissionsSyncSession: accessToken => ipcRenderer.invoke('nemesis:missions:sync-session', { accessToken }),
   // On-device speech engine: accurate transcription in the main process
   // (model auto-downloads once; progress arrives via nemesis:asr:progress).
   nemesisAsrTranscribe: (samples, sampleRate) => ipcRenderer.invoke('nemesis:asr:transcribe', { sampleRate, samples }),
