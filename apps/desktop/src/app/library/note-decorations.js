@@ -20,28 +20,30 @@ export const noteMarkdown = markdown({ base: markdownLanguage, codeLanguages: la
 /** Syntax colors for embedded fenced code, scoped to CODE-token tags only so markdown structure
  *  (headings, bold, links) is untouched and stays owned by the live-preview decorations. The
  *  markdown language is configured with codeLanguages (above) to lazy-load each language's Lezer
- *  grammar; these colors render its tokens. light-dark() adapts to the app's color-scheme, so a
- *  single palette works in both themes. */
+ *  grammar; these colors render its tokens. Colors track the chat's shiki theme — GitHub
+ *  `github-light-default` / `github-dark-dimmed` — via light-dark(), so a note's code looks like
+ *  the same code in a chat message. Punctuation/plain variables stay default fg (as GitHub does). */
 const codeHighlightStyle = HighlightStyle.define([
     {
-        color: 'light-dark(#8250df, #c297ff)',
+        color: 'light-dark(#cf222e, #f47067)',
         tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword, tags.definitionKeyword, tags.moduleKeyword]
     },
-    { color: 'light-dark(#0a7b34, #7ee787)', tag: [tags.string, tags.special(tags.string), tags.regexp] },
-    { color: 'light-dark(#0550ae, #79c0ff)', tag: [tags.number, tags.bool, tags.null, tags.atom] },
+    { color: 'light-dark(#0a3069, #96d0ff)', tag: [tags.string, tags.special(tags.string), tags.regexp] },
     {
-        color: 'light-dark(#6e7781, #8b949e)',
+        color: 'light-dark(#0550ae, #6cb6ff)',
+        tag: [tags.number, tags.bool, tags.null, tags.atom, tags.propertyName, tags.attributeName]
+    },
+    {
+        color: 'light-dark(#57606a, #768390)',
         fontStyle: 'italic',
         tag: [tags.comment, tags.lineComment, tags.blockComment, tags.meta]
     },
     {
-        color: 'light-dark(#8250df, #d2a8ff)',
+        color: 'light-dark(#8250df, #dcbdfb)',
         tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName]
     },
-    { color: 'light-dark(#953800, #ffa657)', tag: [tags.typeName, tags.className, tags.namespace, tags.tagName] },
-    { color: 'light-dark(#0550ae, #79c0ff)', tag: [tags.propertyName, tags.attributeName] },
-    { color: 'light-dark(#953800, #ffa657)', tag: [tags.variableName, tags.definition(tags.variableName)] },
-    { color: 'light-dark(#6e7781, #a0a0aa)', tag: [tags.operator, tags.punctuation, tags.separator, tags.bracket] }
+    { color: 'light-dark(#953800, #f69d50)', tag: [tags.typeName, tags.className, tags.namespace] },
+    { color: 'light-dark(#116329, #8ddb8c)', tag: [tags.tagName] }
 ]);
 /** syntaxHighlighting for fenced code (see codeHighlightStyle). Added to the editor alongside
  *  noteMarkdown; markdown tokens aren't in the style, so only code is colored. */
