@@ -58,6 +58,7 @@ import { NEW_CHAT_ROUTE, sessionRoute } from '../routes'
 import { hasClozeMarker, renderClozeAnswer, renderClozePrompt } from './cloze'
 import { DECK_DIR, importedDeckFileNames, scanAllDeckFiles } from './deck-files'
 import { readDiskStudyState, readDiskTestAttempts } from './disk-state'
+import { STUDY_STATE_EXTERNAL_CHANGE_EVENT } from './phone-sync'
 import {
   bestAttempt,
   groupExtras,
@@ -279,6 +280,17 @@ export function StudyView() {
   const update = useCallback((next: StudyState) => {
     setState(next)
     saveState(next)
+  }, [])
+
+  // Phone grades land in localStorage via the phone-sync bridge (its ingest is
+  // synchronous through the same saveState) — reload so an open page converges
+  // without a remount. Fired right after the bridge saves, never mid-fold.
+  useEffect(() => {
+    const onExternalChange = () => setState(loadState())
+
+    window.addEventListener(STUDY_STATE_EXTERNAL_CHANGE_EVENT, onExternalChange)
+
+    return () => window.removeEventListener(STUDY_STATE_EXTERNAL_CHANGE_EVENT, onExternalChange)
   }, [])
 
   const toggleSection = useCallback((course: string) => {

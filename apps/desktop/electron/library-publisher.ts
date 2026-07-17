@@ -15,7 +15,7 @@
  * else injected so library-publisher.test.ts drives it with fakes.
  */
 import { createHash } from 'node:crypto'
-import { encryptDoc, pathHashHex } from './library-crypto'
+import { encryptDoc, pathHashHex, type DocKind } from './library-crypto'
 
 export const MAX_DOC_BYTES = 262_144 // format v1 cap; bigger files are skipped + logged once
 export const QUIET_MS = 5_000 // skip files modified in the last 5s (agent write-bursts settle)
@@ -23,7 +23,21 @@ export const UPSERT_BATCH = 20
 
 export type VaultFileEntry = { relPath: string; mtimeMs: number; size: number }
 
-export type PublisherState = { v: 1; files: Record<string, { hash: string }> }
+/**
+ * A Mac-derived document (deck snapshot, calendar feed) — Phase 2/3 additions.
+ * Content arrives ready-made (JSON, not a vault file read), so there's no quiet
+ * rule: the collector only ever hands over complete, parsed-and-rebuilt content.
+ * Paths are synthetic (`.study/sync/...`, `.derived/...`); the dot prefix keeps
+ * them out of the markdown walker's namespace so they can never collide.
+ */
+export type DerivedDocEntry = { path: string; kind: DocKind; title: string; content: string; mtimeMs: number }
+
+export type PublisherState = {
+  v: 1
+  files: Record<string, { hash: string }>
+  /** sha256 of the last ICS text confirmed upserted into calendar_feeds. */
+  calendarFeedHash?: string
+}
 
 export type PublishResult = { at: number; published: number; deleted: number; total: number }
 
@@ -36,6 +50,11 @@ export type LibraryPublisherDeps = {
   /** Vault-relative *.md files, dot-dirs/node_modules already excluded. */
   listVaultFiles: () => Promise<VaultFileEntry[]>
   readFileText: (relPath: string) => Promise<string>
+  /** Deck snapshots + the calendar doc (Phase 2/3). Absent/empty = notes only. */
+  listDerivedDocs?: () => Promise<DerivedDocEntry[]>
+  /** Plaintext ICS for the native-calendar feed (owner D3 scoped exception);
+   * null = no calendar data yet. Upserted into calendar_feeds on change. */
+  getCalendarFeed?: () => Promise<{ ics: string; token: string } | null>
   loadState: () => Promise<PublisherState | null>
   saveState: (state: PublisherState) => Promise<void>
   now?: () => number
@@ -91,7 +110,14 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
       const seen = new Set<string>()
 
       // Which files changed since the last confirmed publish?
-      const changed: { relPath: string; mtimeMs: number; hash: string; content: string }[] = []
+      const changed: {
+        relPath: string
+        mtimeMs: number
+        hash: string
+        content: string
+        kind?: DocKind
+        title?: string
+      }[] = []
       for (const file of files) {
         if (file.size > MAX_DOC_BYTES) {
           if (!oversizeWarned.has(file.relPath)) {
@@ -110,13 +136,34 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
         changed.push({ relPath: file.relPath, mtimeMs: file.mtimeMs, hash, content })
       }
 
-      // Files that vanished from disk since we last published them.
-      const removed = Object.keys(state.files).filter(relPath => !seen.has(relPath))
-
-      if (!changed.length && !removed.length) {
-        lastResult = { at: now(), published: 0, deleted: 0, total: files.length }
-        return
+      // Mac-derived docs (deck snapshots, the calendar doc) ride the same
+      // pipeline: hash change-detection, tombstone-on-absence, encrypted batches.
+      // No quiet rule — their content arrives complete by construction.
+      const derived = deps.listDerivedDocs ? await deps.listDerivedDocs() : []
+      for (const doc of derived) {
+        if (Buffer.byteLength(doc.content, 'utf8') > MAX_DOC_BYTES) {
+          if (!oversizeWarned.has(doc.path)) {
+            oversizeWarned.add(doc.path)
+            log(`[phone-sync] skipping ${doc.path}: over the ${Math.round(MAX_DOC_BYTES / 1024)}KB sync cap`)
+          }
+          continue
+        }
+        seen.add(doc.path)
+        const hash = createHash('sha256').update(doc.content, 'utf8').digest('hex')
+        if (state.files[doc.path]?.hash === hash) continue
+        changed.push({
+          relPath: doc.path,
+          mtimeMs: doc.mtimeMs,
+          hash,
+          content: doc.content,
+          kind: doc.kind,
+          title: doc.title
+        })
       }
+
+      // Docs that vanished (files from disk, derived docs from their source)
+      // since we last published them.
+      const removed = Object.keys(state.files).filter(relPath => !seen.has(relPath))
 
       const nextFiles = { ...state.files }
       let published = 0
@@ -127,7 +174,13 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
         const rows = batch.map(entry => ({
           user_id: userId,
           deleted: false,
-          ...encryptDoc(key, entry.relPath, entry.content, new Date(entry.mtimeMs).toISOString())
+          ...encryptDoc(
+            key,
+            entry.relPath,
+            entry.content,
+            new Date(entry.mtimeMs).toISOString(),
+            entry.kind ? { kind: entry.kind, title: entry.title } : undefined
+          )
         }))
         await upsert(token, rows)
         // State advances only after the server confirmed the batch — a failed
@@ -149,9 +202,45 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
         deleted += batch.length
       }
 
-      await deps.saveState({ v: 1, files: nextFiles })
-      lastResult = { at: now(), published, deleted, total: files.length }
-      log(`[phone-sync] published ${published}, tombstoned ${deleted} (${files.length} files tracked)`)
+      // Native-calendar ICS feed (plaintext by owner-scoped exception): its own
+      // row in calendar_feeds, refreshed only when the rendered text changed.
+      // Failures log-and-retry next tick without disturbing the doc pipeline.
+      let calendarFeedHash = state.calendarFeedHash
+      const feed = deps.getCalendarFeed ? await deps.getCalendarFeed() : null
+      if (feed) {
+        const icsHash = createHash('sha256').update(feed.ics, 'utf8').digest('hex')
+        if (icsHash !== calendarFeedHash) {
+          const res = await doFetch(`${deps.supabaseUrl}/rest/v1/calendar_feeds?on_conflict=user_id`, {
+            method: 'POST',
+            headers: {
+              apikey: deps.anonKey,
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal'
+            },
+            body: JSON.stringify([{ user_id: userId, token: feed.token, ics: feed.ics }])
+          })
+          if (res.ok) {
+            calendarFeedHash = icsHash
+            log('[phone-sync] calendar feed refreshed')
+          } else {
+            log(`[phone-sync] calendar feed upsert failed (${res.status}); retrying next tick`)
+          }
+        }
+      }
+
+      const dirty = published > 0 || deleted > 0 || calendarFeedHash !== state.calendarFeedHash
+      if (dirty) {
+        await deps.saveState({
+          v: 1,
+          files: nextFiles,
+          ...(calendarFeedHash ? { calendarFeedHash } : {})
+        })
+      }
+      lastResult = { at: now(), published, deleted, total: files.length + derived.length }
+      if (published || deleted) {
+        log(`[phone-sync] published ${published}, tombstoned ${deleted} (${files.length + derived.length} docs tracked)`)
+      }
     } catch (error) {
       // Transient network/auth failure — swallow so the interval keeps ticking;
       // state only ever advances on confirmed batches, so the next tick retries.

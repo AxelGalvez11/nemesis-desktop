@@ -821,6 +821,35 @@ export async function fetchWeeklyUsage(): Promise<null | WeeklyUsageDay[]> {
   }
 }
 
+/** Authed PostgREST call for renderer-side background jobs (phone-sync study
+ *  ingest). Same session plumbing as fetchWeeklyUsage: current session, refresh
+ *  when close to expiry, anon apikey + user Bearer so RLS scopes every row.
+ *  Null when signed out or the network call itself threw — callers treat both
+ *  as "try again next tick". */
+export async function restFetch(pathAndQuery: string, init?: RequestInit): Promise<null | Response> {
+  const stored = loadSession()
+
+  if (!stored) {
+    return null
+  }
+
+  try {
+    const session = await refreshIfNeeded(stored)
+
+    return await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, {
+      ...init,
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${session.accessToken}`,
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(init?.headers ?? {})
+      }
+    })
+  } catch {
+    return null
+  }
+}
+
 /** Human label for a plan code: 'health_pro' → 'Health Pro'. */
 export function planLabel(plan: string): string {
   if (!plan || plan === 'free') {

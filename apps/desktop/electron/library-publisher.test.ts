@@ -11,6 +11,7 @@ import {
   emptyPublisherState,
   walkVaultMarkdown,
   MAX_DOC_BYTES,
+  type DerivedDocEntry,
   type LibraryPublisherDeps,
   type PublisherState,
   type VaultFileEntry
@@ -224,4 +225,118 @@ test('walkVaultMarkdown: recurses folders, takes only *.md, never enters dot-dir
 
 test('emptyPublisherState is the v1 shape', () => {
   assert.deepEqual(emptyPublisherState(), { v: 1, files: {} })
+})
+
+// ——— Phase 2/3: derived docs (deck snapshots, calendar) + the ICS feed ———
+
+function openRow(key: Buffer, row: Record<string, unknown>): Record<string, unknown> {
+  const raw = Buffer.from(String(row.payload), 'base64')
+  return JSON.parse(
+    bytesToUtf8(
+      gcm(Uint8Array.from(key), Uint8Array.from(raw.subarray(0, 12)), utf8ToBytes(String(row.path_hash))).decrypt(
+        Uint8Array.from(raw.subarray(12))
+      )
+    )
+  )
+}
+
+function derivedHarness() {
+  const derived = new Map<string, DerivedDocEntry>()
+  let feed: { ics: string; token: string } | null = null
+  const h = makeHarness({
+    listDerivedDocs: async () => [...derived.values()],
+    getCalendarFeed: async () => feed
+  })
+  return {
+    ...h,
+    derived,
+    setFeed: (next: { ics: string; token: string } | null) => {
+      feed = next
+    }
+  }
+}
+
+test('derived docs publish with their own kind + title and change-detect on content', async () => {
+  const h = derivedHarness()
+  h.derived.set('.study/sync/deck/deck-1', {
+    path: '.study/sync/deck/deck-1',
+    kind: 'deck',
+    title: 'Cardio Exam 2',
+    content: JSON.stringify({ v: 1, id: 'deck-1', queue: [] }),
+    mtimeMs: NOW - 60_000
+  })
+
+  await h.publisher.tick()
+  assert.equal(h.calls.length, 1)
+  const opened = openRow(h.key, h.calls[0].rows[0])
+  assert.equal(opened.kind, 'deck')
+  assert.equal(opened.title, 'Cardio Exam 2')
+  assert.equal(opened.path, '.study/sync/deck/deck-1')
+  assert.equal(JSON.parse(String(opened.content)).id, 'deck-1')
+
+  // Unchanged content → no new request; changed content → republished.
+  await h.publisher.tick()
+  assert.equal(h.calls.length, 1)
+  h.derived.set('.study/sync/deck/deck-1', {
+    ...h.derived.get('.study/sync/deck/deck-1')!,
+    content: JSON.stringify({ v: 1, id: 'deck-1', queue: [{ key: 'c1' }] })
+  })
+  await h.publisher.tick()
+  assert.equal(h.calls.length, 2)
+})
+
+test('a derived doc that disappears from its source is tombstoned', async () => {
+  const h = derivedHarness()
+  h.derived.set('.derived/calendar', {
+    path: '.derived/calendar',
+    kind: 'calendar',
+    title: 'Calendar',
+    content: JSON.stringify({ v: 1, events: [] }),
+    mtimeMs: NOW - 60_000
+  })
+  await h.publisher.tick()
+  h.derived.clear()
+
+  await h.publisher.tick()
+  const last = h.calls[h.calls.length - 1]
+  assert.equal(last.rows.length, 1)
+  assert.equal(last.rows[0].deleted, true)
+  assert.equal(last.rows[0].payload, null)
+  assert.equal(Object.keys(h.getState()!.files).length, 0)
+})
+
+test('calendar feed upserts once per ICS text and remembers the confirmed hash', async () => {
+  const h = derivedHarness()
+  h.setFeed({ ics: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n', token: 'a'.repeat(64) })
+
+  await h.publisher.tick()
+  const feedCalls = () => h.calls.filter(call => call.url.includes('calendar_feeds'))
+  assert.equal(feedCalls().length, 1)
+  assert.ok(feedCalls()[0].url.includes('on_conflict=user_id'))
+  assert.deepEqual(feedCalls()[0].rows[0], {
+    user_id: 'user-1',
+    token: 'a'.repeat(64),
+    ics: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n'
+  })
+  assert.equal(h.getState()!.calendarFeedHash?.length, 64)
+
+  // Same text → no re-upsert. New text → one more.
+  await h.publisher.tick()
+  assert.equal(feedCalls().length, 1)
+  h.setFeed({ ics: 'BEGIN:VCALENDAR\r\nX\r\nEND:VCALENDAR\r\n', token: 'a'.repeat(64) })
+  await h.publisher.tick()
+  assert.equal(feedCalls().length, 2)
+})
+
+test('a failed feed upsert leaves the hash unsaved so the next tick retries', async () => {
+  const h = derivedHarness()
+  h.setFeed({ ics: 'ICS-1', token: 'b'.repeat(64) })
+  h.setFailNext(1)
+
+  await h.publisher.tick()
+  assert.equal(h.getState()?.calendarFeedHash, undefined)
+
+  await h.publisher.tick()
+  assert.equal(h.calls.filter(call => call.url.includes('calendar_feeds')).length, 1)
+  assert.equal(h.getState()!.calendarFeedHash?.length, 64)
 })

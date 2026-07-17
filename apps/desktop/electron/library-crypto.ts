@@ -52,21 +52,35 @@ export function titleFromMarkdown(content: string, relPath: string): string {
 
 export type EncryptedRow = { path_hash: string; payload: string }
 
+/** Wire-format doc kinds (nemesis-phone-sync-format-v1.md): notes are vault
+ * markdown; 'deck'/'calendar' are Mac-derived docs added with sync Phases 2/3. */
+export type DocKind = 'calendar' | 'deck' | 'note'
+
 /**
  * Seal one document. payload = base64(nonce || ciphertext || tag), with the
  * row's path_hash as GCM additional-authenticated-data so a payload moved onto
- * a different row fails authentication on the phone.
+ * a different row fails authentication on the phone. Vault notes omit `opts`
+ * (kind 'note', title from the markdown); derived docs pass their kind + a
+ * ready-made title, since their content is JSON, not markdown.
  */
 export function encryptDoc(
   key: Buffer,
   relPath: string,
   content: string,
-  mtimeIso: string
+  mtimeIso: string,
+  opts?: { kind?: DocKind; title?: string }
 ): EncryptedRow {
   const path = relPath.normalize('NFC')
   const path_hash = pathHashHex(key, path)
   const plaintext = Buffer.from(
-    JSON.stringify({ v: 1, path, title: titleFromMarkdown(content, path), kind: 'note', content, mtime: mtimeIso }),
+    JSON.stringify({
+      v: 1,
+      path,
+      title: opts?.title ?? titleFromMarkdown(content, path),
+      kind: opts?.kind ?? 'note',
+      content,
+      mtime: mtimeIso
+    }),
     'utf8'
   )
   const nonce = randomBytes(NONCE_BYTES)

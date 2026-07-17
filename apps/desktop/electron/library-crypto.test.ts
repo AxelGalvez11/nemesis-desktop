@@ -73,3 +73,33 @@ test('titleFromMarkdown: first # heading wins, filename stem is the fallback', (
   assert.equal(titleFromMarkdown('## only a subheading\ntext', 'PHCY 1205/exam-2.md'), 'exam-2')
   assert.equal(titleFromMarkdown('', 'plain.md'), 'plain')
 })
+
+test('encryptDoc opts override kind + title for derived docs (default stays note)', () => {
+  const key = generateVaultKey()
+  const derived = encryptDoc(key, '.study/sync/deck/deck-1', '{"v":1}', '2026-07-17T00:00:00Z', {
+    kind: 'deck',
+    title: 'Cardio Exam 2'
+  })
+  const raw = Buffer.from(derived.payload, 'base64')
+  const opened = JSON.parse(
+    bytesToUtf8(
+      gcm(Uint8Array.from(key), Uint8Array.from(raw.subarray(0, 12)), utf8ToBytes(derived.path_hash)).decrypt(
+        Uint8Array.from(raw.subarray(12))
+      )
+    )
+  )
+  assert.equal(opened.kind, 'deck')
+  assert.equal(opened.title, 'Cardio Exam 2')
+
+  const note = encryptDoc(key, 'a.md', '# Alpha', '2026-07-17T00:00:00Z')
+  const noteRaw = Buffer.from(note.payload, 'base64')
+  const openedNote = JSON.parse(
+    bytesToUtf8(
+      gcm(Uint8Array.from(key), Uint8Array.from(noteRaw.subarray(0, 12)), utf8ToBytes(note.path_hash)).decrypt(
+        Uint8Array.from(noteRaw.subarray(12))
+      )
+    )
+  )
+  assert.equal(openedNote.kind, 'note')
+  assert.equal(openedNote.title, 'Alpha')
+})
