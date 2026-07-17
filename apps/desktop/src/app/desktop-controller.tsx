@@ -109,6 +109,7 @@ import { ModelVisibilityOverlay } from './model-visibility-overlay'
 import { PetGenerateOverlay } from './pet-generate/pet-generate-overlay'
 import { RightSidebarPane } from './right-sidebar'
 import { FileActionDialogs } from './right-sidebar/file-actions'
+import { $currentExchangeHasSources } from './right-sidebar/sources'
 import { RemoteFolderPicker } from './right-sidebar/files/remote-picker'
 import { ReviewPane } from './right-sidebar/review'
 import { $terminalTakeover } from './right-sidebar/store'
@@ -227,6 +228,7 @@ export function DesktopController() {
   const filePreviewTarget = useStore($filePreviewTarget)
   const previewTarget = useStore($previewTarget)
   const browserRailOpen = useStore($browserRailOpen)
+  const railHasSources = useStore($currentExchangeHasSources)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
   const messagingSessions = useStore($messagingSessions)
   const sessionsLoading = useStore($sessionsLoading)
@@ -1292,7 +1294,7 @@ export function DesktopController() {
   // hover-reveal overlays (narrow window) don't take a column, so they don't count.
   const railColumnOpen =
     (browserSurfaceOpen &&
-      (welcomeOpen || NEMESIS_STUDENT_BUILD || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
+      (welcomeOpen || railHasSources || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
       previewPaneOpen) ||
     (chatOpen && !NEMESIS_STUDENT_BUILD && !narrowViewport && fileBrowserOpen) ||
     (chatOpen && Boolean(currentCwd.trim()) && !narrowViewport && reviewOpen)
@@ -1303,9 +1305,12 @@ export function DesktopController() {
 
   const previewPane = (
     <Pane
+      // The rail is content-driven: sources on the current answer, a preview file,
+      // or the browser earn it a column; otherwise it stays out of the way entirely
+      // (owner call 2026-07-16 — replaced the old always-on student rail + manual ✕).
       disabled={
         !browserSurfaceOpen ||
-        (!welcomeOpen && !NEMESIS_STUDENT_BUILD && !previewTarget && !filePreviewTarget && !browserRailOpen)
+        (!welcomeOpen && !railHasSources && !previewTarget && !filePreviewTarget && !browserRailOpen)
       }
       // Narrow window: collapse to a hover-reveal overlay like the other side
       // panes — docked at its min width it collided with the chat column and

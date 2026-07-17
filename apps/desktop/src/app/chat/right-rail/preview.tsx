@@ -1,7 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useMemo, useState } from 'react'
 
-import { SourcesTab } from '@/app/right-sidebar/sources'
+import { $currentExchangeHasSources, SourcesTab } from '@/app/right-sidebar/sources'
 import type { SetTitlebarToolGroup } from '@/app/shell/titlebar-controls'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -108,14 +108,18 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
   const dirtyPreviewUrls = useStore($dirtyPreviewUrls)
   const browserRailOpen = useStore($browserRailOpen)
   const hasPreviewContent = Boolean(previewTarget || filePreviewTabs.length > 0)
+  // Sources earns its tab only when the current answer actually touched sources —
+  // an empty Sources pane parked next to every answer read as clutter (owner call
+  // 2026-07-16). With no sources, no browser, and no files, the rail shows nothing.
+  const hasSources = useStore($currentExchangeHasSources)
 
   const segments = useMemo<readonly SegmentedControlOption<StudentRailSegmentId>[]>(
     () => [
-      { id: RIGHT_RAIL_SOURCES_TAB_ID, label: 'Sources' },
+      ...(hasSources ? [{ id: RIGHT_RAIL_SOURCES_TAB_ID, label: 'Sources' } as const] : []),
       ...(browserRailOpen ? [{ id: RIGHT_RAIL_BROWSER_TAB_ID, label: 'Browser' } as const] : []),
       ...(hasPreviewContent ? [{ id: RIGHT_RAIL_PREVIEW_TAB_ID, label: 'Preview' } as const] : [])
     ],
-    [browserRailOpen, hasPreviewContent]
+    [browserRailOpen, hasPreviewContent, hasSources]
   )
 
   const activeFileTab = activeTabId.startsWith('file:')
@@ -126,7 +130,7 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
       ? RIGHT_RAIL_BROWSER_TAB_ID
       : (activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID || activeFileTab) && hasPreviewContent
         ? RIGHT_RAIL_PREVIEW_TAB_ID
-        : RIGHT_RAIL_SOURCES_TAB_ID
+        : (segments[0]?.id ?? RIGHT_RAIL_SOURCES_TAB_ID)
   const activePreviewTarget =
     activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID
       ? previewTarget
@@ -144,15 +148,15 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
 
   useEffect(() => {
     const activeTabAvailable =
-      activeTabId === RIGHT_RAIL_SOURCES_TAB_ID ||
+      (activeTabId === RIGHT_RAIL_SOURCES_TAB_ID && hasSources) ||
       (activeTabId === RIGHT_RAIL_BROWSER_TAB_ID && browserRailOpen) ||
       (activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID && Boolean(previewTarget)) ||
       Boolean(activeFileTab)
 
-    if (!activeTabAvailable) {
-      selectRightRailTab(RIGHT_RAIL_SOURCES_TAB_ID)
+    if (!activeTabAvailable && segments.length > 0) {
+      selectRightRailTab(segments[0].id)
     }
-  }, [activeFileTab, activeTabId, browserRailOpen, previewTarget])
+  }, [activeFileTab, activeTabId, browserRailOpen, hasSources, previewTarget, segments])
 
   const selectSegment = (id: StudentRailSegmentId) => {
     if (id !== RIGHT_RAIL_PREVIEW_TAB_ID) {
@@ -170,23 +174,6 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
     )
   }
 
-  const closeActiveView = () => {
-    if (activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID) {
-      closeRightRail()
-
-      return
-    }
-
-    if (activeSegmentId === RIGHT_RAIL_BROWSER_TAB_ID) {
-      closeRightRailTab(RIGHT_RAIL_BROWSER_TAB_ID)
-
-      return
-    }
-
-    closeRightRailTab(activeFileTab?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID)
-  }
-
-  const activeSegmentLabel = segments.find(segment => segment.id === activeSegmentId)?.label ?? 'Sources'
   // Fullscreen: the rail lifts out of its column and covers the whole window
   // (owner ask — reading a paper or steering the browser in a narrow strip is
   // cramped). Plain fixed positioning; the native browser view follows
@@ -208,6 +195,14 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
 
     return () => window.removeEventListener('keydown', onKey)
   }, [fullscreen])
+
+  // Nothing to show — no sources on this answer, no preview files, no browser.
+  // The rail stays out of the way instead of parking an empty pane there (the
+  // old close "✕" existed to hide that empty pane by hand; with the rail fully
+  // content-driven, it's gone).
+  if (segments.length === 0) {
+    return null
+  }
 
   return (
     <aside
@@ -245,29 +240,6 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }: ChatP
             variant="ghost"
           >
             <Codicon name={fullscreen ? 'screen-normal' : 'screen-full'} size="0.75rem" />
-          </Button>
-        </Tip>
-        <Tip
-          label={
-            activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? t.preview.closePane : t.preview.closeTab(activeSegmentLabel)
-          }
-        >
-          <Button
-            aria-label={
-              activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
-                ? t.preview.closePane
-                : t.preview.closeTab(activeSegmentLabel)
-            }
-            className="shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100"
-            onClick={() => {
-              setFullscreen(false)
-              closeActiveView()
-            }}
-            size="icon-xs"
-            type="button"
-            variant="ghost"
-          >
-            <Codicon name="close" size="0.75rem" />
           </Button>
         </Tip>
       </div>

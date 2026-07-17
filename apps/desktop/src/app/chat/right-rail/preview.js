@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useStore } from '@nanostores/react';
 import { useEffect, useMemo, useState } from 'react';
-import { SourcesTab } from '@/app/right-sidebar/sources';
+import { $currentExchangeHasSources, SourcesTab } from '@/app/right-sidebar/sources';
 import { Button } from '@/components/ui/button';
 import { Codicon } from '@/components/ui/codicon';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -58,11 +58,15 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
     const dirtyPreviewUrls = useStore($dirtyPreviewUrls);
     const browserRailOpen = useStore($browserRailOpen);
     const hasPreviewContent = Boolean(previewTarget || filePreviewTabs.length > 0);
+    // Sources earns its tab only when the current answer actually touched sources —
+    // an empty Sources pane parked next to every answer read as clutter (owner call
+    // 2026-07-16). With no sources, no browser, and no files, the rail shows nothing.
+    const hasSources = useStore($currentExchangeHasSources);
     const segments = useMemo(() => [
-        { id: RIGHT_RAIL_SOURCES_TAB_ID, label: 'Sources' },
+        ...(hasSources ? [{ id: RIGHT_RAIL_SOURCES_TAB_ID, label: 'Sources' }] : []),
         ...(browserRailOpen ? [{ id: RIGHT_RAIL_BROWSER_TAB_ID, label: 'Browser' }] : []),
         ...(hasPreviewContent ? [{ id: RIGHT_RAIL_PREVIEW_TAB_ID, label: 'Preview' }] : [])
-    ], [browserRailOpen, hasPreviewContent]);
+    ], [browserRailOpen, hasPreviewContent, hasSources]);
     const activeFileTab = activeTabId.startsWith('file:')
         ? filePreviewTabs.find(tab => tab.id === activeTabId)
         : undefined;
@@ -70,7 +74,7 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
         ? RIGHT_RAIL_BROWSER_TAB_ID
         : (activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID || activeFileTab) && hasPreviewContent
             ? RIGHT_RAIL_PREVIEW_TAB_ID
-            : RIGHT_RAIL_SOURCES_TAB_ID;
+            : (segments[0]?.id ?? RIGHT_RAIL_SOURCES_TAB_ID);
     const activePreviewTarget = activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID
         ? previewTarget
         : (activeFileTab?.target ?? previewTarget ?? filePreviewTabs[0]?.target ?? null);
@@ -81,14 +85,14 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
         ...filePreviewTabs.map(({ id, target }) => ({ id, label: tabLabelFor(target), target }))
     ], [filePreviewTabs, previewTarget, t.preview.tab]);
     useEffect(() => {
-        const activeTabAvailable = activeTabId === RIGHT_RAIL_SOURCES_TAB_ID ||
+        const activeTabAvailable = (activeTabId === RIGHT_RAIL_SOURCES_TAB_ID && hasSources) ||
             (activeTabId === RIGHT_RAIL_BROWSER_TAB_ID && browserRailOpen) ||
             (activeTabId === RIGHT_RAIL_PREVIEW_TAB_ID && Boolean(previewTarget)) ||
             Boolean(activeFileTab);
-        if (!activeTabAvailable) {
-            selectRightRailTab(RIGHT_RAIL_SOURCES_TAB_ID);
+        if (!activeTabAvailable && segments.length > 0) {
+            selectRightRailTab(segments[0].id);
         }
-    }, [activeFileTab, activeTabId, browserRailOpen, previewTarget]);
+    }, [activeFileTab, activeTabId, browserRailOpen, hasSources, previewTarget, segments]);
     const selectSegment = (id) => {
         if (id !== RIGHT_RAIL_PREVIEW_TAB_ID) {
             selectRightRailTab(id);
@@ -99,18 +103,6 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
         }
         selectRightRailTab(previewTarget ? RIGHT_RAIL_PREVIEW_TAB_ID : (filePreviewTabs[0]?.id ?? RIGHT_RAIL_SOURCES_TAB_ID));
     };
-    const closeActiveView = () => {
-        if (activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID) {
-            closeRightRail();
-            return;
-        }
-        if (activeSegmentId === RIGHT_RAIL_BROWSER_TAB_ID) {
-            closeRightRailTab(RIGHT_RAIL_BROWSER_TAB_ID);
-            return;
-        }
-        closeRightRailTab(activeFileTab?.id ?? RIGHT_RAIL_PREVIEW_TAB_ID);
-    };
-    const activeSegmentLabel = segments.find(segment => segment.id === activeSegmentId)?.label ?? 'Sources';
     // Fullscreen: the rail lifts out of its column and covers the whole window
     // (owner ask — reading a paper or steering the browser in a narrow strip is
     // cramped). Plain fixed positioning; the native browser view follows
@@ -128,18 +120,20 @@ function StudentChatPreviewRail({ onRestartServer, setTitlebarToolGroup }) {
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [fullscreen]);
+    // Nothing to show — no sources on this answer, no preview files, no browser.
+    // The rail stays out of the way instead of parking an empty pane there (the
+    // old close "✕" existed to hide that empty pane by hand; with the rail fully
+    // content-driven, it's gone).
+    if (segments.length === 0) {
+        return null;
+    }
     return (_jsxs("aside", { className: cn('isolate flex min-w-0 flex-col overflow-hidden border-(--ui-stroke-tertiary) bg-(--ui-editor-surface-background) text-(--ui-text-tertiary)', fullscreen
             ? 'fixed inset-0 z-40 border-none'
             : cn('relative h-full w-full', panesFlipped ? 'border-r' : 'border-l')), style: fullscreen ? undefined : { paddingTop: 'var(--right-rail-top-inset, 0px)' }, children: [_jsxs("div", { className: cn(
                 // pr-12 (not pr-3): the window-pinned sidebar-collapse toggle sits fixed in
                 // this same top-right band — the rail's own fullscreen/close buttons must
                 // stop short of it or the two clusters overlap (owner report, beta.14).
-                'relative z-10 flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) pr-12 [-webkit-app-region:no-drag]', fullscreen && IS_MACOS ? 'pl-[84px]' : 'pl-2'), "data-rail-chrome": "", children: [_jsx(SegmentedControl, { className: "min-w-0 max-w-full bg-(--ui-bg-tertiary) [&>button]:min-w-0 [&>button]:truncate [&>button]:transition-none [&>button]:active:scale-[0.98] [&>button]:motion-reduce:active:scale-100 [&>button[aria-pressed=true]]:bg-(--theme-primary)/15 [&>button[aria-pressed=true]]:text-(--theme-primary) [&>button[aria-pressed=true]]:shadow-none", onChange: selectSegment, options: segments, value: activeSegmentId }), _jsx(Tip, { label: fullscreen ? 'Exit full screen' : 'Full screen', children: _jsx(Button, { "aria-label": fullscreen ? 'Exit full screen' : 'Full screen', className: "ml-auto shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100", onClick: () => setFullscreen(current => !current), size: "icon-xs", type: "button", variant: "ghost", children: _jsx(Codicon, { name: fullscreen ? 'screen-normal' : 'screen-full', size: "0.75rem" }) }) }), _jsx(Tip, { label: activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID ? t.preview.closePane : t.preview.closeTab(activeSegmentLabel), children: _jsx(Button, { "aria-label": activeSegmentId === RIGHT_RAIL_SOURCES_TAB_ID
-                                ? t.preview.closePane
-                                : t.preview.closeTab(activeSegmentLabel), className: "shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100", onClick: () => {
-                                setFullscreen(false);
-                                closeActiveView();
-                            }, size: "icon-xs", type: "button", variant: "ghost", children: _jsx(Codicon, { name: "close", size: "0.75rem" }) }) })] }), activeSegmentId === RIGHT_RAIL_PREVIEW_TAB_ID && filePreviewTabs.length > 0 && (_jsx("div", { className: "flex h-7 shrink-0 overflow-x-auto border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: previewTabs.map(tab => {
+                'relative z-10 flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) pr-12 [-webkit-app-region:no-drag]', fullscreen && IS_MACOS ? 'pl-[84px]' : 'pl-2'), "data-rail-chrome": "", children: [_jsx(SegmentedControl, { className: "min-w-0 max-w-full bg-(--ui-bg-tertiary) [&>button]:min-w-0 [&>button]:truncate [&>button]:transition-none [&>button]:active:scale-[0.98] [&>button]:motion-reduce:active:scale-100 [&>button[aria-pressed=true]]:bg-(--theme-primary)/15 [&>button[aria-pressed=true]]:text-(--theme-primary) [&>button[aria-pressed=true]]:shadow-none", onChange: selectSegment, options: segments, value: activeSegmentId }), _jsx(Tip, { label: fullscreen ? 'Exit full screen' : 'Full screen', children: _jsx(Button, { "aria-label": fullscreen ? 'Exit full screen' : 'Full screen', className: "ml-auto shrink-0 text-(--ui-text-tertiary) transition-colors duration-100 ease active:scale-[0.97] motion-reduce:active:scale-100", onClick: () => setFullscreen(current => !current), size: "icon-xs", type: "button", variant: "ghost", children: _jsx(Codicon, { name: fullscreen ? 'screen-normal' : 'screen-full', size: "0.75rem" }) }) })] }), activeSegmentId === RIGHT_RAIL_PREVIEW_TAB_ID && filePreviewTabs.length > 0 && (_jsx("div", { className: "flex h-7 shrink-0 overflow-x-auto border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", role: "tablist", children: previewTabs.map(tab => {
                     const active = tab.id === activeTabId;
                     const dirty = Boolean(dirtyPreviewUrls[tab.target.url]);
                     return (_jsxs("div", { className: cn('group/file-tab relative flex h-full min-w-24 max-w-40 shrink-0 items-center border-r border-(--ui-stroke-quaternary) text-[0.65rem] font-medium [-webkit-app-region:no-drag]', active

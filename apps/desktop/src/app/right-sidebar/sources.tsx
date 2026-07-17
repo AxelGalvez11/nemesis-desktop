@@ -3,6 +3,7 @@
 // This replaces the developer file-tree as the default right-sidebar pane: students
 // ask evidence questions, so the rail should answer "where did THAT come from?".
 import { useStore } from '@nanostores/react'
+import { computed } from 'nanostores'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
@@ -231,6 +232,30 @@ export function extractSources(messages: readonly ChatMessage[]): SourceRef[] {
   return out.slice(0, 100)
 }
 
+/** The current exchange: the last user message onward — the only slice of the session
+ *  the Sources rail reads (owner call 2026-07-14; the whole-session harvest buried the
+ *  live answer's citations and froze the rail across session switches). */
+export function currentExchange(messages: readonly ChatMessage[]): readonly ChatMessage[] {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index].role === 'user') {
+      return messages.slice(index)
+    }
+  }
+
+  return messages
+}
+
+/** Whether the current answer touched any sources — the right rail only offers its
+ *  Sources tab (and only shows at all, absent a preview/browser) when this is true. */
+export function hasCurrentExchangeSources(messages: readonly ChatMessage[]): boolean {
+  return extractSources(currentExchange(messages)).length > 0
+}
+
+/** Store form of the same check, so layout code (the rail's Pane, its segment strip)
+ *  can subscribe to the BOOLEAN and only re-render when it flips — subscribing the
+ *  desktop controller to $messages itself would re-render the shell every token. */
+export const $currentExchangeHasSources = computed($messages, hasCurrentExchangeSources)
+
 /** Site icon for a pill — the domain's own favicon, falling back to a letter badge
  *  (api subdomains and offline mode often have no icon to fetch). */
 export function SourceFavicon({ domain }: { domain: string }) {
@@ -316,18 +341,9 @@ function SourceRow({
 export function SourcesTab() {
   const messages = useStore($messages)
   const focusedSourceUrl = useStore($focusedSourceUrl)
-  // Only the current exchange (last user message onward) feeds the rail. Harvesting the
-  // whole session buried the live answer's citations under every earlier question's pile
-  // — and made the rail look frozen across session switches (owner call 2026-07-14).
-  const exchange = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index--) {
-      if (messages[index].role === 'user') {
-        return messages.slice(index)
-      }
-    }
-
-    return messages
-  }, [messages])
+  // Only the current exchange (last user message onward) feeds the rail — see
+  // currentExchange above for why.
+  const exchange = useMemo(() => currentExchange(messages), [messages])
   const sources = useMemo(() => extractSources(exchange), [exchange])
   // ChatGPT splits its drawer into cited-in-the-answer vs everything else the
   // run touched. Cited = named in an ASSISTANT message's text; the rest came
