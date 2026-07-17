@@ -1,4 +1,4 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx } from "react/jsx-runtime";
 // NoteEditor — Obsidian-style "live preview" over CodeMirror 6 (the SAME editor engine
 // Obsidian itself is built on; @codemirror/* + @lezer/markdown, all MIT). The markdown
 // stays plain text on disk, but formatting marks melt away as you read: `# ` disappears
@@ -10,18 +10,26 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { autocompletion } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { deleteMarkupBackward, insertNewlineContinueMarkup } from '@codemirror/lang-markdown';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
-import { IconBold, IconHeading, IconItalic, IconList } from '@tabler/icons-react';
 import { useEffect, useImperativeHandle, useRef } from 'react';
-import { Button } from '@/components/ui/button';
 import { livePreview, noteMarkdown, noteTheme, tableExtension } from './note-decorations';
-import { cycleHeading, toggleBold, toggleBulletList, toggleItalic } from './note-format';
+import { toggleBold, toggleItalic } from './note-format';
 import { VAULT_DIR } from './vault';
 import { wikilinkCompletionSource } from './wikilink-autocomplete';
 const EMPTY_IMAGE_CONTEXT = { files: [], noteFolder: '', vaultDir: VAULT_DIR };
-export function NoteEditor({ imageContext = EMPTY_IMAGE_CONTEXT, initialValue, isResolved = () => false, notes = [], onChange, onOpenWikilink, ref }) {
+// Read-only vs editable is one compartment we reconfigure live (see the `editable`
+// prop) so the "Edit" toggle in the header flips the note between a calm reading view
+// and an editable one without remounting the editor or losing scroll position.
+// `readOnly` blocks doc changes; `editable: false` also removes the caret and keeps
+// the text selectable (copy still works) — together that's a true read-only note.
+function editableExtensions(editable) {
+    return [EditorState.readOnly.of(!editable), EditorView.editable.of(editable)];
+}
+export function NoteEditor({ editable = false, imageContext = EMPTY_IMAGE_CONTEXT, initialValue, isResolved = () => false, notes = [], onChange, onOpenWikilink, ref }) {
     const hostRef = useRef(null);
     const viewRef = useRef(null);
+    const editableCompartment = useRef(new Compartment());
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
     const onOpenRef = useRef(onOpenWikilink);
@@ -70,6 +78,7 @@ export function NoteEditor({ imageContext = EMPTY_IMAGE_CONTEXT, initialValue, i
                     { key: 'Backspace', run: deleteMarkupBackward }
                 ]),
                 keymap.of([...defaultKeymap, ...historyKeymap]),
+                editableCompartment.current.of(editableExtensions(editable)),
                 EditorView.lineWrapping,
                 noteMarkdown,
                 tableExtension(target => onOpenRef.current(target), target => isResolvedRef.current(target)),
@@ -96,20 +105,17 @@ export function NoteEditor({ imageContext = EMPTY_IMAGE_CONTEXT, initialValue, i
         // intentionally captured once per mount.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    const runFormat = (command) => {
+    // Flip read-only ⇄ editable in place when the header toggle changes, without
+    // tearing down the editor (keeps scroll position and undo history).
+    useEffect(() => {
         const view = viewRef.current;
-        if (view) {
-            command(view);
+        if (!view) {
+            return;
+        }
+        view.dispatch({ effects: editableCompartment.current.reconfigure(editableExtensions(editable)) });
+        if (editable) {
             view.focus();
         }
-    };
-    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col", children: [_jsx("div", { "aria-label": "Formatting", className: "mx-auto flex w-full max-w-[46rem] shrink-0 items-center gap-0.5 border-b border-(--ui-stroke-tertiary) px-1 py-1", role: "toolbar", children: FORMAT_ACTIONS.map(action => (_jsx(Button, { "aria-label": action.label, 
-                    // Keep focus (and the selection) in the editor while the button is clicked.
-                    onMouseDown: event => event.preventDefault(), onClick: () => runFormat(action.run), size: "icon-xs", title: action.label, type: "button", variant: "ghost", children: _jsx(action.icon, {}) }, action.label))) }), _jsx("div", { className: "min-h-0 flex-1", ref: hostRef })] }));
+    }, [editable]);
+    return (_jsx("div", { className: "flex h-full min-h-0 flex-col", children: _jsx("div", { className: "min-h-0 flex-1", ref: hostRef }) }));
 }
-const FORMAT_ACTIONS = [
-    { icon: IconBold, label: 'Bold (⌘B)', run: toggleBold },
-    { icon: IconItalic, label: 'Italic (⌘I)', run: toggleItalic },
-    { icon: IconHeading, label: 'Heading (cycle H1–H3)', run: cycleHeading },
-    { icon: IconList, label: 'Bullet list', run: toggleBulletList }
-];

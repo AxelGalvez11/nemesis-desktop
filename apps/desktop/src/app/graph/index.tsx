@@ -454,6 +454,9 @@ export function GraphView() {
   // that specific setting actually changed — not on every unrelated control tweak.
   const prevLabelSignatureRef = useRef(`${controls.showNames}|${controls.labelSize}|${controls.nodeSize}`)
   const prevLayoutSignatureRef = useRef(`${controls.nodeSize}|${controls.spread}|${controls.repulsion}`)
+  // Set by the main effect to the graph's "wake the render loop" fn. The tuning-panel
+  // effect calls it so slider/reheat/label changes draw even while the loop is paused.
+  const wakeRef = useRef<(() => void) | null>(null)
   controlsRef.current = controls
 
   useEffect(() => {
@@ -472,6 +475,8 @@ export function GraphView() {
       // ref-reading nodeColor/linkColor/etc accessors installed below in the same pass.
       graph.refresh?.()
       refreshHighlight()
+      // Repaint the new palette even if the render loop was parked.
+      wakeRef.current?.()
     })
 
     return () => window.cancelAnimationFrame(frame)
@@ -530,6 +535,50 @@ export function GraphView() {
     // Fallback timer for the one-time camera fit (see below). Retained so unmount can cancel it —
     // otherwise it could call zoomToFit on a destroyed instance if the user leaves within ~2s.
     let frameTimer = 0
+
+    // Render-on-demand: 3d-force-graph runs a continuous requestAnimationFrame loop that
+    // redraws the WebGL scene every frame for as long as the page is mounted — and because
+    // the app sets backgroundThrottling:false (so chat streaming survives in the background),
+    // an open Graph page keeps the GPU busy even when hidden. Once the force layout settles,
+    // the reveal finishes, and auto-rotate is off, nothing on screen moves, so we pause the
+    // loop entirely and wake it on any interaction (hover, orbit drag, zoom, control changes).
+    let pauseInstance: { pauseAnimation: () => void; resumeAnimation: () => void } | null = null
+    let idlePauseTimer = 0
+    let engineSettled = false
+    let revealing = true
+    // Grace period after the last interaction before re-parking, so orbit inertia and a
+    // moving mouse don't fight the pause.
+    const AUTO_PAUSE_MS = 700
+
+    const canAutoPause = () =>
+      !disposed && engineSettled && !revealing && controlsRef.current.rotationSpeed === 0
+
+    const scheduleIdlePause = () => {
+      window.clearTimeout(idlePauseTimer)
+
+      if (!canAutoPause()) {
+        return
+      }
+
+      idlePauseTimer = window.setTimeout(() => {
+        if (canAutoPause()) {
+          pauseInstance?.pauseAnimation()
+        }
+      }, AUTO_PAUSE_MS)
+    }
+
+    // Resume the loop for at least one frame, then re-arm the idle pause. Hoisted so the
+    // inline node/link handlers below (defined before this point) can call it at runtime.
+    function wake() {
+      if (disposed) {
+        return
+      }
+
+      window.clearTimeout(idlePauseTimer)
+      pauseInstance?.resumeAnimation()
+      scheduleIdlePause()
+    }
+    wakeRef.current = wake
 
     void (async () => {
       try {
@@ -675,6 +724,7 @@ export function GraphView() {
 
             hoverNodeRef.current = graphNode
             refreshHighlight()
+            wake()
           })
           .onNodeClick((node: object) => {
             const graphNode = node as GraphNode
@@ -698,8 +748,12 @@ export function GraphView() {
           .onBackgroundClick(() => {
             selectedNodeRef.current = null
             refreshHighlight()
+            wake()
           })
           .graphData({ links, nodes })
+
+        // The instance exposes the pause/resume render-loop controls (three-render-objects).
+        pauseInstance = instance as unknown as { pauseAnimation: () => void; resumeAnimation: () => void }
 
         // Register gravity once; the force reads the slider live via controlsRef.
         instance.d3Force('gravity', makeGravityForce(() => controlsRef.current.gravity))
@@ -727,7 +781,12 @@ export function GraphView() {
         // Primary: the engine settling. Fallback: a timer for the 0px-at-construction case where
         // onEngineStop may not fire. onEngineStop clears the timer so only one fit ever runs, and
         // the 2s window gives the real settle time to win on larger graphs before the fallback bites.
-        instance.onEngineStop(frameOnce)
+        instance.onEngineStop(() => {
+          engineSettled = true
+          frameOnce()
+          // Layout has settled — if nothing else is animating, park the render loop.
+          scheduleIdlePause()
+        })
         frameTimer = window.setTimeout(frameOnce, 2000)
 
         // Reveal: ramp node spheres, links, and label sprites from invisible to their
@@ -748,17 +807,35 @@ export function GraphView() {
 
           if (p < 1) {
             revealRaf = requestAnimationFrame(stepReveal)
+          } else {
+            // Reveal done — clear the flag and let the idle pause arm (no-op if the
+            // engine is still settling; onEngineStop will re-arm).
+            revealing = false
+            scheduleIdlePause()
           }
         }
         revealRaf = requestAnimationFrame(stepReveal)
 
-        const orbit = instance.controls() as { autoRotate?: boolean; autoRotateSpeed?: number }
+        const orbit = instance.controls() as {
+          addEventListener?: (type: string, listener: () => void) => void
+          autoRotate?: boolean
+          autoRotateSpeed?: number
+        }
         orbit.autoRotate = controlsRef.current.rotationSpeed > 0
         orbit.autoRotateSpeed = controlsRef.current.rotationSpeed
+        // Orbit drag / wheel-zoom (and each auto-rotate frame) fire 'change'; keep the loop
+        // awake through the gesture, then re-park once it stops moving.
+        orbit.addEventListener?.('change', wake)
+
+        // A pointer press or wheel starts a gesture a frame before OrbitControls emits
+        // 'change' — wake on the input itself so the first frame isn't dropped.
+        host.addEventListener('pointerdown', wake)
+        host.addEventListener('wheel', wake, { passive: true })
 
         observer = new ResizeObserver(() => {
           instance.width(host.clientWidth || 800)
           instance.height(host.clientHeight || 600)
+          wake()
         })
         observer.observe(host)
 
@@ -780,6 +857,10 @@ export function GraphView() {
       if (frameTimer) {
         window.clearTimeout(frameTimer)
       }
+      window.clearTimeout(idlePauseTimer)
+      host.removeEventListener('pointerdown', wake)
+      host.removeEventListener('wheel', wake)
+      wakeRef.current = null
       observer?.disconnect()
       graphRef.current = null
       neighborsByNodeRef.current = new Map()
@@ -834,6 +915,10 @@ export function GraphView() {
     }
 
     refreshHighlight()
+    // Any of the above (reheat, sprite rebuild, color redigest, turning auto-rotate on)
+    // must draw at least one frame even if the render loop was parked. wake() resumes it;
+    // turning auto-rotate on keeps it running, turning it off re-arms the idle pause.
+    wakeRef.current?.()
   }, [controls, status])
 
   return (
