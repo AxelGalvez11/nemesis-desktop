@@ -17,6 +17,7 @@ import { useAuiState } from '@assistant-ui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { currentActivityEvent, phraseForActivity } from '@/components/assistant-ui/thread/activity-phrase';
 import { contentHasVisibleText } from '@/components/assistant-ui/thread/content';
+import { ActivityTimerText } from '@/components/chat/activity-timer-text';
 import { Codicon } from '@/components/ui/codicon';
 import { cn } from '@/lib/utils';
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
@@ -71,6 +72,8 @@ export const ActivityStrip = ({ placement = 'header' }) => {
     // Bumped when the clock stops so the settled label re-renders with a duration
     // (the settle render itself runs before the effect records `end`).
     const [, setClockTick] = useState(0);
+    // Live instance only: 1 Hz re-render so the inline turn timer counts up.
+    const [now, setNow] = useState(() => Date.now());
     const ref = useRef(null);
     const messageId = useAuiState(s => s.message.id);
     const running = useAuiState(s => s.message.status?.type === 'running');
@@ -119,6 +122,15 @@ export const ActivityStrip = ({ placement = 'header' }) => {
             setClockTick(tick => tick + 1);
         }
     }, [messageId, placement, running]);
+    // Tick the live row's turn timer once a second. Live-only and while running
+    // only — the settled label reads the frozen clock instead.
+    useEffect(() => {
+        if (placement !== 'live' || !running) {
+            return;
+        }
+        const id = window.setInterval(() => setNow(Date.now()), 1000);
+        return () => window.clearInterval(id);
+    }, [placement, running]);
     // The trail lives in a sibling subtree (MessagePrimitive.Parts), so the collapse is
     // driven by an attribute on the shared message root + a CSS rule in styles.css.
     // Header-owned: its anchor stays mounted through every phase of the turn.
@@ -145,7 +157,13 @@ export const ActivityStrip = ({ placement = 'header' }) => {
         if (!running || !(livePhrase || intent || hasReasoning)) {
             return null;
         }
-        return (_jsxs("div", { "aria-live": "polite", className: "mt-1.5 mb-1 flex min-w-0 max-w-full flex-col gap-1", "data-slot": "aui_activity-phrase", role: "status", children: [intent && !hasProse && (_jsx("p", { className: "nemesis-intent-line text-[0.875rem] leading-relaxed text-(--ui-text-secondary)", children: intent })), _jsx("span", { className: "nemesis-activity-phrase flex min-w-0 text-[length:var(--conversation-tool-font-size)] text-(--ui-text-tertiary)", children: _jsx("span", { className: "shimmer min-w-0 truncate", children: livePhrase || 'Thinking' }) }, livePhrase || 'thinking')] }));
+        // Whole-turn seconds for the inline timer — same clock the settled
+        // "Worked for Xs" label reads, so live and settled numbers agree. Null on
+        // the very first render if the header effect hasn't armed the clock yet;
+        // the timer simply appears on the next tick.
+        const clockStart = TURN_CLOCK.get(messageId)?.start;
+        const liveSeconds = clockStart !== undefined ? Math.max(0, Math.floor((now - clockStart) / 1000)) : null;
+        return (_jsxs("div", { "aria-live": "polite", className: "mt-1.5 mb-1 flex min-w-0 max-w-full flex-col gap-1", "data-slot": "aui_activity-phrase", role: "status", children: [intent && !hasProse && (_jsx("p", { className: "nemesis-intent-line text-[0.875rem] leading-relaxed text-(--ui-text-secondary)", children: intent })), _jsxs("div", { className: "flex min-w-0 max-w-full items-center gap-2", children: [_jsx("span", { "aria-hidden": "true", className: "dither inline-block size-3 shrink-0 rounded-[2px] text-midground/80 animate-pulse" }), _jsx("span", { className: "nemesis-activity-phrase flex min-w-0 text-[length:var(--conversation-tool-font-size)] text-(--ui-text-tertiary)", children: _jsx("span", { className: "shimmer min-w-0 truncate", children: livePhrase || 'Thinking' }) }, livePhrase || 'thinking'), liveSeconds !== null && _jsx(ActivityTimerText, { seconds: liveSeconds })] })] }));
     }
     if (!active || running) {
         // Zero-size anchor keeps the ref attached so the attribute updates on settle.
