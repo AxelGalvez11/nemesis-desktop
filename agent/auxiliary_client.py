@@ -4110,6 +4110,25 @@ def _resolve_single_provider(
     )
     return client
 
+def _aux_fast_deepseek_model(model: str) -> str:
+    """Map thinking/premium DeepSeek tiers to the fast non-thinking tier.
+
+    Aux tasks (compression, title generation, web extract, …) never want a
+    thinking or premium model: DeepSeek endpoints (and the Nemesis metering
+    valve) map ``deepseek-reasoner`` to thinking-enabled and pass the
+    ``v4-pro`` tier through at premium pricing — pay for reasoning on chat
+    turns, not on summarization side work. ``deepseek-chat`` is a valid
+    alias for the fast non-thinking tier on both the real DeepSeek API and
+    the valve. Non-DeepSeek model names pass through untouched.
+    """
+    normalized = (model or "").lower()
+    if normalized.startswith("deepseek-reasoner"):
+        return "deepseek-chat"
+    if "deepseek" in normalized and "v4-pro" in normalized:
+        return "deepseek-chat"
+    return model
+
+
 def _resolve_auto(
     main_runtime: Optional[Dict[str, Any]] = None,
     task: Optional[str] = None,
@@ -4233,12 +4252,7 @@ def _resolve_auto(
         # None — /compress no-op'd for the whole session (2026-07-14).
         if runtime_base_url and runtime_api_key:
             try:
-                _direct_model = main_model
-                # Aux tasks never want a thinking model: the proxy maps
-                # deepseek-reasoner to thinking-enabled — pay for reasoning on
-                # chat turns, not on summarization side work.
-                if _direct_model.startswith("deepseek-reasoner"):
-                    _direct_model = "deepseek-chat"
+                _direct_model = _aux_fast_deepseek_model(main_model)
                 _direct = OpenAI(base_url=runtime_base_url, api_key=runtime_api_key)
                 logger.info(
                     "Auxiliary auto-detect: using live session runtime directly (%s)",
@@ -4259,17 +4273,21 @@ def _resolve_auto(
         if main_chain_label and _is_provider_unhealthy(main_chain_label):
             _log_skip_unhealthy(main_chain_label)
         else:
+            # Same fast-tier mapping as the direct lane above — without it a
+            # registry-resolved DeepSeek client would run aux work on the
+            # thinking/premium tier whenever the direct lane is unavailable.
+            _registry_model = _aux_fast_deepseek_model(main_model)
             client, resolved = resolve_provider_client(
                 resolved_provider,
-                main_model,
+                _registry_model,
                 explicit_base_url=explicit_base_url,
                 explicit_api_key=explicit_api_key,
                 api_mode=runtime_api_mode or None,
             )
             if client is not None:
                 logger.info("Auxiliary auto-detect: using main provider %s (%s)",
-                            main_provider, resolved or main_model)
-                return client, resolved or main_model
+                            main_provider, resolved or _registry_model)
+                return client, resolved or _registry_model
 
     # ── Step 2: user-configured fallback policy ─────────────────────────
     # In auto mode, respect the task-specific fallback chain first, then the

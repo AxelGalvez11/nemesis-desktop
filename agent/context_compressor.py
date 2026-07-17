@@ -201,6 +201,20 @@ _SUMMARY_TOKENS_CEILING = 10_000
 # Placeholder used when pruning old tool results
 _PRUNED_TOOL_PLACEHOLDER = "[Old tool output cleared to save context space]"
 
+# Failed tool results keep the last lines of real output alongside the pruned
+# one-line synopsis. Flattening a failure to "exit 1" erases the only evidence
+# (the traceback, the compiler error) the summarizer's "## Blocked" section
+# and the model's own retry avoidance need — the same "never sanitize
+# failures out of context" rule Anthropic's context-engineering guidance and
+# Manus's published practice converge on. Successes stay one-liners.
+_ERROR_TAIL_MAX_LINES = 10
+_ERROR_TAIL_MAX_CHARS = 700
+# A tool result whose content matches this is already a pruned synopsis from
+# an earlier compaction ("[terminal] ran `npm test` -> exit 1, ..."). It must
+# not be re-summarized: _summarize_tool_result would re-derive counts from the
+# synopsis's own text and drop any kept error tail.
+_PRUNED_SYNOPSIS_RE = re.compile(r"^\[[a-z][a-z0-9_]*\][ \n]")
+
 # Chars per token rough estimate
 _CHARS_PER_TOKEN = 4
 # Flat token cost per attached image part.  Real cost varies by provider and
@@ -586,7 +600,59 @@ def _strip_historical_media(messages: List[Dict[str, Any]]) -> List[Dict[str, An
     return result if changed else messages
 
 
+def _error_tail(tool_content: str) -> str:
+    """Last lines of a FAILED tool result, kept next to the pruned synopsis.
+
+    For structured (JSON) results the tail is built from the real output plus
+    the error message (error last, so left-side truncation keeps it); for
+    plain-text results it's simply the final lines. Bounded by
+    ``_ERROR_TAIL_MAX_LINES`` / ``_ERROR_TAIL_MAX_CHARS`` so a kept failure
+    stays ~2 orders of magnitude smaller than the raw output it replaces.
+    """
+    text = tool_content
+    try:
+        data = json.loads(tool_content)
+    except (json.JSONDecodeError, TypeError):
+        data = None
+    if isinstance(data, dict):
+        output = str(data.get("output") or data.get("stdout") or "")
+        error = str(data.get("error") or "")
+        combined = "\n".join(part for part in (output, error) if part.strip())
+        if combined.strip():
+            text = combined
+
+    lines = [line for line in text.rstrip().splitlines() if line.strip()]
+    tail = "\n".join(lines[-_ERROR_TAIL_MAX_LINES:]).strip()
+    if len(tail) > _ERROR_TAIL_MAX_CHARS:
+        tail = "…" + tail[-(_ERROR_TAIL_MAX_CHARS - 1):]
+    return tail
+
+
 def _summarize_tool_result(tool_name: str, tool_args: str, tool_content: str) -> str:
+    """Synopsis of a tool call + result; failures keep their error tail.
+
+    Successful results become the 1-line synopsis from
+    ``_summarize_tool_result_base``. Failed results (per
+    ``classify_tool_failure`` — the same classifier the CLI's ``[error]``
+    tag uses) additionally keep the last lines of real output, so exact
+    error text survives pruning into the summarizer's ``## Blocked``
+    section instead of being flattened to "exit 1".
+    """
+    summary = _summarize_tool_result_base(tool_name, tool_args, tool_content)
+    try:
+        from agent.tool_guardrails import classify_tool_failure
+
+        failed, _tag = classify_tool_failure(tool_name, tool_content)
+    except Exception:
+        failed = False
+    if failed:
+        tail = _error_tail(tool_content or "")
+        if tail:
+            summary = f"{summary}\n[kept error output]\n{tail}"
+    return summary
+
+
+def _summarize_tool_result_base(tool_name: str, tool_args: str, tool_content: str) -> str:
     """Create an informative 1-line summary of a tool call + result.
 
     Used during the pre-compression pruning pass to replace large tool
@@ -1391,6 +1457,11 @@ class ContextCompressor(ContextEngine):
                 continue
             # Skip already-deduplicated or previously-summarized results
             if content.startswith("[Duplicate tool output"):
+                continue
+            # A synopsis from an earlier compaction pass (possibly carrying a
+            # kept error tail) must not be summarized again — the second pass
+            # would derive counts from the synopsis text and drop the tail.
+            if _PRUNED_SYNOPSIS_RE.match(content):
                 continue
             # Only prune if the content is substantial (>200 chars)
             if len(content) > 200:
