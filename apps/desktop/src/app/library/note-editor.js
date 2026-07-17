@@ -13,7 +13,7 @@ import { deleteMarkupBackward, insertNewlineContinueMarkup } from '@codemirror/l
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { useEffect, useImperativeHandle, useRef } from 'react';
-import { calloutExtension, livePreview, mathBlockExtension, mermaidExtension, noteMarkdown, noteTheme, tableExtension } from './note-decorations';
+import { calloutExtension, codeHighlighting, livePreview, mathBlockExtension, mermaidExtension, noteMarkdown, noteTheme, tableExtension } from './note-decorations';
 import { toggleBold, toggleItalic } from './note-format';
 import { VAULT_DIR } from './vault';
 import { wikilinkCompletionSource } from './wikilink-autocomplete';
@@ -81,6 +81,7 @@ export function NoteEditor({ editable = false, imageContext = EMPTY_IMAGE_CONTEX
                 editableCompartment.current.of(editableExtensions(editable)),
                 EditorView.lineWrapping,
                 noteMarkdown,
+                codeHighlighting,
                 tableExtension(target => onOpenRef.current(target), target => isResolvedRef.current(target)),
                 calloutExtension(target => onOpenRef.current(target), target => isResolvedRef.current(target)),
                 mathBlockExtension(),

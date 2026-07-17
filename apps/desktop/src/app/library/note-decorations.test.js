@@ -6,7 +6,7 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
-import { calloutExtension, findCalloutBlocks, findMathBlocks, findMermaidBlocks, isTaskChecked, livePreview, mathBlockExtension, mermaidExtension, noteMarkdown, noteTheme, tableExtension, toggleTaskChar } from './note-decorations';
+import { calloutExtension, codeHighlighting, findCalloutBlocks, findMathBlocks, findMermaidBlocks, isTaskChecked, livePreview, mathBlockExtension, mermaidExtension, noteMarkdown, noteTheme, tableExtension, toggleTaskChar } from './note-decorations';
 describe('isTaskChecked', () => {
     it('is true for "[x]" and "[X]"', () => {
         expect(isTaskChecked('[x]')).toBe(true);
@@ -92,6 +92,7 @@ describe('note editor extensions mounted together (smoke test)', () => {
                 doc,
                 extensions: [
                     noteMarkdown,
+                    codeHighlighting,
                     tableExtension(onOpen, isResolved),
                     calloutExtension(onOpen, isResolved),
                     mathBlockExtension(),

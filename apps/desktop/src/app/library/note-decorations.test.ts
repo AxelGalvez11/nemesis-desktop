@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import type { ImageContext } from './note-decorations'
 import {
   calloutExtension,
+  codeHighlighting,
   findCalloutBlocks,
   findMathBlocks,
   findMermaidBlocks,
@@ -119,6 +120,7 @@ describe('note editor extensions mounted together (smoke test)', () => {
         doc,
         extensions: [
           noteMarkdown,
+          codeHighlighting,
           tableExtension(onOpen, isResolved),
           calloutExtension(onOpen, isResolved),
           mathBlockExtension(),
