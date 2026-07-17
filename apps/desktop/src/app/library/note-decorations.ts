@@ -4,7 +4,8 @@
 // so this CodeMirror-heavy layer is independently importable — including by tests — from the
 // thin React component that mounts it.
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { syntaxTree } from '@codemirror/language'
+import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language'
+import { languages } from '@codemirror/language-data'
 import { type EditorState, type Extension, type Range, StateField } from '@codemirror/state'
 import {
   Decoration,
@@ -14,14 +15,50 @@ import {
   type ViewUpdate,
   WidgetType
 } from '@codemirror/view'
+import { tags } from '@lezer/highlight'
 import { Strikethrough, TaskList } from '@lezer/markdown'
+import katex from 'katex'
 
+import { onThemeRepaint } from '../../hooks/use-theme-epoch'
 import { type EmbeddableFile, resolveEmbeddedImageSrc, resolveRelativeImageSrc } from './image-embed'
 
 /** The markdown language config the whole editor runs on — GFM strikethrough (`~~x~~`) and
  *  task lists (`- [ ]`) on top of the CommonMark base. Exported so a test can parse the exact
  *  same grammar this file's decorations expect. */
-export const noteMarkdown = markdown({ base: markdownLanguage, extensions: [Strikethrough, TaskList] })
+export const noteMarkdown = markdown({ base: markdownLanguage, codeLanguages: languages, extensions: [Strikethrough, TaskList] })
+
+/** Syntax colors for embedded fenced code, scoped to CODE-token tags only so markdown structure
+ *  (headings, bold, links) is untouched and stays owned by the live-preview decorations. The
+ *  markdown language is configured with codeLanguages (above) to lazy-load each language's Lezer
+ *  grammar; these colors render its tokens. Colors track the chat's shiki theme — GitHub
+ *  `github-light-default` / `github-dark-dimmed` — via light-dark(), so a note's code looks like
+ *  the same code in a chat message. Punctuation/plain variables stay default fg (as GitHub does). */
+const codeHighlightStyle = HighlightStyle.define([
+  {
+    color: 'light-dark(#cf222e, #f47067)',
+    tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword, tags.definitionKeyword, tags.moduleKeyword]
+  },
+  { color: 'light-dark(#0a3069, #96d0ff)', tag: [tags.string, tags.special(tags.string), tags.regexp] },
+  {
+    color: 'light-dark(#0550ae, #6cb6ff)',
+    tag: [tags.number, tags.bool, tags.null, tags.atom, tags.propertyName, tags.attributeName]
+  },
+  {
+    color: 'light-dark(#57606a, #768390)',
+    fontStyle: 'italic',
+    tag: [tags.comment, tags.lineComment, tags.blockComment, tags.meta]
+  },
+  {
+    color: 'light-dark(#8250df, #dcbdfb)',
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName]
+  },
+  { color: 'light-dark(#953800, #f69d50)', tag: [tags.typeName, tags.className, tags.namespace] },
+  { color: 'light-dark(#116329, #8ddb8c)', tag: [tags.tagName] }
+])
+
+/** syntaxHighlighting for fenced code (see codeHighlightStyle). Added to the editor alongside
+ *  noteMarkdown; markdown tokens aren't in the style, so only code is colored. */
+export const codeHighlighting: Extension = syntaxHighlighting(codeHighlightStyle)
 
 // Negative lookbehind excludes an Obsidian image embed's "![[...]]" — without it, this would
 // ALSO match the "[[...]]" tail of an embed, producing a second, overlapping decoration
@@ -35,6 +72,18 @@ const IMAGE_EMBED_RE = /!\[\[([^\]|#\n]+)(?:[^\]\n]*)?\]\]/g
 // writes `> [!solution]- Steps` and the note renders it as a fold-to-reveal card.
 const CALLOUT_HEAD_RE = /^\s*>\s*\[!([A-Za-z][\w-]*)\]([-+]?)\s?(.*)$/
 const QUOTE_LINE_RE = /^\s*>/
+
+// Inline math: `$…$`. Space-delimited (open `$` not before whitespace, close `$` not after
+// whitespace) so "$5 and $10" in prose isn't consumed; `$$…$$` display math is a block (see
+// findMathBlocks), so a doubled `$` is excluded here. Content still needs a math signal:
+const INLINE_MATH_RE = /(?<![\\$])\$(?![\s$])((?:[^$\n\\]|\\.)+?)(?<![\s\\])\$(?!\$)/g
+// …a letter, backslash, or operator char — what separates `$3x + 2$` / `$\frac12$` (render)
+// from `$5` / `$5$` (currency / bare number, left as plain text).
+const MATH_SIGNAL_RE = /[A-Za-z\\^_{}]/
+// A fenced code delimiter line (``` or ~~~), so `$$` inside a code fence isn't treated as math.
+const CODE_FENCE_RE = /^\s*(```|~~~)/
+// A fenced code block tagged `mermaid` (```mermaid) — rendered as a diagram, not a code block.
+const MERMAID_FENCE_RE = /^\s*(`{3,}|~{3,})\s*mermaid\s*$/i
 
 /** Context the editor supplies for resolving image sources — the note's own folder (for
  *  `![alt](relative/path)`) and the vault's file list (for `![[name]]` embeds, which Obsidian
@@ -126,6 +175,180 @@ class ImageWidget extends WidgetType {
   }
 }
 
+/** A KaTeX-rendered equation — inline (`$…$`, a <span>) or display (`$$…$$`, a centered
+ *  <div>). Renders with the same options the chat's markdown uses (see lib/katex-memo.ts) so
+ *  an equation looks the same in a note as in a message. eq() keeps the DOM stable across
+ *  rebuilds so KaTeX only re-runs when the LaTeX actually changes. */
+class MathWidget extends WidgetType {
+  constructor(
+    readonly tex: string,
+    readonly display: boolean
+  ) {
+    super()
+  }
+
+  eq(other: MathWidget): boolean {
+    return other.tex === this.tex && other.display === this.display
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement(this.display ? 'div' : 'span')
+    el.className = this.display ? 'cm-np-math cm-np-math-display' : 'cm-np-math cm-np-math-inline'
+
+    try {
+      // innerHTML is safe here: the markup is produced by katex.renderToString, which emits
+      // trusted HTML/MathML by design, and trust:false blocks the injection-capable commands
+      // (\href javascript:, \htmlData, …). The LaTeX is the user's own note text. (Routing it
+      // through DOMPurify would strip KaTeX's MathML and break rendering.) throwOnError:false
+      // renders invalid LaTeX as inline red text instead of throwing — a throw here would
+      // abort the whole decoration build and blank the note.
+      el.innerHTML = katex.renderToString(this.tex, {
+        displayMode: this.display,
+        errorColor: '#e5484d',
+        strict: 'ignore',
+        throwOnError: false,
+        trust: false
+      })
+    } catch {
+      el.classList.add('cm-np-math-error')
+      el.textContent = this.display ? `$$${this.tex}$$` : `$${this.tex}$`
+    }
+
+    return el
+  }
+}
+
+type MermaidModule = (typeof import('mermaid'))['default']
+
+let mermaidPromise: Promise<MermaidModule> | null = null
+let mermaidThemeApplied: 'dark' | 'default' | null = null
+
+/** Lazy-load mermaid on first diagram — it's heavy (d3/dagre), so a note with no diagrams never
+ *  pays for it. Matches how the chat's mermaid embed loads it. */
+function loadMermaid(): Promise<MermaidModule> {
+  mermaidPromise ??= import('mermaid').then(module => module.default)
+
+  return mermaidPromise
+}
+
+function applyMermaidTheme(mermaid: MermaidModule, dark: boolean): void {
+  const theme = dark ? 'dark' : 'default'
+
+  if (theme === mermaidThemeApplied) {
+    return
+  }
+
+  mermaid.initialize({ fontFamily: 'inherit', securityLevel: 'strict', startOnLoad: false, theme })
+  mermaidThemeApplied = theme
+}
+
+function isDarkMode(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+}
+
+function safeRequestMeasure(view: EditorView): void {
+  try {
+    view.requestMeasure()
+  } catch {
+    // The view was torn down between the async render and now — nothing to measure.
+  }
+}
+
+/** A ```mermaid fenced block rendered as a diagram. Mermaid renders ASYNCHRONOUSLY, so the widget
+ *  shows the raw source synchronously, then swaps in the SVG when render resolves (and calls
+ *  view.requestMeasure so CodeMirror re-measures the height change). Re-renders on a dark/light
+ *  flip via onThemeRepaint — theme changes don't produce CM transactions, so the StateField never
+ *  rebuilds for them and this subscription is the only re-theme path. On any error (or invalid
+ *  syntax mid-edit) it falls back to the raw source, never a broken diagram. securityLevel:'strict'
+ *  + innerHTML is safe the same way KaTeX's is (mermaid sanitizes labels, drops click handlers). */
+class MermaidWidget extends WidgetType {
+  private unsub: (() => void) | null = null
+  private destroyed = false
+
+  constructor(readonly code: string) {
+    super()
+  }
+
+  eq(other: MermaidWidget): boolean {
+    // Code alone — NOT theme. A theme flip is handled by the onThemeRepaint subscription; folding
+    // it into eq() would never fire (no transaction) and would rebuild the DOM on every edit.
+    return other.code === this.code
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-np-mermaid'
+
+    const showSource = (errored: boolean) => {
+      wrap.innerHTML = ''
+      const pre = document.createElement('pre')
+      pre.className = errored ? 'cm-np-mermaid-src cm-np-mermaid-error' : 'cm-np-mermaid-src'
+      pre.textContent = this.code
+      wrap.appendChild(pre)
+    }
+
+    // Raw-source placeholder until the async render resolves (also the error fallback).
+    showSource(false)
+
+    let token = 0
+    let renderedDark: boolean | null = null
+
+    const render = (force: boolean) => {
+      const dark = isDarkMode()
+
+      // onThemeRepaint fires on ANY <html> class/style mutation (CSS var churn, scroll locks…),
+      // not only a dark flip — so re-render only when the resolved dark state actually changed.
+      if (!force && dark === renderedDark) {
+        return
+      }
+
+      renderedDark = dark
+      const mine = ++token
+
+      void (async () => {
+        try {
+          const mermaid = await loadMermaid()
+          applyMermaidTheme(mermaid, dark)
+          const { svg } = await mermaid.render(`cm-mmd-${Math.random().toString(36).slice(2)}`, this.code)
+
+          if (this.destroyed || mine !== token) {
+            return
+          }
+
+          wrap.innerHTML = svg
+          safeRequestMeasure(view)
+        } catch {
+          if (this.destroyed || mine !== token) {
+            return
+          }
+
+          showSource(true)
+          safeRequestMeasure(view)
+        }
+      })()
+    }
+
+    render(true)
+    this.unsub = onThemeRepaint(() => render(false))
+
+    return wrap
+  }
+
+  destroy(): void {
+    this.destroyed = true
+    this.unsub?.()
+    this.unsub = null
+  }
+}
+
 /** Given a task's checkbox marker text ("[ ]" / "[x]" / "[X]"), whether it's checked. */
 export function isTaskChecked(marker: string): boolean {
   return /^\[[xX]\]$/.test(marker)
@@ -185,9 +408,10 @@ function tableCells(line: string): string[] {
 const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/
 
 // One alternative per inline construct, tried in this order at each position:
-// `code`, [[wikilink]], **strong**, *em*, ~~strike~~, [text](url).
+// `code`, [[wikilink]], **strong**, *em*, ~~strike~~, [text](url), $math$. Code comes first so a
+// `$` inside inline code isn't read as a math delimiter. Group 9 = the math body (no delimiters).
 const INLINE_TOKEN_RE =
-  /`([^`\n]+)`|(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]|\*\*((?:[^*\n]|\*(?!\*))+)\*\*|\*([^*\n]+)\*|~~([^~\n]+)~~|\[([^\]\n]+)\]\(([^)\n]+)\)/g
+  /`([^`\n]+)`|(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]|\*\*((?:[^*\n]|\*(?!\*))+)\*\*|\*([^*\n]+)\*|~~([^~\n]+)~~|\[([^\]\n]+)\]\(([^)\n]+)\)|\$(?![\s$])((?:[^$\n\\]|\\.)+?)(?<![\s\\])\$(?!\$)/g
 
 /** Render one table cell's markdown into `parent` — the same inline constructs the
  *  live-preview pass handles in body text (which the table's block widget replaces,
@@ -238,6 +462,28 @@ function appendInlineMarkdown(
       styled('cm-np-em', match[5])
     } else if (match[6] !== undefined) {
       styled('cm-np-strike', match[6])
+    } else if (match[9] !== undefined) {
+      // Inline math in a cell/callout body. Same signal guard as the body pass — bare numbers /
+      // currency stay literal — and the same trusted KaTeX render (see MathWidget for why
+      // innerHTML is safe here).
+      if (MATH_SIGNAL_RE.test(match[9])) {
+        const span = styled('cm-np-math cm-np-math-inline')
+
+        try {
+          span.innerHTML = katex.renderToString(match[9], {
+            displayMode: false,
+            errorColor: '#e5484d',
+            strict: 'ignore',
+            throwOnError: false,
+            trust: false
+          })
+        } catch {
+          span.classList.add('cm-np-math-error')
+          span.textContent = `$${match[9]}$`
+        }
+      } else {
+        parent.appendChild(document.createTextNode(match[0]))
+      }
     } else {
       const link = styled('cm-np-link')
       link.textContent = match[7]
@@ -445,6 +691,144 @@ export function findCalloutBlocks(doc: EditorView['state']['doc']): CalloutBlock
   return blocks
 }
 
+interface MathBlock {
+  from: number
+  to: number
+  tex: string
+}
+
+/** Display-math blocks (`$$ … $$`) — either all on one line (`$$E=mc^2$$`) or the canonical
+ *  fenced form (a `$$` line, body lines, a closing `$$`). Whole-line ranges so the caller can
+ *  block-replace them (exported for tests). A `$$` inside a ``` code fence is skipped. */
+export function findMathBlocks(doc: EditorView['state']['doc']): MathBlock[] {
+  const blocks: MathBlock[] = []
+  const total = doc.lines
+  let inFence = false
+  let n = 1
+
+  while (n <= total) {
+    const line = doc.line(n)
+    const trimmed = line.text.trim()
+
+    if (CODE_FENCE_RE.test(line.text)) {
+      inFence = !inFence
+      n++
+      continue
+    }
+
+    if (inFence || !trimmed.startsWith('$$')) {
+      n++
+      continue
+    }
+
+    const afterOpen = trimmed.slice(2)
+
+    // Single line: "$$ … $$" with a real closing "$$" after the opener.
+    if (afterOpen.trimEnd().length > 2 && afterOpen.trimEnd().endsWith('$$')) {
+      const tex = afterOpen.trimEnd().slice(0, -2).trim()
+
+      if (tex) {
+        blocks.push({ from: line.from, tex, to: line.to })
+      }
+
+      n++
+      continue
+    }
+
+    // Multi-line: opener line (usually a bare "$$"), body lines, then a line ending in "$$".
+    const texLines: string[] = afterOpen.trim() ? [afterOpen.trim()] : []
+    let last = n
+    let closed = false
+
+    for (let m = n + 1; m <= total; m++) {
+      const body = doc.line(m).text
+
+      if (body.trim().endsWith('$$')) {
+        const inner = body.trim().slice(0, -2)
+
+        if (inner.trim()) {
+          texLines.push(inner)
+        }
+
+        last = m
+        closed = true
+        break
+      }
+
+      texLines.push(body)
+    }
+
+    if (closed) {
+      const tex = texLines.join('\n').trim()
+
+      if (tex) {
+        blocks.push({ from: line.from, tex, to: doc.line(last).to })
+      }
+
+      n = last + 1
+      continue
+    }
+
+    n++
+  }
+
+  return blocks
+}
+
+interface MermaidBlock {
+  from: number
+  to: number
+  code: string
+}
+
+/** ```mermaid fenced blocks — the fence line, body (the diagram source), and closing fence.
+ *  Whole-line ranges so the caller can block-replace them (exported for tests). */
+export function findMermaidBlocks(doc: EditorView['state']['doc']): MermaidBlock[] {
+  const blocks: MermaidBlock[] = []
+  const total = doc.lines
+  let n = 1
+
+  while (n <= total) {
+    const open = MERMAID_FENCE_RE.exec(doc.line(n).text)
+
+    if (!open) {
+      n++
+      continue
+    }
+
+    const closeRe = open[1][0] === '`' ? /^\s*`{3,}\s*$/ : /^\s*~{3,}\s*$/
+    const codeLines: string[] = []
+    let last = n
+    let closed = false
+
+    for (let m = n + 1; m <= total; m++) {
+      const bodyLine = doc.line(m).text
+
+      if (closeRe.test(bodyLine)) {
+        last = m
+        closed = true
+        break
+      }
+
+      codeLines.push(bodyLine)
+    }
+
+    if (closed) {
+      const code = codeLines.join('\n').trim()
+
+      if (code) {
+        blocks.push({ code, from: doc.line(n).from, to: doc.line(last).to })
+      }
+
+      n = last + 1
+    } else {
+      n++
+    }
+  }
+
+  return blocks
+}
+
 function buildDecorations(
   view: EditorView,
   onOpen: (target: string) => void,
@@ -473,7 +857,18 @@ function buildDecorations(
     decorations.push(Decoration.replace({}).range(from, end))
   }
 
+  const mathInline: MathBlock[] = []
+
   for (const { from, to } of view.visibleRanges) {
+    const text = doc.sliceString(from, to)
+    // Ranges an inline `$…$` must NOT fire inside: code (a `$` in `inline code`/a ``` fence is
+    // literal — think `if [ "$a" = "$b" ]`), plus wikilinks and images whose alias/label holds a
+    // formula (`[[ACE|$K_i$]]`, `![$x$](d.png)`). Each of those emits its OWN replace over the whole
+    // construct; a math replace nested inside would be a second, overlapping replace and crash CM.
+    // Collected across the tree pass + regex scans below; the math scan runs LAST so all are known.
+    const protectedRanges: { from: number; to: number }[] = []
+    const insideProtected = (pos: number) => protectedRanges.some(range => pos >= range.from && pos < range.to)
+
     syntaxTree(view.state).iterate({
       enter: node => {
         const type = node.name
@@ -519,12 +914,14 @@ function buildDecorations(
         }
 
         if (type === 'InlineCode') {
+          protectedRanges.push({ from: node.from, to: node.to })
           decorations.push(Decoration.mark({ class: 'cm-np-code' }).range(node.from, node.to))
 
           return
         }
 
         if (type === 'FencedCode') {
+          protectedRanges.push({ from: node.from, to: node.to })
           const first = doc.lineAt(node.from).number
           const last = doc.lineAt(node.to).number
 
@@ -594,6 +991,8 @@ function buildDecorations(
         if (type === 'Image') {
           // Standard "![alt](path)" — Obsidian's "![[name]]" embed is regex-matched below,
           // same reason wikilinks are (lezer's grammar doesn't know that syntax).
+          protectedRanges.push({ from: node.from, to: node.to })
+
           if (!selectionTouches(node.from, node.to)) {
             const urlNode = node.node.getChild('URL')
             const rawUrl = urlNode ? doc.sliceString(urlNode.from, urlNode.to) : ''
@@ -624,11 +1023,10 @@ function buildDecorations(
     })
 
     // Wikilinks by regex — lezer's markdown grammar doesn't know Obsidian's [[...]].
-    const text = doc.sliceString(from, to)
-
     for (const match of text.matchAll(WIKILINK_RE)) {
       const start = from + (match.index ?? 0)
       const end = start + match[0].length
+      protectedRanges.push({ from: start, to: end })
       // A "\|"-escaped alias pipe (table syntax) leaves a trailing backslash on the
       // captured target — strip it so the link resolves to the real note.
       const target = match[1].replace(/\\$/, '').trim()
@@ -656,6 +1054,7 @@ function buildDecorations(
       const start = from + (match.index ?? 0)
       const end = start + match[0].length
       const name = match[1].trim()
+      protectedRanges.push({ from: start, to: end })
 
       if (!name || selectionTouches(start, end)) {
         continue
@@ -667,23 +1066,48 @@ function buildDecorations(
         decorations.push(Decoration.replace({ widget: new ImageWidget(src, name) }).range(start, end))
       }
     }
+
+    // Inline math (`$…$`) — LAST, so every protected range (code, wikilinks, images) is known.
+    // Skipped inside those (their replace would collide) and inside `code`; bare numbers/currency
+    // fail the signal check. Widgets are appended (and colliding markdown decos dropped) after the
+    // loop; see below.
+    for (const match of text.matchAll(INLINE_MATH_RE)) {
+      const start = from + (match.index ?? 0)
+      const end = start + match[0].length
+
+      if (insideProtected(start) || !MATH_SIGNAL_RE.test(match[1]) || selectionTouches(start, end)) {
+        continue
+      }
+
+      mathInline.push({ from: start, tex: match[1], to: end })
+    }
   }
 
   // Tables AND callouts render via separate StateFields (below) — CodeMirror forbids
   // block-replace-across-lines decorations from a ViewPlugin. Here we only DROP the
   // inline/line decorations that fall inside a rendered block so they don't collide
   // with the StateField's block widget (e.g. the per-line quote styling on callout lines).
-  const renderedBlocks = [...findTableBlocks(doc), ...findCalloutBlocks(doc)].filter(
-    block => !selectionTouches(block.from, block.to)
-  )
+  const renderedBlocks = [
+    ...findTableBlocks(doc),
+    ...findCalloutBlocks(doc),
+    ...findMathBlocks(doc),
+    ...findMermaidBlocks(doc)
+  ].filter(block => !selectionTouches(block.from, block.to))
+  const inRendered = (pos: number) => renderedBlocks.some(block => pos >= block.from && pos <= block.to)
+  const insideMath = (pos: number) => mathInline.some(math => pos >= math.from && pos < math.to)
 
-  if (renderedBlocks.length > 0) {
-    const inRendered = (pos: number) => renderedBlocks.some(block => pos >= block.from && pos <= block.to)
+  // Drop any block-covered decoration AND any markdown deco that fell inside an inline-math span
+  // (e.g. lezer parsing `x_1` as emphasis) — the latter would otherwise be a second decoration
+  // overlapping the math widget's replace and crash CodeMirror at set construction.
+  const kept = decorations.filter(range => !inRendered(range.from) && !insideMath(range.from))
 
-    return Decoration.set(decorations.filter(range => !inRendered(range.from)), true)
+  for (const math of mathInline) {
+    if (!inRendered(math.from)) {
+      kept.push(Decoration.replace({ widget: new MathWidget(math.tex, false) }).range(math.from, math.to))
+    }
   }
 
-  return Decoration.set(decorations, true)
+  return Decoration.set(kept, true)
 }
 
 /** Table block-replace decorations. In a StateField (not the ViewPlugin) because
@@ -766,6 +1190,64 @@ function buildCalloutDecorations(
           widget: new CalloutWidget(block.type, block.title, block.collapsed, block.body, onOpen, isResolved)
         }).range(block.from, block.to)
       )
+    }
+  }
+
+  return Decoration.set(ranges, true)
+}
+
+/** Display-math (`$$ … $$`) block-replace decorations. Same StateField requirement as tables
+ *  and callouts (block decorations across line breaks can't come from a ViewPlugin). The caret
+ *  entering the block reverts it to raw `$$` markdown for editing; no link callbacks needed. */
+export function mathBlockExtension(): Extension {
+  return StateField.define<DecorationSet>({
+    create: buildMathBlockDecorations,
+    provide: field => EditorView.decorations.from(field),
+    update(value, tr) {
+      return tr.docChanged || tr.selection ? buildMathBlockDecorations(tr.state) : value
+    }
+  })
+}
+
+function buildMathBlockDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+
+  for (const block of findMathBlocks(doc)) {
+    const touched = state.selection.ranges.some(r => r.to >= block.from && r.from <= block.to)
+
+    if (!touched) {
+      ranges.push(
+        Decoration.replace({ block: true, widget: new MathWidget(block.tex, true) }).range(block.from, block.to)
+      )
+    }
+  }
+
+  return Decoration.set(ranges, true)
+}
+
+/** ```mermaid diagram block-replace decorations. Same StateField requirement as tables/callouts/
+ *  math (block decorations across line breaks can't come from a ViewPlugin). The caret entering
+ *  the block reverts it to the raw ```mermaid source for editing. */
+export function mermaidExtension(): Extension {
+  return StateField.define<DecorationSet>({
+    create: buildMermaidDecorations,
+    provide: field => EditorView.decorations.from(field),
+    update(value, tr) {
+      return tr.docChanged || tr.selection ? buildMermaidDecorations(tr.state) : value
+    }
+  })
+}
+
+function buildMermaidDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+
+  for (const block of findMermaidBlocks(doc)) {
+    const touched = state.selection.ranges.some(r => r.to >= block.from && r.from <= block.to)
+
+    if (!touched) {
+      ranges.push(Decoration.replace({ block: true, widget: new MermaidWidget(block.code) }).range(block.from, block.to))
     }
   }
 
@@ -946,6 +1428,34 @@ export const noteTheme = EditorView.theme({
     padding: '0.55em 0.85em 0.7em'
   },
   '.cm-np-callout-line': { minHeight: '1.2em' },
+  '.cm-np-math-inline': { padding: '0 0.1em' },
+  '.cm-np-math-display': {
+    display: 'block',
+    margin: '0.7em 0',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    textAlign: 'center'
+  },
+  '.cm-np-math-error': {
+    color: 'var(--ui-text-tertiary)',
+    fontFamily: 'var(--dt-font-mono, ui-monospace, monospace)',
+    fontSize: '0.9em'
+  },
+  '.cm-np-mermaid': {
+    display: 'flex',
+    justifyContent: 'center',
+    margin: '0.7em 0',
+    overflowX: 'auto'
+  },
+  '.cm-np-mermaid svg': { height: 'auto', maxWidth: '100%' },
+  '.cm-np-mermaid-src': {
+    color: 'var(--ui-text-tertiary)',
+    fontFamily: 'var(--dt-font-mono, ui-monospace, monospace)',
+    fontSize: '0.85em',
+    margin: '0',
+    padding: '0.4em 0.6em',
+    whiteSpace: 'pre-wrap'
+  },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     backgroundColor: 'var(--ui-bg-elevated)',
     border: '1px solid var(--ui-stroke-secondary)',

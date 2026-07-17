@@ -13,7 +13,7 @@ import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, keymap, placeholder } from '@codemirror/view'
 import { type Ref, useEffect, useImperativeHandle, useRef } from 'react'
 
-import { calloutExtension, livePreview, noteMarkdown, noteTheme, tableExtension, type ImageContext } from './note-decorations'
+import { calloutExtension, codeHighlighting, livePreview, mathBlockExtension, mermaidExtension, noteMarkdown, noteTheme, tableExtension, type ImageContext } from './note-decorations'
 import { toggleBold, toggleItalic } from './note-format'
 import { VAULT_DIR } from './vault'
 import { wikilinkCompletionSource, type WikilinkTarget } from './wikilink-autocomplete'
@@ -134,6 +134,7 @@ export function NoteEditor({
         editableCompartment.current.of(editableExtensions(editable)),
         EditorView.lineWrapping,
         noteMarkdown,
+        codeHighlighting,
         tableExtension(
           target => onOpenRef.current(target),
           target => isResolvedRef.current(target)
@@ -142,6 +143,8 @@ export function NoteEditor({
           target => onOpenRef.current(target),
           target => isResolvedRef.current(target)
         ),
+        mathBlockExtension(),
+        mermaidExtension(),
         livePreview(
           target => onOpenRef.current(target),
           target => isResolvedRef.current(target),
