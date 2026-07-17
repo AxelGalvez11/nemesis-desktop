@@ -88,8 +88,10 @@ function synthLightColors(seed) {
         midgroundForeground: readableOn(midground),
         destructive: '#b94a3a',
         destructiveForeground: '#ffffff',
-        sidebarBackground: mix('#fafafa', accent, 0.05),
-        sidebarBorder: border,
+        // Sidebars and panel chrome stay strictly achromatic — accent lives in
+        // buttons/links/highlights only, never in surface fills or their borders.
+        sidebarBackground: '#fafafa',
+        sidebarBorder: '#ececef',
         userBubble: soft,
         userBubbleBorder: border
     };

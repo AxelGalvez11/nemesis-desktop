@@ -1956,8 +1956,13 @@ text-* variant utilities. */ .btn-arc {
    derivations — each one is re-declared here so it re-derives inside the
    sidebar scope with the accent neutralized. Formulas mirror :root exactly;
    dark mode inherits the same formulas, so this covers both modes. The accent
-   keeps living everywhere else (chat, buttons, controls). */
-.bg-sidebar {
+   keeps living everywhere else (chat, buttons, controls).
+   NOTE: every real panel uses the arbitrary-property utility
+   bg-(--ui-sidebar-surface-background), not bg-sidebar (twMerge strips the
+   latter when both are passed) — so this scope must list BOTH selectors or
+   it matches nothing. */
+.bg-sidebar,
+.bg-\(--ui-sidebar-surface-background\) {
   --ui-accent: var(--ui-base);
   --ui-accent-secondary: var(--ui-base);
   --ui-bg-card: color-mix(in srgb, var(--ui-accent) 4%, color-mix(in srgb, var(--ui-base) 4%, transparent));
