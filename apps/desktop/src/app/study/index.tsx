@@ -1380,7 +1380,7 @@ function DeckBrowser({
 
             {!isCollapsed &&
               (group.decks.length > 0 ? (
-                <div className="divide-y divide-(--ui-stroke-quaternary) rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
+                <div className="divide-y divide-(--ui-stroke-quaternary)">
                   {group.decks.map(deck => (
                     <DeckTableRow
                       counts={queueCounts.get(deck.id) ?? ZERO_COUNTS}
@@ -1926,7 +1926,7 @@ function Heatmap({ state }: { state: StudyState }) {
 
   return (
     <section className="px-8 pb-2 pt-8">
-      <div className="rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
+      <div>
         <button
           aria-expanded={expanded}
           className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

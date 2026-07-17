@@ -261,12 +261,7 @@ export function CalendarView() {
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-6 pb-3 pt-5">
         <div>
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--theme-primary)">Schedule</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em]">Calendar</h1>
-          <p className="mt-1 max-w-lg text-xs leading-relaxed text-muted-foreground">
-            Assignment due dates, exams, and rotation dates in one place. Nemesis can add these as it reads your
-            school accounts — add or fix anything yourself too.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-[-0.025em]">Calendar</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SegmentedControl onChange={changeView} options={VIEW_OPTIONS} value={view} />
