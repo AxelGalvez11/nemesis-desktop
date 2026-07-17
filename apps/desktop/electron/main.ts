@@ -101,7 +101,8 @@ import { createMissionDispatcher } from './mission-dispatcher'
 import { createWebSocketMissionGateway } from './mission-gateway'
 import { createMissionRunner } from './mission-runner'
 import { generateVaultKey, keyFromStoredBase64url, pairingCodeFromKey } from './library-crypto'
-import { createLibraryPublisher, walkVaultMarkdown } from './library-publisher'
+import { createLibraryPublisher, walkVaultMarkdown, type DerivedDocEntry } from './library-publisher'
+import { buildCalendarDocContent, parseCalendarFeedEvents, renderIcs, windowedEvents } from './calendar-feed'
 import { registerNemesisAsr } from './nemesis-asr'
 import {
   APP_ID,
@@ -7369,6 +7370,81 @@ function ensurePhoneSyncVaultKey(): Buffer {
   return key
 }
 
+// ——— Phase 2/3 derived docs: deck snapshots + calendar ———
+// Deck snapshots: the renderer's study module precomputes due queues into
+// .study/phone-decks.json (it owns the FSRS scheduler and the primary state);
+// main just splits that file into one encrypted doc per deck. Calendar: main
+// reads the agent-written School/calendar.json directly. A missing source means
+// that kind simply isn't listed, and the publisher tombstones its old docs.
+const calendarFeedTokenFile = () => path.join(app.getPath('userData'), 'calendar-feed-token.json')
+const phoneDecksFile = () => path.join(phoneSyncVaultRoot(), '.study', 'phone-decks.json')
+const calendarJsonFile = () => path.join(phoneSyncVaultRoot(), 'School', 'calendar.json')
+
+// Capability token for the native-calendar ICS URL (unguessable, per-Mac,
+// regenerated only by unpairing). Reuses the vault-key generator for 32 random
+// bytes; stored as plain hex — it guards dates + titles, not note content.
+function ensureCalendarFeedToken(): string {
+  try {
+    const raw = JSON.parse(fs.readFileSync(calendarFeedTokenFile(), 'utf8'))
+    if (typeof raw?.token === 'string' && /^[0-9a-f]{64}$/.test(raw.token)) return raw.token
+  } catch {
+    // first use (or unreadable file): mint a fresh token below
+  }
+  const token = generateVaultKey().toString('hex')
+  fs.writeFileSync(calendarFeedTokenFile(), JSON.stringify({ v: 1, token }), { mode: 0o600 })
+  return token
+}
+
+async function listPhoneDerivedDocs(): Promise<DerivedDocEntry[]> {
+  const docs: DerivedDocEntry[] = []
+  try {
+    const file = phoneDecksFile()
+    const [stat, text] = await Promise.all([fs.promises.stat(file), fs.promises.readFile(file, 'utf8')])
+    const parsed = JSON.parse(text)
+    if (parsed?.v === 1 && Array.isArray(parsed.decks)) {
+      for (const deck of parsed.decks) {
+        if (!deck || typeof deck.id !== 'string' || typeof deck.name !== 'string') continue
+        docs.push({
+          path: `.study/sync/deck/${deck.id}`,
+          kind: 'deck',
+          title: deck.name,
+          content: JSON.stringify({ v: 1, asOf: parsed.asOf ?? new Date(stat.mtimeMs).toISOString(), ...deck }),
+          mtimeMs: stat.mtimeMs
+        })
+      }
+    }
+  } catch {
+    // no deck snapshots yet (Study never used, or renderer hasn't written them)
+  }
+  try {
+    const file = calendarJsonFile()
+    const [stat, text] = await Promise.all([fs.promises.stat(file), fs.promises.readFile(file, 'utf8')])
+    const events = windowedEvents(parseCalendarFeedEvents(text), new Date())
+    const feedUrl = `${MISSION_SUPABASE_URL}/functions/v1/nemesis-ics?token=${ensureCalendarFeedToken()}`
+    docs.push({
+      path: '.derived/calendar',
+      kind: 'calendar',
+      title: 'Calendar',
+      content: buildCalendarDocContent(events, feedUrl, new Date(stat.mtimeMs).toISOString()),
+      mtimeMs: stat.mtimeMs
+    })
+  } catch {
+    // no calendar file yet — the agent hasn't written School/calendar.json
+  }
+  return docs
+}
+
+async function phoneCalendarFeed(): Promise<{ ics: string; token: string } | null> {
+  try {
+    const file = calendarJsonFile()
+    const [stat, text] = await Promise.all([fs.promises.stat(file), fs.promises.readFile(file, 'utf8')])
+    const events = windowedEvents(parseCalendarFeedEvents(text), new Date())
+    return { ics: renderIcs(events, new Date(stat.mtimeMs)), token: ensureCalendarFeedToken() }
+  } catch {
+    return null
+  }
+}
+
 const libraryPublisher = createLibraryPublisher({
   supabaseUrl: MISSION_SUPABASE_URL,
   anonKey: MISSION_SUPABASE_ANON_KEY,
@@ -7391,6 +7467,8 @@ const libraryPublisher = createLibraryPublisher({
       phoneSyncVaultRoot()
     ),
   readFileText: relPath => fs.promises.readFile(path.join(phoneSyncVaultRoot(), relPath), 'utf8'),
+  listDerivedDocs: () => listPhoneDerivedDocs(),
+  getCalendarFeed: () => phoneCalendarFeed(),
   loadState: async () => {
     try {
       const raw = JSON.parse(fs.readFileSync(phoneSyncStateFile(), 'utf8'))
@@ -7424,6 +7502,7 @@ ipcMain.handle('nemesis:phone-sync:unpair', async () => {
   try {
     fs.rmSync(phoneSyncKeyFile(), { force: true })
     fs.rmSync(phoneSyncStateFile(), { force: true })
+    fs.rmSync(calendarFeedTokenFile(), { force: true })
   } catch (error) {
     rememberLog(`[phone-sync] could not clear pairing files: ${error?.message || error}`)
   }
@@ -7432,6 +7511,11 @@ ipcMain.handle('nemesis:phone-sync:unpair', async () => {
     try {
       const sub = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8')).sub
       await fetch(`${MISSION_SUPABASE_URL}/rest/v1/library_documents?user_id=eq.${sub}`, {
+        method: 'DELETE',
+        headers: { apikey: MISSION_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` }
+      })
+      // The ICS feed dies with the pairing too — a fresh pair mints a new token.
+      await fetch(`${MISSION_SUPABASE_URL}/rest/v1/calendar_feeds?user_id=eq.${sub}`, {
         method: 'DELETE',
         headers: { apikey: MISSION_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` }
       })

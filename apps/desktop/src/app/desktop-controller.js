@@ -39,6 +39,7 @@ import { $filePreviewTarget, $previewTarget, closeActiveRightRailTab } from '../
 import { $activeGatewayProfile, $freshSessionRequest, $profileScope, refreshActiveProfile } from '../store/profile';
 import { $startWorkSessionRequest, followActiveSessionCwd, resolveNewSessionCwd } from '../store/projects';
 import { $reviewOpen, REVIEW_PANE_ID } from '../store/review';
+import { startPhoneStudySync } from './study/phone-sync';
 import { $activeSessionId, $attentionSessionIds, $currentCwd, $freshDraftReady, $gatewayState, $messages, $messagingSessions, $resumeExhaustedSessionId, $resumeFailedSessionId, $selectedStoredSessionId, $sessions, $sessionsLoading, $sessionsTotal, getRememberedSessionId, sessionPinId, setAwaitingResponse, setBusy, setCurrentBranch, setCurrentCwd, setCurrentModel, setCurrentProvider, setMessages, setRememberedSessionId } from '../store/session';
 import { onSessionsChanged } from '../store/session-sync';
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '../store/todos';
@@ -207,6 +208,10 @@ export function DesktopController() {
             stopUpdatePoller();
         };
     }, []);
+    // Phone-sync study bridge (sync spec Phases 2/3): precompute deck snapshots
+    // for the encrypted publisher and apply phone review grades through the study
+    // model's own apply path. App-wide, not tied to the Study page being open.
+    useEffect(() => startPhoneStudySync(), []);
     // Telemetry only ever starts once the CURRENT consent version was accepted
     // (the consent gate itself starts it the moment a student first accepts).
     useEffect(() => {
