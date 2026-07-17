@@ -318,8 +318,16 @@ export function DesktopController() {
 
   // Phone-sync study bridge (sync spec Phases 2/3): precompute deck snapshots
   // for the encrypted publisher and apply phone review grades through the study
-  // model's own apply path. App-wide, not tied to the Study page being open.
-  useEffect(() => startPhoneStudySync(), [])
+  // model's own apply path. Main window ONLY — secondary chat pop-outs share
+  // this component AND the same localStorage, and a second bridge instance
+  // would race the ingest into double-applying grades.
+  useEffect(() => {
+    if (isSecondaryWindow()) {
+      return
+    }
+
+    return startPhoneStudySync()
+  }, [])
 
   // Telemetry only ever starts once the CURRENT consent version was accepted
   // (the consent gate itself starts it the moment a student first accepts).

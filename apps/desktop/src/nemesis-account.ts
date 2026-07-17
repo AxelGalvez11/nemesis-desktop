@@ -836,13 +836,15 @@ export async function restFetch(pathAndQuery: string, init?: RequestInit): Promi
   try {
     const session = await refreshIfNeeded(stored)
 
+    // Caller headers first, auth last — a caller can add Prefer/etc. but can
+    // never (accidentally) override the credentials.
     return await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, {
       ...init,
       headers: {
+        ...(init?.headers ?? {}),
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${session.accessToken}`,
-        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(init?.headers ?? {})
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {})
       }
     })
   } catch {

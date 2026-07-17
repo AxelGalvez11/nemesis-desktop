@@ -114,3 +114,13 @@ test('ICS: byte-identical for the same inputs + stamp, and every line folds unde
   }
   assert.ok(first.includes(`DTSTAMP:20260717T050000Z`))
 })
+
+test('ICS: out-of-range times fall back to all-day instead of emitting invalid DTSTART', () => {
+  const ics = renderIcs(
+    [event({ id: 'bad-time', time: '25:99' }), event({ id: 'ok-time', date: '2026-07-21', time: '9:05' })],
+    STAMP
+  )
+
+  assert.ok(ics.includes('DTSTART;VALUE=DATE:20260720')) // 25:99 → all-day
+  assert.ok(ics.includes('DTSTART:20260721T090500')) // 9:05 stays timed
+})
