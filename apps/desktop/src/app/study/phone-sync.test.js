@@ -4,7 +4,7 @@
 // same apply path as the desktop grade buttons.
 import { describe, expect, it } from 'vitest';
 import { renderClozeAnswer, renderClozePrompt } from './cloze';
-import { applyPhoneReviews, buildPhoneDecksPayload } from './phone-sync';
+import { appendToLedger, APPLIED_LEDGER_CAP, appliedLedgerFrom, applyPhoneReviews, buildPhoneDecksPayload } from './phone-sync';
 const NOW = new Date('2026-07-17T12:00:00Z');
 function fixtureState() {
     return {
@@ -87,5 +87,20 @@ describe('applyPhoneReviews', () => {
         applyPhoneReviews(state, [row({})], NOW);
         expect(state.schedule).toEqual({});
         expect(state.reviews).toEqual([]);
+    });
+});
+describe('applied-row ledger', () => {
+    it('parses persisted ledgers leniently and rejects garbage', () => {
+        expect(appliedLedgerFrom(null)).toEqual([]);
+        expect(appliedLedgerFrom('not json')).toEqual([]);
+        expect(appliedLedgerFrom('{"a":1}')).toEqual([]);
+        expect(appliedLedgerFrom('["id-1", 7, "id-2"]')).toEqual(['id-1', 'id-2']);
+    });
+    it('caps at the most recent entries so it can never grow unbounded', () => {
+        const big = Array.from({ length: APPLIED_LEDGER_CAP }, (_, i) => `old-${i}`);
+        const next = appendToLedger(big, ['new-1', 'new-2']);
+        expect(next).toHaveLength(APPLIED_LEDGER_CAP);
+        expect(next[next.length - 1]).toBe('new-2');
+        expect(next[0]).toBe('old-2');
     });
 });

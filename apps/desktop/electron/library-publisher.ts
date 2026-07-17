@@ -208,7 +208,9 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
       let calendarFeedHash = state.calendarFeedHash
       const feed = deps.getCalendarFeed ? await deps.getCalendarFeed() : null
       if (feed) {
-        const icsHash = createHash('sha256').update(feed.ics, 'utf8').digest('hex')
+        // The token is part of the hash so a regenerated token re-uploads even
+        // when the ICS text itself hasn't changed (stale-URL guard).
+        const icsHash = createHash('sha256').update(`${feed.token}\n${feed.ics}`, 'utf8').digest('hex')
         if (icsHash !== calendarFeedHash) {
           const res = await doFetch(`${deps.supabaseUrl}/rest/v1/calendar_feeds?on_conflict=user_id`, {
             method: 'POST',

@@ -25,7 +25,9 @@ export type CalendarFeedEvent = {
 
 const KINDS: ReadonlySet<string> = new Set(['assignment', 'exam', 'rotation', 'class', 'other'])
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
-const TIME_RE = /^(\d{1,2}):(\d{2})/
+// Range-checked: a malformed agent-written time ("25:99") falls back to an
+// all-day event instead of emitting an invalid DTSTART.
+const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)/
 
 /** Default event window published to the phone + ICS: a week of history for
  * context, half a year ahead for planning. */

@@ -340,3 +340,15 @@ test('a failed feed upsert leaves the hash unsaved so the next tick retries', as
   assert.equal(h.calls.filter(call => call.url.includes('calendar_feeds')).length, 1)
   assert.equal(h.getState()!.calendarFeedHash?.length, 64)
 })
+
+test('a regenerated feed token re-upserts even when the ICS text is unchanged', async () => {
+  const h = derivedHarness()
+  h.setFeed({ ics: 'SAME-ICS', token: 'c'.repeat(64) })
+  await h.publisher.tick()
+  h.setFeed({ ics: 'SAME-ICS', token: 'd'.repeat(64) })
+  await h.publisher.tick()
+
+  const feedCalls = h.calls.filter(call => call.url.includes('calendar_feeds'))
+  assert.equal(feedCalls.length, 2)
+  assert.equal(feedCalls[1].rows[0].token, 'd'.repeat(64))
+})

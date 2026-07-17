@@ -23,7 +23,47 @@ export const STUDY_STATE_EXTERNAL_CHANGE_EVENT = 'nemesis:study-state-external-c
 export const PHONE_DECKS_FILE = `${STUDY_DATA_DIR}/phone-decks.json`;
 const TICK_MS = 30_000;
 const INGEST_LIMIT = 200;
+const STAMP_BATCH = 50;
 const GRADES = new Set(['again', 'hard', 'good', 'easy']);
+// Applied-row ledger: the local, persisted "I already folded this row" record.
+// The server-side ingested_at stamp alone is NOT a safe idempotency signal —
+// it's written AFTER the local save, so a failed PATCH (or a crash between
+// save and stamp) would re-deliver the same rows next tick and gradeCard would
+// happily re-run FSRS on them, corrupting schedules. Rows in the ledger are
+// never re-applied; their stamp is simply retried.
+const APPLIED_LEDGER_KEY = 'nemesis.study.phone-applied.v1';
+export const APPLIED_LEDGER_CAP = 5000;
+/** Parse the persisted ledger (ids of review_events rows already folded). Pure. */
+export function appliedLedgerFrom(raw) {
+    try {
+        const parsed = raw ? JSON.parse(raw) : null;
+        return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : [];
+    }
+    catch {
+        return [];
+    }
+}
+/** Append newly applied ids, keeping only the most recent entries. Stamped rows
+ *  never return from the pending query, so pruned old ids are harmless. Pure. */
+export function appendToLedger(ledger, ids) {
+    return [...ledger, ...ids].slice(-APPLIED_LEDGER_CAP);
+}
+function loadAppliedLedger() {
+    try {
+        return appliedLedgerFrom(window.localStorage.getItem(APPLIED_LEDGER_KEY));
+    }
+    catch {
+        return [];
+    }
+}
+function saveAppliedLedger(ledger) {
+    try {
+        window.localStorage.setItem(APPLIED_LEDGER_KEY, JSON.stringify(ledger));
+    }
+    catch {
+        // best-effort; worst case a row re-applies once after a localStorage failure
+    }
+}
 /** Precompute the phone's study material: per deck, today's queue (due order,
  *  daily caps — exactly what the desktop review surface would show) with
  *  pre-rendered cloze prompts, so the phone ships zero scheduler code. Pure. */
@@ -140,25 +180,42 @@ export function startPhoneStudySync() {
         if (!valid.length) {
             return;
         }
-        // Synchronous read-fold-write-notify: no await between loadState and the
-        // event dispatch, so an open Study page can neither interleave a grade nor
-        // clobber the fold with a stale in-memory state.
-        const folded = applyPhoneReviews(loadState(), valid, new Date());
-        saveState(folded.state);
-        try {
-            window.dispatchEvent(new Event(STUDY_STATE_EXTERNAL_CHANGE_EVENT));
+        // The ledger splits fetched rows into never-seen (fold them) and
+        // already-applied-but-unstamped (just retry their stamp).
+        const ledger = loadAppliedLedger();
+        const applied = new Set(ledger);
+        const fresh = valid.filter(row => !applied.has(row.id));
+        if (fresh.length) {
+            // Synchronous read-fold-write-notify: no await from loadState through the
+            // ledger save and event dispatch, so an open Study page can neither
+            // interleave a grade nor clobber the fold with a stale in-memory state.
+            // The ledger write shares that synchronous block, so a crash at any later
+            // point can never make these rows fold twice.
+            const folded = applyPhoneReviews(loadState(), fresh, new Date());
+            saveState(folded.state);
+            saveAppliedLedger(appendToLedger(ledger, fresh.map(row => row.id)));
+            try {
+                window.dispatchEvent(new Event(STUDY_STATE_EXTERNAL_CHANGE_EVENT));
+            }
+            catch {
+                // no-op outside a browser context
+            }
         }
-        catch {
-            // no-op outside a browser context
+        // Stamp everything fetched (fresh rows just folded + leftovers whose stamp
+        // failed before), in URL-safe chunks, and STOP on the first failure — the
+        // next tick re-fetches them, the ledger blocks re-application, and the
+        // stamp gets retried until the server confirms.
+        const ids = valid.map(row => encodeURIComponent(row.id));
+        for (let i = 0; i < ids.length; i += STAMP_BATCH) {
+            const stamped = await restFetch(`review_events?id=in.(${ids.slice(i, i + STAMP_BATCH).join(',')})`, {
+                body: JSON.stringify({ ingested_at: new Date().toISOString() }),
+                headers: { Prefer: 'return=minimal' },
+                method: 'PATCH'
+            });
+            if (!stamped?.ok) {
+                return;
+            }
         }
-        // Stamp AFTER the save. A crash between save and stamp re-applies these
-        // rows next tick — the spec blesses that: worst case a card shows one extra
-        // time, and no grade is ever lost.
-        await restFetch(`review_events?id=in.(${valid.map(row => row.id).join(',')})`, {
-            body: JSON.stringify({ ingested_at: new Date().toISOString() }),
-            headers: { Prefer: 'return=minimal' },
-            method: 'PATCH'
-        });
     };
     const tick = async () => {
         if (busy) {

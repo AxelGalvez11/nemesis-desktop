@@ -448,17 +448,22 @@ export function StudyView() {
         return
       }
 
+      // Fold against the PERSISTED state, not the render closure: the
+      // phone-sync bridge may have ingested phone grades between our last
+      // render and this keystroke, and update() overwrites rather than merges —
+      // reading loadState() in this same synchronous block closes that window.
+      const latest = loadState()
       // Snapshot BEFORE grading so Undo can restore the exact schedule entry
       // (or its absence, for a never-studied card).
-      const previous = state.schedule[current.scheduleKey]
+      const previous = latest.schedule[current.scheduleKey]
 
       setLastUndo({ rating, scheduleKey: current.scheduleKey, ...(previous ? { previous } : {}) })
       setSessionGrades(counts => ({ ...counts, [rating]: counts[rating] + 1 }))
-      update(gradeCard(state, current.scheduleKey, rating, new Date()))
+      update(gradeCard(latest, current.scheduleKey, rating, new Date()))
       setRevealed(false)
       setDone(count => count + 1)
     },
-    [current, state, update]
+    [current, update]
   )
 
   const undoGrade = useCallback(() => {
@@ -466,12 +471,13 @@ export function StudyView() {
       return
     }
 
-    update(undoLastGrade(state, lastUndo))
+    // Same persisted-state rule as grade() — see the comment there.
+    update(undoLastGrade(loadState(), lastUndo))
     setSessionGrades(counts => ({ ...counts, [lastUndo.rating]: Math.max(0, counts[lastUndo.rating] - 1) }))
     setDone(count => Math.max(0, count - 1))
     setLastUndo(null)
     setRevealed(false)
-  }, [lastUndo, state, update])
+  }, [lastUndo, update])
 
   // Anki muscle memory: Space/Enter flips, 1-4 grades, Escape leaves the session.
   useEffect(() => {
