@@ -8,7 +8,7 @@ import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 
 import type { ImageContext } from './note-decorations'
-import { isTaskChecked, livePreview, noteMarkdown, noteTheme, tableField, toggleTaskChar } from './note-decorations'
+import { isTaskChecked, livePreview, noteMarkdown, noteTheme, tableExtension, toggleTaskChar } from './note-decorations'
 
 describe('isTaskChecked', () => {
   it('is true for "[x]" and "[X]"', () => {
@@ -52,6 +52,10 @@ describe('note editor extensions mounted together (smoke test)', () => {
     '![[cover.jpg]]',
     '',
     '![[missing-embed.png]]',
+    '',
+    '| Drug | Class |',
+    '|------|-------|',
+    '| **Lisinopril** | [[Pharmacology/ACE inhibitors\\|ACE inhibitors]] |',
     ''
   ].join('\n')
 
@@ -61,7 +65,11 @@ describe('note editor extensions mounted together (smoke test)', () => {
     vaultDir: '/vault'
   }
 
-  function mount(isResolved: (target: string) => boolean, imageContext: ImageContext = IMAGE_CONTEXT) {
+  function mount(
+    isResolved: (target: string) => boolean,
+    imageContext: ImageContext = IMAGE_CONTEXT,
+    onOpen: (target: string) => void = () => {}
+  ) {
     const host = document.createElement('div')
     document.body.appendChild(host)
 
@@ -69,7 +77,7 @@ describe('note editor extensions mounted together (smoke test)', () => {
       parent: host,
       state: EditorState.create({
         doc,
-        extensions: [noteMarkdown, tableField, livePreview(() => {}, isResolved, () => imageContext), noteTheme]
+        extensions: [noteMarkdown, tableExtension(onOpen, isResolved), livePreview(onOpen, isResolved, () => imageContext), noteTheme]
       })
     })
 
@@ -177,6 +185,42 @@ describe('note editor extensions mounted together (smoke test)', () => {
     const { view } = mount(() => false)
 
     expect(view.dom.querySelectorAll('.cm-np-image').length).toBe(2)
+
+    view.destroy()
+  })
+
+  it('renders inline markdown inside table cells instead of raw marks', () => {
+    const { view } = mount(target => target === 'Pharmacology/ACE inhibitors')
+
+    const table = view.dom.querySelector('.cm-np-table')
+    expect(table).not.toBeNull()
+
+    const strong = table?.querySelector('.cm-np-strong')
+    expect(strong?.textContent).toBe('Lisinopril')
+    expect(table?.textContent).not.toContain('**')
+
+    view.destroy()
+  })
+
+  it('renders an escaped-pipe wikilink in a table cell as a resolved aliased link', () => {
+    const { view } = mount(target => target === 'Pharmacology/ACE inhibitors')
+
+    const link = view.dom.querySelector('.cm-np-table .cm-np-wikilink')
+    expect(link?.textContent).toBe('ACE inhibitors')
+    expect(link?.classList.contains('cm-np-wikilink-unresolved')).toBe(false)
+    expect(view.dom.querySelector('.cm-np-table')?.textContent).not.toContain('\\')
+
+    view.destroy()
+  })
+
+  it('opens the real target (no trailing backslash) when a table wikilink is clicked', () => {
+    const opened: string[] = []
+    const { view } = mount(() => true, IMAGE_CONTEXT, target => opened.push(target))
+
+    const link = view.dom.querySelector('.cm-np-table .cm-np-wikilink')
+    link?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+
+    expect(opened).toEqual(['Pharmacology/ACE inhibitors'])
 
     view.destroy()
   })

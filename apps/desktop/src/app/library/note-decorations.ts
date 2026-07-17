@@ -164,24 +164,105 @@ class CheckboxWidget extends WidgetType {
   }
 }
 
-/** Split a markdown table row into trimmed cell strings ("| a | b |" → ["a","b"]). */
+/** Split a markdown table row into trimmed cell strings ("| a | b |" → ["a","b"]).
+ *  An escaped pipe ("\|" — Obsidian's wikilink-alias-in-a-table syntax) is cell
+ *  CONTENT, not a cell boundary, so the split only breaks on unescaped pipes. */
 function tableCells(line: string): string[] {
   return line
     .replace(/^\s*\|/, '')
-    .replace(/\|\s*$/, '')
-    .split('|')
+    .replace(/(?<!\\)\|\s*$/, '')
+    .split(/(?<!\\)\|/)
     .map(cell => cell.trim())
 }
 
 const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/
 
+// One alternative per inline construct, tried in this order at each position:
+// `code`, [[wikilink]], **strong**, *em*, ~~strike~~, [text](url).
+const INLINE_TOKEN_RE =
+  /`([^`\n]+)`|(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]|\*\*((?:[^*\n]|\*(?!\*))+)\*\*|\*([^*\n]+)\*|~~([^~\n]+)~~|\[([^\]\n]+)\]\(([^)\n]+)\)/g
+
+/** Render one table cell's markdown into `parent` — the same inline constructs the
+ *  live-preview pass handles in body text (which the table's block widget replaces,
+ *  so cells must re-render them here). Recurses so `**bold [[links]]**` nest. */
+function appendInlineMarkdown(
+  parent: HTMLElement,
+  text: string,
+  onOpen: (target: string) => void,
+  isResolved: (target: string) => boolean
+): void {
+  const styled = (className: string, inner?: string): HTMLElement => {
+    const span = document.createElement('span')
+    span.className = className
+
+    if (inner !== undefined) {
+      appendInlineMarkdown(span, inner, onOpen, isResolved)
+    }
+
+    parent.appendChild(span)
+
+    return span
+  }
+
+  let last = 0
+
+  for (const match of text.matchAll(INLINE_TOKEN_RE)) {
+    const start = match.index ?? 0
+
+    if (start > last) {
+      parent.appendChild(document.createTextNode(text.slice(last, start)))
+    }
+
+    if (match[1] !== undefined) {
+      styled('cm-np-code').textContent = match[1]
+    } else if (match[2] !== undefined) {
+      const target = match[2].replace(/\\$/, '').trim()
+      const label = (match[3] ?? target).trim() || target
+      const link = styled(isResolved(target) ? 'cm-np-wikilink' : 'cm-np-wikilink cm-np-wikilink-unresolved')
+      link.textContent = label
+      link.onmousedown = event => {
+        event.preventDefault()
+        event.stopPropagation()
+        onOpen(target)
+      }
+    } else if (match[4] !== undefined) {
+      styled('cm-np-strong', match[4])
+    } else if (match[5] !== undefined) {
+      styled('cm-np-em', match[5])
+    } else if (match[6] !== undefined) {
+      styled('cm-np-strike', match[6])
+    } else {
+      const link = styled('cm-np-link')
+      link.textContent = match[7]
+      link.title = match[8]
+    }
+
+    last = start + match[0].length
+  }
+
+  if (last < text.length) {
+    parent.appendChild(document.createTextNode(text.slice(last)))
+  }
+}
+
 class TableWidget extends WidgetType {
-  constructor(readonly header: string[], readonly rows: string[][]) {
+  constructor(
+    readonly header: string[],
+    readonly rows: string[][],
+    readonly onOpen: (target: string) => void,
+    readonly isResolved: (target: string) => boolean
+  ) {
     super()
   }
 
   eq(other: TableWidget): boolean {
     return JSON.stringify([this.header, this.rows]) === JSON.stringify([other.header, other.rows])
+  }
+
+  private fillCell(cell: HTMLElement, raw: string): void {
+    // The row split kept "\|" escaped; inside the cell it's a plain pipe again
+    // (which is how "[[target\|alias]]" becomes a normal aliased wikilink).
+    appendInlineMarkdown(cell, raw.replace(/\\\|/g, '|'), this.onOpen, this.isResolved)
   }
 
   toDOM(): HTMLElement {
@@ -192,7 +273,7 @@ class TableWidget extends WidgetType {
 
     for (const cell of this.header) {
       const th = document.createElement('th')
-      th.textContent = cell
+      this.fillCell(th, cell)
       hr.appendChild(th)
     }
 
@@ -202,7 +283,7 @@ class TableWidget extends WidgetType {
       const tr = tbody.insertRow()
 
       for (let i = 0; i < this.header.length; i++) {
-        tr.insertCell().textContent = row[i] ?? ''
+        this.fillCell(tr.insertCell(), row[i] ?? '')
       }
     }
 
@@ -429,7 +510,9 @@ function buildDecorations(
     for (const match of text.matchAll(WIKILINK_RE)) {
       const start = from + (match.index ?? 0)
       const end = start + match[0].length
-      const target = match[1].trim()
+      // A "\|"-escaped alias pipe (table syntax) leaves a trailing backslash on the
+      // captured target — strip it so the link resolves to the real note.
+      const target = match[1].replace(/\\$/, '').trim()
       const label = (match[2] ?? target).trim() || target
 
       if (!target) {
@@ -485,16 +568,28 @@ function buildDecorations(
 /** Table block-replace decorations. In a StateField (not the ViewPlugin) because
  *  CodeMirror only allows line-break-replacing block decorations from state, not
  *  plugins. Recomputes on doc + selection changes so the raw markdown reappears
- *  when the caret enters the table. */
-export const tableField = StateField.define<DecorationSet>({
-  create: state => buildTableDecorations(state),
-  provide: field => EditorView.decorations.from(field),
-  update(value, tr) {
-    return tr.docChanged || tr.selection ? buildTableDecorations(tr.state) : value
-  }
-})
+ *  when the caret enters the table. A function (not a bare field) because the
+ *  cell renderer needs the same wikilink open/resolve callbacks livePreview gets. */
+export function tableExtension(
+  onOpen: (target: string) => void,
+  isResolved: (target: string) => boolean
+): Extension {
+  const build = (state: EditorState) => buildTableDecorations(state, onOpen, isResolved)
 
-function buildTableDecorations(state: EditorState): DecorationSet {
+  return StateField.define<DecorationSet>({
+    create: build,
+    provide: field => EditorView.decorations.from(field),
+    update(value, tr) {
+      return tr.docChanged || tr.selection ? build(tr.state) : value
+    }
+  })
+}
+
+function buildTableDecorations(
+  state: EditorState,
+  onOpen: (target: string) => void,
+  isResolved: (target: string) => boolean
+): DecorationSet {
   const doc = state.doc
   const ranges: Range<Decoration>[] = []
 
@@ -503,7 +598,7 @@ function buildTableDecorations(state: EditorState): DecorationSet {
 
     if (!touched) {
       ranges.push(
-        Decoration.replace({ block: true, widget: new TableWidget(block.header, block.rows) }).range(
+        Decoration.replace({ block: true, widget: new TableWidget(block.header, block.rows, onOpen, isResolved) }).range(
           block.from,
           block.to
         )

@@ -14,7 +14,7 @@ import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { IconBold, IconHeading, IconItalic, IconList } from '@tabler/icons-react';
 import { useEffect, useImperativeHandle, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { livePreview, noteMarkdown, noteTheme, tableField } from './note-decorations';
+import { livePreview, noteMarkdown, noteTheme, tableExtension } from './note-decorations';
 import { cycleHeading, toggleBold, toggleBulletList, toggleItalic } from './note-format';
 import { VAULT_DIR } from './vault';
 import { wikilinkCompletionSource } from './wikilink-autocomplete';
@@ -72,7 +72,7 @@ export function NoteEditor({ imageContext = EMPTY_IMAGE_CONTEXT, initialValue, i
                 keymap.of([...defaultKeymap, ...historyKeymap]),
                 EditorView.lineWrapping,
                 noteMarkdown,
-                tableField,
+                tableExtension(target => onOpenRef.current(target), target => isResolvedRef.current(target)),
                 livePreview(target => onOpenRef.current(target), target => isResolvedRef.current(target), () => imageContextRef.current),
                 // [[ autocomplete: the source only fires inside an open "[[", so it never
                 // intercepts normal typing anywhere else (see wikilinkCompletionSource).
