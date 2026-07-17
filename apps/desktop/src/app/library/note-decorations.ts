@@ -15,6 +15,7 @@ import {
   WidgetType
 } from '@codemirror/view'
 import { Strikethrough, TaskList } from '@lezer/markdown'
+import katex from 'katex'
 
 import { type EmbeddableFile, resolveEmbeddedImageSrc, resolveRelativeImageSrc } from './image-embed'
 
@@ -35,6 +36,16 @@ const IMAGE_EMBED_RE = /!\[\[([^\]|#\n]+)(?:[^\]\n]*)?\]\]/g
 // writes `> [!solution]- Steps` and the note renders it as a fold-to-reveal card.
 const CALLOUT_HEAD_RE = /^\s*>\s*\[!([A-Za-z][\w-]*)\]([-+]?)\s?(.*)$/
 const QUOTE_LINE_RE = /^\s*>/
+
+// Inline math: `$…$`. Space-delimited (open `$` not before whitespace, close `$` not after
+// whitespace) so "$5 and $10" in prose isn't consumed; `$$…$$` display math is a block (see
+// findMathBlocks), so a doubled `$` is excluded here. Content still needs a math signal:
+const INLINE_MATH_RE = /(?<![\\$])\$(?![\s$])((?:[^$\n\\]|\\.)+?)(?<![\s\\])\$(?!\$)/g
+// …a letter, backslash, or operator char — what separates `$3x + 2$` / `$\frac12$` (render)
+// from `$5` / `$5$` (currency / bare number, left as plain text).
+const MATH_SIGNAL_RE = /[A-Za-z\\^_{}]/
+// A fenced code delimiter line (``` or ~~~), so `$$` inside a code fence isn't treated as math.
+const CODE_FENCE_RE = /^\s*(```|~~~)/
 
 /** Context the editor supplies for resolving image sources — the note's own folder (for
  *  `![alt](relative/path)`) and the vault's file list (for `![[name]]` embeds, which Obsidian
@@ -126,6 +137,53 @@ class ImageWidget extends WidgetType {
   }
 }
 
+/** A KaTeX-rendered equation — inline (`$…$`, a <span>) or display (`$$…$$`, a centered
+ *  <div>). Renders with the same options the chat's markdown uses (see lib/katex-memo.ts) so
+ *  an equation looks the same in a note as in a message. eq() keeps the DOM stable across
+ *  rebuilds so KaTeX only re-runs when the LaTeX actually changes. */
+class MathWidget extends WidgetType {
+  constructor(
+    readonly tex: string,
+    readonly display: boolean
+  ) {
+    super()
+  }
+
+  eq(other: MathWidget): boolean {
+    return other.tex === this.tex && other.display === this.display
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement(this.display ? 'div' : 'span')
+    el.className = this.display ? 'cm-np-math cm-np-math-display' : 'cm-np-math cm-np-math-inline'
+
+    try {
+      // innerHTML is safe here: the markup is produced by katex.renderToString, which emits
+      // trusted HTML/MathML by design, and trust:false blocks the injection-capable commands
+      // (\href javascript:, \htmlData, …). The LaTeX is the user's own note text. (Routing it
+      // through DOMPurify would strip KaTeX's MathML and break rendering.) throwOnError:false
+      // renders invalid LaTeX as inline red text instead of throwing — a throw here would
+      // abort the whole decoration build and blank the note.
+      el.innerHTML = katex.renderToString(this.tex, {
+        displayMode: this.display,
+        errorColor: '#e5484d',
+        strict: 'ignore',
+        throwOnError: false,
+        trust: false
+      })
+    } catch {
+      el.classList.add('cm-np-math-error')
+      el.textContent = this.display ? `$$${this.tex}$$` : `$${this.tex}$`
+    }
+
+    return el
+  }
+}
+
 /** Given a task's checkbox marker text ("[ ]" / "[x]" / "[X]"), whether it's checked. */
 export function isTaskChecked(marker: string): boolean {
   return /^\[[xX]\]$/.test(marker)
@@ -185,9 +243,10 @@ function tableCells(line: string): string[] {
 const TABLE_SEP_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/
 
 // One alternative per inline construct, tried in this order at each position:
-// `code`, [[wikilink]], **strong**, *em*, ~~strike~~, [text](url).
+// `code`, [[wikilink]], **strong**, *em*, ~~strike~~, [text](url), $math$. Code comes first so a
+// `$` inside inline code isn't read as a math delimiter. Group 9 = the math body (no delimiters).
 const INLINE_TOKEN_RE =
-  /`([^`\n]+)`|(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]|\*\*((?:[^*\n]|\*(?!\*))+)\*\*|\*([^*\n]+)\*|~~([^~\n]+)~~|\[([^\]\n]+)\]\(([^)\n]+)\)/g
+  /`([^`\n]+)`|(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]|\*\*((?:[^*\n]|\*(?!\*))+)\*\*|\*([^*\n]+)\*|~~([^~\n]+)~~|\[([^\]\n]+)\]\(([^)\n]+)\)|\$(?![\s$])((?:[^$\n\\]|\\.)+?)(?<![\s\\])\$(?!\$)/g
 
 /** Render one table cell's markdown into `parent` — the same inline constructs the
  *  live-preview pass handles in body text (which the table's block widget replaces,
@@ -238,6 +297,28 @@ function appendInlineMarkdown(
       styled('cm-np-em', match[5])
     } else if (match[6] !== undefined) {
       styled('cm-np-strike', match[6])
+    } else if (match[9] !== undefined) {
+      // Inline math in a cell/callout body. Same signal guard as the body pass — bare numbers /
+      // currency stay literal — and the same trusted KaTeX render (see MathWidget for why
+      // innerHTML is safe here).
+      if (MATH_SIGNAL_RE.test(match[9])) {
+        const span = styled('cm-np-math cm-np-math-inline')
+
+        try {
+          span.innerHTML = katex.renderToString(match[9], {
+            displayMode: false,
+            errorColor: '#e5484d',
+            strict: 'ignore',
+            throwOnError: false,
+            trust: false
+          })
+        } catch {
+          span.classList.add('cm-np-math-error')
+          span.textContent = `$${match[9]}$`
+        }
+      } else {
+        parent.appendChild(document.createTextNode(match[0]))
+      }
     } else {
       const link = styled('cm-np-link')
       link.textContent = match[7]
@@ -445,6 +526,90 @@ export function findCalloutBlocks(doc: EditorView['state']['doc']): CalloutBlock
   return blocks
 }
 
+interface MathBlock {
+  from: number
+  to: number
+  tex: string
+}
+
+/** Display-math blocks (`$$ … $$`) — either all on one line (`$$E=mc^2$$`) or the canonical
+ *  fenced form (a `$$` line, body lines, a closing `$$`). Whole-line ranges so the caller can
+ *  block-replace them (exported for tests). A `$$` inside a ``` code fence is skipped. */
+export function findMathBlocks(doc: EditorView['state']['doc']): MathBlock[] {
+  const blocks: MathBlock[] = []
+  const total = doc.lines
+  let inFence = false
+  let n = 1
+
+  while (n <= total) {
+    const line = doc.line(n)
+    const trimmed = line.text.trim()
+
+    if (CODE_FENCE_RE.test(line.text)) {
+      inFence = !inFence
+      n++
+      continue
+    }
+
+    if (inFence || !trimmed.startsWith('$$')) {
+      n++
+      continue
+    }
+
+    const afterOpen = trimmed.slice(2)
+
+    // Single line: "$$ … $$" with a real closing "$$" after the opener.
+    if (afterOpen.trimEnd().length > 2 && afterOpen.trimEnd().endsWith('$$')) {
+      const tex = afterOpen.trimEnd().slice(0, -2).trim()
+
+      if (tex) {
+        blocks.push({ from: line.from, tex, to: line.to })
+      }
+
+      n++
+      continue
+    }
+
+    // Multi-line: opener line (usually a bare "$$"), body lines, then a line ending in "$$".
+    const texLines: string[] = afterOpen.trim() ? [afterOpen.trim()] : []
+    let last = n
+    let closed = false
+
+    for (let m = n + 1; m <= total; m++) {
+      const body = doc.line(m).text
+
+      if (body.trim().endsWith('$$')) {
+        const inner = body.trim().slice(0, -2)
+
+        if (inner.trim()) {
+          texLines.push(inner)
+        }
+
+        last = m
+        closed = true
+        break
+      }
+
+      texLines.push(body)
+    }
+
+    if (closed) {
+      const tex = texLines.join('\n').trim()
+
+      if (tex) {
+        blocks.push({ from: line.from, tex, to: doc.line(last).to })
+      }
+
+      n = last + 1
+      continue
+    }
+
+    n++
+  }
+
+  return blocks
+}
+
 function buildDecorations(
   view: EditorView,
   onOpen: (target: string) => void,
@@ -473,7 +638,16 @@ function buildDecorations(
     decorations.push(Decoration.replace({}).range(from, end))
   }
 
+  const mathInline: MathBlock[] = []
+
   for (const { from, to } of view.visibleRanges) {
+    const text = doc.sliceString(from, to)
+    // Code wins over math: a `$` inside `inline code` or a ``` fenced ``` block is literal, not
+    // a math delimiter (critical for shell/code notes like `if [ "$a" = "$b" ]`). Ranges are
+    // collected during the syntax-tree pass below, then used to reject math candidates.
+    const codeRanges: { from: number; to: number }[] = []
+    const insideCode = (pos: number) => codeRanges.some(range => pos >= range.from && pos < range.to)
+
     syntaxTree(view.state).iterate({
       enter: node => {
         const type = node.name
@@ -519,12 +693,14 @@ function buildDecorations(
         }
 
         if (type === 'InlineCode') {
+          codeRanges.push({ from: node.from, to: node.to })
           decorations.push(Decoration.mark({ class: 'cm-np-code' }).range(node.from, node.to))
 
           return
         }
 
         if (type === 'FencedCode') {
+          codeRanges.push({ from: node.from, to: node.to })
           const first = doc.lineAt(node.from).number
           const last = doc.lineAt(node.to).number
 
@@ -623,9 +799,20 @@ function buildDecorations(
       to
     })
 
-    // Wikilinks by regex — lezer's markdown grammar doesn't know Obsidian's [[...]].
-    const text = doc.sliceString(from, to)
+    // Inline math (`$…$`) — collected after the tree pass so codeRanges is populated. The
+    // widgets are appended (and colliding markdown decos dropped) after the loop; see below.
+    for (const match of text.matchAll(INLINE_MATH_RE)) {
+      const start = from + (match.index ?? 0)
+      const end = start + match[0].length
 
+      if (insideCode(start) || !MATH_SIGNAL_RE.test(match[1]) || selectionTouches(start, end)) {
+        continue
+      }
+
+      mathInline.push({ from: start, tex: match[1], to: end })
+    }
+
+    // Wikilinks by regex — lezer's markdown grammar doesn't know Obsidian's [[...]].
     for (const match of text.matchAll(WIKILINK_RE)) {
       const start = from + (match.index ?? 0)
       const end = start + match[0].length
@@ -673,17 +860,24 @@ function buildDecorations(
   // block-replace-across-lines decorations from a ViewPlugin. Here we only DROP the
   // inline/line decorations that fall inside a rendered block so they don't collide
   // with the StateField's block widget (e.g. the per-line quote styling on callout lines).
-  const renderedBlocks = [...findTableBlocks(doc), ...findCalloutBlocks(doc)].filter(
+  const renderedBlocks = [...findTableBlocks(doc), ...findCalloutBlocks(doc), ...findMathBlocks(doc)].filter(
     block => !selectionTouches(block.from, block.to)
   )
+  const inRendered = (pos: number) => renderedBlocks.some(block => pos >= block.from && pos <= block.to)
+  const insideMath = (pos: number) => mathInline.some(math => pos >= math.from && pos < math.to)
 
-  if (renderedBlocks.length > 0) {
-    const inRendered = (pos: number) => renderedBlocks.some(block => pos >= block.from && pos <= block.to)
+  // Drop any block-covered decoration AND any markdown deco that fell inside an inline-math span
+  // (e.g. lezer parsing `x_1` as emphasis) — the latter would otherwise be a second decoration
+  // overlapping the math widget's replace and crash CodeMirror at set construction.
+  const kept = decorations.filter(range => !inRendered(range.from) && !insideMath(range.from))
 
-    return Decoration.set(decorations.filter(range => !inRendered(range.from)), true)
+  for (const math of mathInline) {
+    if (!inRendered(math.from)) {
+      kept.push(Decoration.replace({ widget: new MathWidget(math.tex, false) }).range(math.from, math.to))
+    }
   }
 
-  return Decoration.set(decorations, true)
+  return Decoration.set(kept, true)
 }
 
 /** Table block-replace decorations. In a StateField (not the ViewPlugin) because
@@ -765,6 +959,36 @@ function buildCalloutDecorations(
           block: true,
           widget: new CalloutWidget(block.type, block.title, block.collapsed, block.body, onOpen, isResolved)
         }).range(block.from, block.to)
+      )
+    }
+  }
+
+  return Decoration.set(ranges, true)
+}
+
+/** Display-math (`$$ … $$`) block-replace decorations. Same StateField requirement as tables
+ *  and callouts (block decorations across line breaks can't come from a ViewPlugin). The caret
+ *  entering the block reverts it to raw `$$` markdown for editing; no link callbacks needed. */
+export function mathBlockExtension(): Extension {
+  return StateField.define<DecorationSet>({
+    create: buildMathBlockDecorations,
+    provide: field => EditorView.decorations.from(field),
+    update(value, tr) {
+      return tr.docChanged || tr.selection ? buildMathBlockDecorations(tr.state) : value
+    }
+  })
+}
+
+function buildMathBlockDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+
+  for (const block of findMathBlocks(doc)) {
+    const touched = state.selection.ranges.some(r => r.to >= block.from && r.from <= block.to)
+
+    if (!touched) {
+      ranges.push(
+        Decoration.replace({ block: true, widget: new MathWidget(block.tex, true) }).range(block.from, block.to)
       )
     }
   }
@@ -946,6 +1170,19 @@ export const noteTheme = EditorView.theme({
     padding: '0.55em 0.85em 0.7em'
   },
   '.cm-np-callout-line': { minHeight: '1.2em' },
+  '.cm-np-math-inline': { padding: '0 0.1em' },
+  '.cm-np-math-display': {
+    display: 'block',
+    margin: '0.7em 0',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    textAlign: 'center'
+  },
+  '.cm-np-math-error': {
+    color: 'var(--ui-text-tertiary)',
+    fontFamily: 'var(--dt-font-mono, ui-monospace, monospace)',
+    fontSize: '0.9em'
+  },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     backgroundColor: 'var(--ui-bg-elevated)',
     border: '1px solid var(--ui-stroke-secondary)',

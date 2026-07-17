@@ -6,7 +6,7 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
-import { calloutExtension, findCalloutBlocks, isTaskChecked, livePreview, noteMarkdown, noteTheme, tableExtension, toggleTaskChar } from './note-decorations';
+import { calloutExtension, findCalloutBlocks, findMathBlocks, isTaskChecked, livePreview, mathBlockExtension, noteMarkdown, noteTheme, tableExtension, toggleTaskChar } from './note-decorations';
 describe('isTaskChecked', () => {
     it('is true for "[x]" and "[X]"', () => {
         expect(isTaskChecked('[x]')).toBe(true);
@@ -53,6 +53,24 @@ describe('note editor extensions mounted together (smoke test)', () => {
         '> [!solution]- Worked answer',
         '> Step 1: **isolate** x',
         '> Step 2: see [[Real Note]]',
+        '> Step 3: so $x = 3$',
+        '',
+        // Adversarial math: underscore pairs (`_1 + y_`, `_i + b_`) that markdown mis-parses as
+        // emphasis, one nested inside **bold** — exactly the ranges that would collide with the math
+        // widget's replace and crash CM at construction. Both are valid LaTeX so KaTeX renders them.
+        'Inline $x_1 + y_2 = z$ and **bold $a_i + b_j$ end**.',
+        '',
+        // Currency + a bare number: valid delimiters but no math signal, so both stay literal text.
+        'Currency $5 and $10 and $5$ stay literal.',
+        '',
+        // A "$" inside a code fence must NOT render as math (code wins).
+        '```bash',
+        'if [ "$a" = "$b" ]; then echo $x; fi',
+        '```',
+        '',
+        '$$',
+        '\\int_0^1 x^2 \\, dx',
+        '$$',
         ''
     ].join('\n');
     const IMAGE_CONTEXT = {
@@ -71,6 +89,7 @@ describe('note editor extensions mounted together (smoke test)', () => {
                     noteMarkdown,
                     tableExtension(onOpen, isResolved),
                     calloutExtension(onOpen, isResolved),
+                    mathBlockExtension(),
                     livePreview(onOpen, isResolved, () => imageContext),
                     noteTheme
                 ]
@@ -101,8 +120,8 @@ describe('note editor extensions mounted together (smoke test)', () => {
     it('applies the code-block line class to every line inside the fence', () => {
         const { view } = mount(() => false);
         const codeLines = view.dom.querySelectorAll('.cm-np-codeblock');
-        // ```js / const x = 1 / ``` — three fenced lines.
-        expect(codeLines.length).toBe(3);
+        // Two fences of three lines each: the ```js block and the ```bash math-guard block.
+        expect(codeLines.length).toBe(6);
         view.destroy();
     });
     it('styles a resolving wikilink differently from an unresolved one', () => {
@@ -185,7 +204,59 @@ describe('note editor extensions mounted together (smoke test)', () => {
         expect(callout?.querySelector('.cm-np-strong')?.textContent).toBe('isolate');
         expect(callout?.querySelector('.cm-np-wikilink')?.textContent).toBe('Real Note');
         expect(callout?.textContent).not.toContain('[!solution]');
+        // Inline math inside the callout body renders as KaTeX (worked-solution equations).
+        expect(callout?.querySelector('.cm-np-math-inline .katex')).not.toBeNull();
+        expect(callout?.textContent).not.toContain('$x = 3$');
         view.destroy();
+    });
+    it('renders inline "$…$" as KaTeX (underscores and bold-nested math do not crash the mount)', () => {
+        const { view } = mount(target => target === 'Real Note');
+        // Two real inline equations: "x_1 + y_2 = z" and the one nested inside **bold**.
+        const inline = [...view.dom.querySelectorAll('.cm-np-math-inline')];
+        expect(inline.length).toBe(2);
+        expect(inline.every(el => el.querySelector('.katex') !== null)).toBe(true);
+        view.destroy();
+    });
+    it('renders a "$$…$$" block as a centered KaTeX display', () => {
+        const { view } = mount(() => false);
+        const display = view.dom.querySelector('.cm-np-math-display');
+        expect(display).not.toBeNull();
+        expect(display?.querySelector('.katex')).not.toBeNull();
+        view.destroy();
+    });
+    it('leaves currency and bare numbers as plain text, not math', () => {
+        const { view } = mount(() => false);
+        // "$5 and $10" (space before the closing $) and "$5$" (no math signal) stay literal.
+        expect(view.dom.textContent).toContain('$5 and $10 and $5$');
+        view.destroy();
+    });
+    it('does not render a "$" inside a fenced code block as math', () => {
+        const { view } = mount(() => false);
+        const codeText = [...view.dom.querySelectorAll('.cm-np-codeblock')].map(el => el.textContent).join('\n');
+        expect(codeText).toContain('"$a" = "$b"');
+        // No inline-math widget swallowed part of the shell line.
+        const maths = [...view.dom.querySelectorAll('.cm-np-math')];
+        expect(maths.every(el => !(el.textContent ?? '').includes('a" = "'))).toBe(true);
+        view.destroy();
+    });
+});
+describe('findMathBlocks', () => {
+    const docOf = (text) => EditorState.create({ doc: text, extensions: [noteMarkdown] }).doc;
+    it('parses a single-line "$$…$$" block', () => {
+        const blocks = findMathBlocks(docOf('text\n$$E = mc^2$$\nmore'));
+        expect(blocks).toHaveLength(1);
+        expect(blocks[0].tex).toBe('E = mc^2');
+    });
+    it('parses the canonical multi-line fenced form', () => {
+        const blocks = findMathBlocks(docOf(['$$', '\\int_0^1 x^2 \\, dx', '$$'].join('\n')));
+        expect(blocks).toHaveLength(1);
+        expect(blocks[0].tex).toBe('\\int_0^1 x^2 \\, dx');
+    });
+    it('ignores an unclosed "$$" opener', () => {
+        expect(findMathBlocks(docOf('$$\nx^2\nno close'))).toHaveLength(0);
+    });
+    it('does not treat "$$" inside a code fence as a math block', () => {
+        expect(findMathBlocks(docOf(['```', '$$', 'x^2', '$$', '```'].join('\n')))).toHaveLength(0);
     });
 });
 describe('findCalloutBlocks', () => {
