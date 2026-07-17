@@ -23,16 +23,15 @@ import {
 } from '@/nemesis-account'
 import { setTelemetryEnabled, telemetryEnabled } from '@/nemesis-telemetry'
 
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) {
-    return `${(value / 1_000_000).toFixed(1)}M`
+/** Percentage of the daily allowance, clamped and floored to whole percents —
+ *  students see shares of their day, never raw token counts (owner call
+ *  2026-07-16: "tokens" is engine vocabulary; percentages are self-explaining). */
+function pctOfAllowance(used: number, dailyLimit: number): number {
+  if (dailyLimit <= 0) {
+    return 0
   }
 
-  if (value >= 1_000) {
-    return `${Math.round(value / 1_000)}K`
-  }
-
-  return String(value)
+  return Math.min(100, Math.round((used / dailyLimit) * 100))
 }
 
 /** The last 7 UTC days (oldest first), each with that day's used tokens (0 when
@@ -92,6 +91,8 @@ export function UsageSettings() {
 
   const weekTotal = week ? week.reduce((sum, day) => sum + day.used, 0) : 0
   const weekMax = week ? Math.max(1, ...week.map(day => day.used)) : 1
+  const dailyLimit = usage?.dailyLimit ?? 0
+  const weekAvgPct = dailyLimit > 0 ? pctOfAllowance(Math.round(weekTotal / 7), dailyLimit) : null
 
   return (
     // OverlayMain clips its children (overflow-hidden) and expects every
@@ -154,7 +155,11 @@ export function UsageSettings() {
           <div className="flex items-baseline justify-between">
             <span className="text-sm font-medium text-foreground">This week</span>
             <span className="text-sm tabular-nums text-muted-foreground">
-              {week ? `${formatTokens(weekTotal)} tokens over 7 days` : 'Not available yet'}
+              {week
+                ? weekAvgPct !== null
+                  ? `${weekAvgPct}% of your daily allowance, on average`
+                  : 'Last 7 days'
+                : 'Not available yet'}
             </span>
           </div>
           {week ? (
@@ -165,7 +170,11 @@ export function UsageSettings() {
                     <div
                       className="w-full rounded-md bg-(--theme-primary)/80 transition-[height] duration-500"
                       style={{ height: `${Math.max(day.used > 0 ? 6 : 0, Math.round((day.used / weekMax) * 100))}%` }}
-                      title={`${day.periodStart}: ${formatTokens(day.used)} tokens`}
+                      title={
+                        dailyLimit > 0
+                          ? `${day.periodStart}: ${pctOfAllowance(day.used, dailyLimit)}% of a day's allowance`
+                          : day.periodStart
+                      }
                     />
                   </div>
                   <span className="text-[10px] text-muted-foreground/70">{dayLetter(day.periodStart)}</span>
@@ -185,7 +194,7 @@ export function UsageSettings() {
             <div className="flex items-baseline justify-between">
               <span className="text-sm font-medium text-foreground">Used today</span>
               <span className="text-sm tabular-nums text-muted-foreground">
-                {formatTokens(usage.used)} / {usage.dailyLimit > 0 ? formatTokens(usage.dailyLimit) : 'unlimited'}
+                {usage.dailyLimit > 0 ? `${pct}%` : 'Unlimited'}
               </span>
             </div>
             <div className="h-2.5 w-full overflow-hidden rounded-full bg-(--ui-bg-tertiary)">
@@ -196,8 +205,8 @@ export function UsageSettings() {
             </div>
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
-                <span className="font-semibold text-foreground">{formatTokens(usage.remaining)}</span> left today · resets
-                at midnight (UTC)
+                <span className="font-semibold text-foreground">{Math.max(0, 100 - pct)}%</span> left today · resets at
+                midnight (UTC)
               </span>
               <span className="rounded-full bg-(--theme-primary)/15 px-2 py-0.5 font-semibold text-(--theme-primary)">
                 {planName}
@@ -221,9 +230,9 @@ export function UsageSettings() {
         )}
 
         <p className="text-xs leading-relaxed text-muted-foreground/70">
-          &ldquo;AI work&rdquo; is measured in tokens — the units the model reads and writes. Heavy tasks (a full
-          research brief, a slide deck) use more than a quick question. Lecture transcription runs on your own Mac and
-          never counts against this.
+          Your allowance is your share of AI work for the day, and it resets every midnight (UTC). Heavy tasks (a full
+          research brief, a slide deck) use more of it than a quick question. Lecture transcription runs on your own
+          Mac and never counts against it.
         </p>
 
         <PrivacyCard />
