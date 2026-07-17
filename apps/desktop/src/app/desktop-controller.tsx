@@ -108,7 +108,6 @@ import { ModelVisibilityOverlay } from './model-visibility-overlay'
 import { PetGenerateOverlay } from './pet-generate/pet-generate-overlay'
 import { RightSidebarPane } from './right-sidebar'
 import { FileActionDialogs } from './right-sidebar/file-actions'
-import { $currentExchangeHasSources } from './right-sidebar/sources'
 import { RemoteFolderPicker } from './right-sidebar/files/remote-picker'
 import { ReviewPane } from './right-sidebar/review'
 import { $terminalTakeover } from './right-sidebar/store'
@@ -227,7 +226,6 @@ export function DesktopController() {
   const filePreviewTarget = useStore($filePreviewTarget)
   const previewTarget = useStore($previewTarget)
   const browserRailOpen = useStore($browserRailOpen)
-  const railHasSources = useStore($currentExchangeHasSources)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
   const messagingSessions = useStore($messagingSessions)
   const sessionsLoading = useStore($sessionsLoading)
@@ -1294,7 +1292,7 @@ export function DesktopController() {
   // hover-reveal overlays (narrow window) don't take a column, so they don't count.
   const railColumnOpen =
     (browserSurfaceOpen &&
-      (welcomeOpen || railHasSources || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
+      (welcomeOpen || Boolean(previewTarget || filePreviewTarget || browserRailOpen)) &&
       previewPaneOpen) ||
     (chatOpen && !NEMESIS_STUDENT_BUILD && !narrowViewport && fileBrowserOpen) ||
     (chatOpen && Boolean(currentCwd.trim()) && !narrowViewport && reviewOpen)
@@ -1305,12 +1303,14 @@ export function DesktopController() {
 
   const previewPane = (
     <Pane
-      // The rail is content-driven: sources on the current answer, a preview file,
-      // or the browser earn it a column; otherwise it stays out of the way entirely
-      // (owner call 2026-07-16 — replaced the old always-on student rail + manual ✕).
+      // The rail never opens itself (owner call 2026-07-16): only an explicit action —
+      // clicking a source citation or a file (previewTarget / filePreviewTarget) or the
+      // browser — earns it a column. Merely switching into a session whose last answer
+      // has sources no longer pops it open. Sources stay reachable via the inline
+      // per-answer citation pills, which open the rail on click.
       disabled={
         !browserSurfaceOpen ||
-        (!welcomeOpen && !railHasSources && !previewTarget && !filePreviewTarget && !browserRailOpen)
+        (!welcomeOpen && !previewTarget && !filePreviewTarget && !browserRailOpen)
       }
       // Narrow window: collapse to a hover-reveal overlay like the other side
       // panes — docked at its min width it collided with the chat column and
