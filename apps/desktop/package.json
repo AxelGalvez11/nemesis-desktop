@@ -2,7 +2,7 @@
   "name": "nemesis",
   "productName": "Nemesis",
   "private": true,
-  "version": "0.1.0-beta.20",
+  "version": "0.1.0-beta.21",
   "description": "Native desktop shell for the Nemesis school agent.",
   "author": "Nemesis",
   "type": "module",
