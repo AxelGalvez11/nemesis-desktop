@@ -13,7 +13,7 @@ import { deleteMarkupBackward, insertNewlineContinueMarkup } from '@codemirror/l
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { useEffect, useImperativeHandle, useRef } from 'react';
-import { livePreview, noteMarkdown, noteTheme, tableExtension } from './note-decorations';
+import { calloutExtension, livePreview, noteMarkdown, noteTheme, tableExtension } from './note-decorations';
 import { toggleBold, toggleItalic } from './note-format';
 import { VAULT_DIR } from './vault';
 import { wikilinkCompletionSource } from './wikilink-autocomplete';
@@ -82,6 +82,7 @@ export function NoteEditor({ editable = false, imageContext = EMPTY_IMAGE_CONTEX
                 EditorView.lineWrapping,
                 noteMarkdown,
                 tableExtension(target => onOpenRef.current(target), target => isResolvedRef.current(target)),
+                calloutExtension(target => onOpenRef.current(target), target => isResolvedRef.current(target)),
                 livePreview(target => onOpenRef.current(target), target => isResolvedRef.current(target), () => imageContextRef.current),
                 // [[ autocomplete: the source only fires inside an open "[[", so it never
                 // intercepts normal typing anywhere else (see wikilinkCompletionSource).
