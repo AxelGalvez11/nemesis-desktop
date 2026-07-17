@@ -12,9 +12,11 @@ import {
   calloutExtension,
   findCalloutBlocks,
   findMathBlocks,
+  findMermaidBlocks,
   isTaskChecked,
   livePreview,
   mathBlockExtension,
+  mermaidExtension,
   noteMarkdown,
   noteTheme,
   tableExtension,
@@ -120,6 +122,7 @@ describe('note editor extensions mounted together (smoke test)', () => {
           tableExtension(onOpen, isResolved),
           calloutExtension(onOpen, isResolved),
           mathBlockExtension(),
+          mermaidExtension(),
           livePreview(onOpen, isResolved, () => imageContext),
           noteTheme
         ]
@@ -372,6 +375,58 @@ describe('findMathBlocks', () => {
 
   it('does not treat "$$" inside a code fence as a math block', () => {
     expect(findMathBlocks(docOf(['```', '$$', 'x^2', '$$', '```'].join('\n')))).toHaveLength(0)
+  })
+})
+
+describe('findMermaidBlocks', () => {
+  const docOf = (text: string) => EditorState.create({ doc: text, extensions: [noteMarkdown] }).doc
+
+  it('parses a ```mermaid fenced block', () => {
+    const blocks = findMermaidBlocks(docOf(['```mermaid', 'graph TD', 'A --> B', '```'].join('\n')))
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].code).toBe('graph TD\nA --> B')
+  })
+
+  it('ignores a normal (non-mermaid) code block', () => {
+    expect(findMermaidBlocks(docOf(['```js', 'const x = 1', '```'].join('\n')))).toHaveLength(0)
+  })
+
+  it('ignores an unclosed mermaid fence', () => {
+    expect(findMermaidBlocks(docOf('```mermaid\ngraph TD'))).toHaveLength(0)
+  })
+})
+
+describe('mermaid diagrams', () => {
+  it('renders a "```mermaid" block as a diagram container without crashing', () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: ['# Note', '', '```mermaid', 'graph TD', '  A --> B', '```', ''].join('\n'),
+        extensions: [
+          noteMarkdown,
+          mermaidExtension(),
+          livePreview(
+            () => {},
+            () => false,
+            () => ({ files: [], noteFolder: '', vaultDir: '' })
+          ),
+          noteTheme
+        ]
+      })
+    })
+
+    // The block widget mounts synchronously and shows the raw source as a placeholder; the SVG
+    // fills in asynchronously (jsdom can't rasterize, so it stays on the source fallback). The
+    // real check is that the container is present and construction didn't throw.
+    const diagram = view.dom.querySelector('.cm-np-mermaid')
+    expect(diagram).not.toBeNull()
+    expect(diagram?.textContent).toContain('graph TD')
+
+    view.destroy()
   })
 })
 

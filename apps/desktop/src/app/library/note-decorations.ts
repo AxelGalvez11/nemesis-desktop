@@ -17,6 +17,7 @@ import {
 import { Strikethrough, TaskList } from '@lezer/markdown'
 import katex from 'katex'
 
+import { onThemeRepaint } from '../../hooks/use-theme-epoch'
 import { type EmbeddableFile, resolveEmbeddedImageSrc, resolveRelativeImageSrc } from './image-embed'
 
 /** The markdown language config the whole editor runs on — GFM strikethrough (`~~x~~`) and
@@ -46,6 +47,8 @@ const INLINE_MATH_RE = /(?<![\\$])\$(?![\s$])((?:[^$\n\\]|\\.)+?)(?<![\s\\])\$(?
 const MATH_SIGNAL_RE = /[A-Za-z\\^_{}]/
 // A fenced code delimiter line (``` or ~~~), so `$$` inside a code fence isn't treated as math.
 const CODE_FENCE_RE = /^\s*(```|~~~)/
+// A fenced code block tagged `mermaid` (```mermaid) — rendered as a diagram, not a code block.
+const MERMAID_FENCE_RE = /^\s*(`{3,}|~{3,})\s*mermaid\s*$/i
 
 /** Context the editor supplies for resolving image sources — the note's own folder (for
  *  `![alt](relative/path)`) and the vault's file list (for `![[name]]` embeds, which Obsidian
@@ -181,6 +184,133 @@ class MathWidget extends WidgetType {
     }
 
     return el
+  }
+}
+
+type MermaidModule = (typeof import('mermaid'))['default']
+
+let mermaidPromise: Promise<MermaidModule> | null = null
+let mermaidThemeApplied: 'dark' | 'default' | null = null
+
+/** Lazy-load mermaid on first diagram — it's heavy (d3/dagre), so a note with no diagrams never
+ *  pays for it. Matches how the chat's mermaid embed loads it. */
+function loadMermaid(): Promise<MermaidModule> {
+  mermaidPromise ??= import('mermaid').then(module => module.default)
+
+  return mermaidPromise
+}
+
+function applyMermaidTheme(mermaid: MermaidModule, dark: boolean): void {
+  const theme = dark ? 'dark' : 'default'
+
+  if (theme === mermaidThemeApplied) {
+    return
+  }
+
+  mermaid.initialize({ fontFamily: 'inherit', securityLevel: 'strict', startOnLoad: false, theme })
+  mermaidThemeApplied = theme
+}
+
+function isDarkMode(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+}
+
+function safeRequestMeasure(view: EditorView): void {
+  try {
+    view.requestMeasure()
+  } catch {
+    // The view was torn down between the async render and now — nothing to measure.
+  }
+}
+
+/** A ```mermaid fenced block rendered as a diagram. Mermaid renders ASYNCHRONOUSLY, so the widget
+ *  shows the raw source synchronously, then swaps in the SVG when render resolves (and calls
+ *  view.requestMeasure so CodeMirror re-measures the height change). Re-renders on a dark/light
+ *  flip via onThemeRepaint — theme changes don't produce CM transactions, so the StateField never
+ *  rebuilds for them and this subscription is the only re-theme path. On any error (or invalid
+ *  syntax mid-edit) it falls back to the raw source, never a broken diagram. securityLevel:'strict'
+ *  + innerHTML is safe the same way KaTeX's is (mermaid sanitizes labels, drops click handlers). */
+class MermaidWidget extends WidgetType {
+  private unsub: (() => void) | null = null
+  private destroyed = false
+
+  constructor(readonly code: string) {
+    super()
+  }
+
+  eq(other: MermaidWidget): boolean {
+    // Code alone — NOT theme. A theme flip is handled by the onThemeRepaint subscription; folding
+    // it into eq() would never fire (no transaction) and would rebuild the DOM on every edit.
+    return other.code === this.code
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-np-mermaid'
+
+    const showSource = (errored: boolean) => {
+      wrap.innerHTML = ''
+      const pre = document.createElement('pre')
+      pre.className = errored ? 'cm-np-mermaid-src cm-np-mermaid-error' : 'cm-np-mermaid-src'
+      pre.textContent = this.code
+      wrap.appendChild(pre)
+    }
+
+    // Raw-source placeholder until the async render resolves (also the error fallback).
+    showSource(false)
+
+    let token = 0
+    let renderedDark: boolean | null = null
+
+    const render = (force: boolean) => {
+      const dark = isDarkMode()
+
+      // onThemeRepaint fires on ANY <html> class/style mutation (CSS var churn, scroll locks…),
+      // not only a dark flip — so re-render only when the resolved dark state actually changed.
+      if (!force && dark === renderedDark) {
+        return
+      }
+
+      renderedDark = dark
+      const mine = ++token
+
+      void (async () => {
+        try {
+          const mermaid = await loadMermaid()
+          applyMermaidTheme(mermaid, dark)
+          const { svg } = await mermaid.render(`cm-mmd-${Math.random().toString(36).slice(2)}`, this.code)
+
+          if (this.destroyed || mine !== token) {
+            return
+          }
+
+          wrap.innerHTML = svg
+          safeRequestMeasure(view)
+        } catch {
+          if (this.destroyed || mine !== token) {
+            return
+          }
+
+          showSource(true)
+          safeRequestMeasure(view)
+        }
+      })()
+    }
+
+    render(true)
+    this.unsub = onThemeRepaint(() => render(false))
+
+    return wrap
+  }
+
+  destroy(): void {
+    this.destroyed = true
+    this.unsub?.()
+    this.unsub = null
   }
 }
 
@@ -610,6 +740,60 @@ export function findMathBlocks(doc: EditorView['state']['doc']): MathBlock[] {
   return blocks
 }
 
+interface MermaidBlock {
+  from: number
+  to: number
+  code: string
+}
+
+/** ```mermaid fenced blocks — the fence line, body (the diagram source), and closing fence.
+ *  Whole-line ranges so the caller can block-replace them (exported for tests). */
+export function findMermaidBlocks(doc: EditorView['state']['doc']): MermaidBlock[] {
+  const blocks: MermaidBlock[] = []
+  const total = doc.lines
+  let n = 1
+
+  while (n <= total) {
+    const open = MERMAID_FENCE_RE.exec(doc.line(n).text)
+
+    if (!open) {
+      n++
+      continue
+    }
+
+    const closeRe = open[1][0] === '`' ? /^\s*`{3,}\s*$/ : /^\s*~{3,}\s*$/
+    const codeLines: string[] = []
+    let last = n
+    let closed = false
+
+    for (let m = n + 1; m <= total; m++) {
+      const bodyLine = doc.line(m).text
+
+      if (closeRe.test(bodyLine)) {
+        last = m
+        closed = true
+        break
+      }
+
+      codeLines.push(bodyLine)
+    }
+
+    if (closed) {
+      const code = codeLines.join('\n').trim()
+
+      if (code) {
+        blocks.push({ code, from: doc.line(n).from, to: doc.line(last).to })
+      }
+
+      n = last + 1
+    } else {
+      n++
+    }
+  }
+
+  return blocks
+}
+
 function buildDecorations(
   view: EditorView,
   onOpen: (target: string) => void,
@@ -868,9 +1052,12 @@ function buildDecorations(
   // block-replace-across-lines decorations from a ViewPlugin. Here we only DROP the
   // inline/line decorations that fall inside a rendered block so they don't collide
   // with the StateField's block widget (e.g. the per-line quote styling on callout lines).
-  const renderedBlocks = [...findTableBlocks(doc), ...findCalloutBlocks(doc), ...findMathBlocks(doc)].filter(
-    block => !selectionTouches(block.from, block.to)
-  )
+  const renderedBlocks = [
+    ...findTableBlocks(doc),
+    ...findCalloutBlocks(doc),
+    ...findMathBlocks(doc),
+    ...findMermaidBlocks(doc)
+  ].filter(block => !selectionTouches(block.from, block.to))
   const inRendered = (pos: number) => renderedBlocks.some(block => pos >= block.from && pos <= block.to)
   const insideMath = (pos: number) => mathInline.some(math => pos >= math.from && pos < math.to)
 
@@ -998,6 +1185,34 @@ function buildMathBlockDecorations(state: EditorState): DecorationSet {
       ranges.push(
         Decoration.replace({ block: true, widget: new MathWidget(block.tex, true) }).range(block.from, block.to)
       )
+    }
+  }
+
+  return Decoration.set(ranges, true)
+}
+
+/** ```mermaid diagram block-replace decorations. Same StateField requirement as tables/callouts/
+ *  math (block decorations across line breaks can't come from a ViewPlugin). The caret entering
+ *  the block reverts it to the raw ```mermaid source for editing. */
+export function mermaidExtension(): Extension {
+  return StateField.define<DecorationSet>({
+    create: buildMermaidDecorations,
+    provide: field => EditorView.decorations.from(field),
+    update(value, tr) {
+      return tr.docChanged || tr.selection ? buildMermaidDecorations(tr.state) : value
+    }
+  })
+}
+
+function buildMermaidDecorations(state: EditorState): DecorationSet {
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+
+  for (const block of findMermaidBlocks(doc)) {
+    const touched = state.selection.ranges.some(r => r.to >= block.from && r.from <= block.to)
+
+    if (!touched) {
+      ranges.push(Decoration.replace({ block: true, widget: new MermaidWidget(block.code) }).range(block.from, block.to))
     }
   }
 
@@ -1190,6 +1405,21 @@ export const noteTheme = EditorView.theme({
     color: 'var(--ui-text-tertiary)',
     fontFamily: 'var(--dt-font-mono, ui-monospace, monospace)',
     fontSize: '0.9em'
+  },
+  '.cm-np-mermaid': {
+    display: 'flex',
+    justifyContent: 'center',
+    margin: '0.7em 0',
+    overflowX: 'auto'
+  },
+  '.cm-np-mermaid svg': { height: 'auto', maxWidth: '100%' },
+  '.cm-np-mermaid-src': {
+    color: 'var(--ui-text-tertiary)',
+    fontFamily: 'var(--dt-font-mono, ui-monospace, monospace)',
+    fontSize: '0.85em',
+    margin: '0',
+    padding: '0.4em 0.6em',
+    whiteSpace: 'pre-wrap'
   },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     backgroundColor: 'var(--ui-bg-elevated)',
