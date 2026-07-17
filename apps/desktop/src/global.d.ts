@@ -30,6 +30,13 @@ declare global {
       // iOS companion mission dispatcher: current Supabase access token (or
       // null on sign-out) so main can start/stop polling agent_missions.
       nemesisMissionsSyncSession?: (accessToken: string | null) => Promise<{ ok: boolean }>
+      // Phone library sync (E2EE) — Settings → Phone: pairing + publish status.
+      nemesisPhoneSyncStatus?: () => Promise<{
+        paired: boolean
+        lastPublish: { at: number; published: number; deleted: number; total: number } | null
+      }>
+      nemesisPhoneSyncPairingCode?: () => Promise<{ code: string }>
+      nemesisPhoneSyncUnpair?: () => Promise<{ ok: boolean }>
       // On-device speech engine (recorder accuracy pass). Model downloads once
       // (~480 MB) on first use; progress events stream via onNemesisAsrProgress.
       nemesisAsrTranscribe?: (samples: Float32Array, sampleRate: number) => Promise<{ ok: boolean; text?: string; error?: string }>

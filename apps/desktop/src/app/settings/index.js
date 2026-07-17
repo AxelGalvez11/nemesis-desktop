@@ -6,7 +6,7 @@ import { Tip } from '@/components/ui/tooltip';
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes';
 import { useI18n } from '@/i18n';
 import { triggerHaptic } from '@/lib/haptics';
-import { Activity, Archive, Bell, Download, Globe, Info, Keyboard, KeyRound, Link, RefreshCw, Settings2, Upload, Wrench, Zap } from '@/lib/icons';
+import { Activity, Archive, Bell, Download, Globe, Info, Keyboard, KeyRound, Link, RefreshCw, Settings2, Smartphone, Upload, Wrench, Zap } from '@/lib/icons';
 import { NEMESIS_STUDENT_BUILD, STUDENT_SETTINGS_KEEP } from '@/nemesis';
 import { toggleKeybindPanel } from '@/store/keybinds';
 import { notifyError } from '@/store/notifications';
@@ -23,11 +23,13 @@ import { SECTIONS } from './constants';
 import { GatewaySettings } from './gateway-settings';
 import { KEYS_VIEWS, KeysSettings } from './keys-settings';
 import { NotificationsSettings } from './notifications-settings';
+import { PhoneSyncSettings } from './phone-sync-settings';
 import { PROVIDER_VIEWS, ProvidersSettings } from './providers-settings';
 import { SessionsSettings } from './sessions-settings';
 import { UsageSettings } from './usage-settings';
 const SETTINGS_VIEWS_ALL = [
     'usage',
+    'phone',
     'connections',
     ...SECTIONS.map(s => `config:${s.id}`),
     'providers',
@@ -114,6 +116,13 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
             id: 'usage',
             label: 'Account & usage',
             onSelect: () => setActiveView('usage')
+        },
+        {
+            active: activeView === 'phone',
+            icon: Smartphone,
+            id: 'phone',
+            label: 'Phone',
+            onSelect: () => setActiveView('phone')
         },
         {
             active: activeView === 'connections',
@@ -230,6 +239,6 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }) {
                         triggerHaptic('warning');
                         void resetConfig();
                     }, children: _jsx(RefreshCw, {}) }) })] }));
-    return (_jsx(OverlayView, { closeLabel: t.settings.closeSettings, onClose: onClose, children: _jsxs(OverlaySplitLayout, { children: [_jsx(OverlayNav, { footer: navFooter, groups: navGroups }), _jsx(OverlayMain, { className: "overflow-y-auto overscroll-contain px-0 pb-0", children: activeView === 'usage' ? (_jsx(UsageSettings, {})) : activeView === 'connections' ? (_jsx(ConnectionsSettings, { onClose: onClose })) : activeView === 'config:appearance' ? (_jsx(AppearanceSettings, {})) : activeView === 'about' ? (_jsx(AboutSettings, {})) : activeView === 'gateway' ? (_jsx(GatewaySettings, {})) : activeView.startsWith('config:') ? (_jsx(ConfigSettings, { activeSectionId: activeView.slice('config:'.length), importInputRef: importInputRef, onConfigSaved: onConfigSaved, onMainModelChanged: onMainModelChanged })) : activeView === 'providers' ? (_jsx(ProvidersSettings, { onClose: onClose, onViewChange: setProviderView, view: providerView })) : activeView === 'keys' ? (_jsx(KeysSettings, { view: keysView })) : activeView === 'notifications' ? (_jsx(NotificationsSettings, {})) : (_jsx(SessionsSettings, {})) })] }) }));
+    return (_jsx(OverlayView, { closeLabel: t.settings.closeSettings, onClose: onClose, children: _jsxs(OverlaySplitLayout, { children: [_jsx(OverlayNav, { footer: navFooter, groups: navGroups }), _jsx(OverlayMain, { className: "overflow-y-auto overscroll-contain px-0 pb-0", children: activeView === 'usage' ? (_jsx(UsageSettings, {})) : activeView === 'phone' ? (_jsx(PhoneSyncSettings, {})) : activeView === 'connections' ? (_jsx(ConnectionsSettings, { onClose: onClose })) : activeView === 'config:appearance' ? (_jsx(AppearanceSettings, {})) : activeView === 'about' ? (_jsx(AboutSettings, {})) : activeView === 'gateway' ? (_jsx(GatewaySettings, {})) : activeView.startsWith('config:') ? (_jsx(ConfigSettings, { activeSectionId: activeView.slice('config:'.length), importInputRef: importInputRef, onConfigSaved: onConfigSaved, onMainModelChanged: onMainModelChanged })) : activeView === 'providers' ? (_jsx(ProvidersSettings, { onClose: onClose, onViewChange: setProviderView, view: providerView })) : activeView === 'keys' ? (_jsx(KeysSettings, { view: keysView })) : activeView === 'notifications' ? (_jsx(NotificationsSettings, {})) : (_jsx(SessionsSettings, {})) })] }) }));
 }
 export { SettingsView as SettingsPage };

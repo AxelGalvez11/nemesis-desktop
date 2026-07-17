@@ -10,6 +10,7 @@ export type SettingsView =
   | 'gateway'
   | 'keys'
   | 'notifications'
+  | 'phone'
   | 'providers'
   | 'sessions'
   | 'usage'

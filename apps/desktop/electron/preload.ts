@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // iOS companion mission dispatcher: hand main the current Supabase access
   // token (or null on sign-out) so it can start/stop polling agent_missions.
   nemesisMissionsSyncSession: accessToken => ipcRenderer.invoke('nemesis:missions:sync-session', { accessToken }),
+  // Phone library sync (E2EE): pairing + publish status for Settings → Phone.
+  nemesisPhoneSyncStatus: () => ipcRenderer.invoke('nemesis:phone-sync:status'),
+  nemesisPhoneSyncPairingCode: () => ipcRenderer.invoke('nemesis:phone-sync:pairing-code'),
+  nemesisPhoneSyncUnpair: () => ipcRenderer.invoke('nemesis:phone-sync:unpair'),
   // On-device speech engine: accurate transcription in the main process
   // (model auto-downloads once; progress arrives via nemesis:asr:progress).
   nemesisAsrTranscribe: (samples, sampleRate) => ipcRenderer.invoke('nemesis:asr:transcribe', { sampleRate, samples }),

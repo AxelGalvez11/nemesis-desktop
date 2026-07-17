@@ -100,6 +100,8 @@ import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle 
 import { createMissionDispatcher } from './mission-dispatcher'
 import { createWebSocketMissionGateway } from './mission-gateway'
 import { createMissionRunner } from './mission-runner'
+import { generateVaultKey, keyFromStoredBase64url, pairingCodeFromKey } from './library-crypto'
+import { createLibraryPublisher, walkVaultMarkdown } from './library-publisher'
 import { registerNemesisAsr } from './nemesis-asr'
 import {
   APP_ID,
@@ -7333,6 +7335,113 @@ const missionDispatcher = createMissionDispatcher({
   })
 })
 
+// ——— Phone library sync (Phase 1): E2EE publisher + pairing key ———
+// Spec: docs/design/nemesis-phone-readonly-sync-2026-07.md (nemesis repo). The
+// vault key lives on this Mac only, safeStorage-encrypted at rest; the pairing
+// QR moves it to the phone; the server stores ciphertext it can't read. The key
+// file survives sign-out (pairing is device-level), but rows only flow while a
+// session token is present.
+const phoneSyncKeyFile = () => path.join(app.getPath('userData'), 'phone-sync-key.json')
+const phoneSyncStateFile = () => path.join(app.getPath('userData'), 'phone-sync-state.json')
+const phoneSyncVaultRoot = () => path.join(os.homedir(), 'Documents', 'Nemesis Library')
+
+function loadPhoneSyncVaultKey(): Buffer | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(phoneSyncKeyFile(), 'utf8'))
+    const value = String(raw?.key?.value || '')
+    if (!value) return null
+    const b64u = raw?.key?.encoding === 'safeStorage' ? safeStorage.decryptString(Buffer.from(value, 'base64')) : value
+    return keyFromStoredBase64url(b64u)
+  } catch {
+    return null // no file yet (never paired) or an unreadable one (treated as unpaired)
+  }
+}
+
+function ensurePhoneSyncVaultKey(): Buffer {
+  const existing = loadPhoneSyncVaultKey()
+  if (existing) return existing
+  const key = generateVaultKey()
+  const b64u = key.toString('base64url')
+  const stored = safeStorage.isEncryptionAvailable()
+    ? { encoding: 'safeStorage', value: safeStorage.encryptString(b64u).toString('base64') }
+    : { encoding: 'plain', value: b64u } // no OS keychain available (rare); 0600 file perms are the fallback
+  fs.writeFileSync(phoneSyncKeyFile(), JSON.stringify({ v: 1, key: stored }), { mode: 0o600 })
+  return key
+}
+
+const libraryPublisher = createLibraryPublisher({
+  supabaseUrl: MISSION_SUPABASE_URL,
+  anonKey: MISSION_SUPABASE_ANON_KEY,
+  getAccessToken: async () => missionAccessToken,
+  getVaultKey: async () => loadPhoneSyncVaultKey(),
+  listVaultFiles: () =>
+    walkVaultMarkdown(
+      {
+        readdir: async dir =>
+          (await fs.promises.readdir(dir, { withFileTypes: true })).map(entry => ({
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+            isFile: entry.isFile()
+          })),
+        stat: async target => {
+          const stats = await fs.promises.stat(target)
+          return { size: stats.size, mtimeMs: stats.mtimeMs }
+        }
+      },
+      phoneSyncVaultRoot()
+    ),
+  readFileText: relPath => fs.promises.readFile(path.join(phoneSyncVaultRoot(), relPath), 'utf8'),
+  loadState: async () => {
+    try {
+      const raw = JSON.parse(fs.readFileSync(phoneSyncStateFile(), 'utf8'))
+      return raw?.v === 1 && raw.files ? raw : null
+    } catch {
+      return null // first run (or corrupt state): the next tick republishes everything
+    }
+  },
+  saveState: async state => {
+    fs.writeFileSync(phoneSyncStateFile(), JSON.stringify(state))
+  },
+  log: line => rememberLog(line)
+})
+
+ipcMain.handle('nemesis:phone-sync:status', async () => ({
+  paired: loadPhoneSyncVaultKey() !== null,
+  lastPublish: libraryPublisher.lastResult()
+}))
+
+// Returns the pairing code, creating the vault key on first use. The code IS
+// the key to the student's notes: the renderer shows it as a QR + copyable
+// string and never persists it, and it must never be logged.
+ipcMain.handle('nemesis:phone-sync:pairing-code', async () => ({
+  code: pairingCodeFromKey(ensurePhoneSyncVaultKey())
+}))
+
+// Unpair: forget the key + publish state, and best-effort delete this user's
+// encrypted rows server-side — they're unreadable without the key, and a future
+// re-pair generates a fresh key whose path_hashes will never match them.
+ipcMain.handle('nemesis:phone-sync:unpair', async () => {
+  try {
+    fs.rmSync(phoneSyncKeyFile(), { force: true })
+    fs.rmSync(phoneSyncStateFile(), { force: true })
+  } catch (error) {
+    rememberLog(`[phone-sync] could not clear pairing files: ${error?.message || error}`)
+  }
+  const token = missionAccessToken
+  if (token) {
+    try {
+      const sub = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString('utf8')).sub
+      await fetch(`${MISSION_SUPABASE_URL}/rest/v1/library_documents?user_id=eq.${sub}`, {
+        method: 'DELETE',
+        headers: { apikey: MISSION_SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` }
+      })
+    } catch {
+      // best-effort: orphaned ciphertext rows are unreadable and harmless
+    }
+  }
+  return { ok: true }
+})
+
 // The renderer calls this at every point nemesis-account.ts treats the
 // session as current (see that file's applySession/startMissionSessionSync);
 // null/empty stops the dispatcher immediately (sign-out).
@@ -7343,8 +7452,13 @@ ipcMain.handle('nemesis:missions:sync-session', async (_event, payload) => {
 
   if (accessToken) {
     missionDispatcher.start(MISSION_POLL_INTERVAL_MS)
+    // Library publisher shares the session gate but NOT the dispatcher's tick —
+    // that tick blocks for a mission's whole runtime, which would starve
+    // publishing exactly while the agent writes notes (see library-publisher.ts).
+    libraryPublisher.start(MISSION_POLL_INTERVAL_MS)
   } else {
     missionDispatcher.stop()
+    libraryPublisher.stop()
     // Forget this device identity too — see clearCachedMissionDeviceId's
     // comment. The next signed-in student re-registers their own row.
     missionDeviceIdPromise = null
