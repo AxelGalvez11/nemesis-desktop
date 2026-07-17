@@ -17,6 +17,7 @@ import { type FC, useCallback, useEffect, useRef, useState } from 'react'
 
 import { currentActivityEvent, phraseForActivity } from '@/components/assistant-ui/thread/activity-phrase'
 import { contentHasVisibleText } from '@/components/assistant-ui/thread/content'
+import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { Codicon } from '@/components/ui/codicon'
 import { cn } from '@/lib/utils'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
@@ -85,6 +86,8 @@ export const ActivityStrip: FC<{ placement?: 'header' | 'live' }> = ({ placement
   // Bumped when the clock stops so the settled label re-renders with a duration
   // (the settle render itself runs before the effect records `end`).
   const [, setClockTick] = useState(0)
+  // Live instance only: 1 Hz re-render so the inline turn timer counts up.
+  const [now, setNow] = useState(() => Date.now())
   const ref = useRef<HTMLElement | null>(null)
   const messageId = useAuiState(s => s.message.id)
   const running = useAuiState(s => s.message.status?.type === 'running')
@@ -149,6 +152,18 @@ export const ActivityStrip: FC<{ placement?: 'header' | 'live' }> = ({ placement
     }
   }, [messageId, placement, running])
 
+  // Tick the live row's turn timer once a second. Live-only and while running
+  // only — the settled label reads the frozen clock instead.
+  useEffect(() => {
+    if (placement !== 'live' || !running) {
+      return
+    }
+
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+
+    return () => window.clearInterval(id)
+  }, [placement, running])
+
   // The trail lives in a sibling subtree (MessagePrimitive.Parts), so the collapse is
   // driven by an attribute on the shared message root + a CSS rule in styles.css.
   // Header-owned: its anchor stays mounted through every phase of the turn.
@@ -183,6 +198,13 @@ export const ActivityStrip: FC<{ placement?: 'header' | 'live' }> = ({ placement
       return null
     }
 
+    // Whole-turn seconds for the inline timer — same clock the settled
+    // "Worked for Xs" label reads, so live and settled numbers agree. Null on
+    // the very first render if the header effect hasn't armed the clock yet;
+    // the timer simply appears on the next tick.
+    const clockStart = TURN_CLOCK.get(messageId)?.start
+    const liveSeconds = clockStart !== undefined ? Math.max(0, Math.floor((now - clockStart) / 1000)) : null
+
     return (
       <div
         aria-live="polite"
@@ -193,15 +215,24 @@ export const ActivityStrip: FC<{ placement?: 'header' | 'live' }> = ({ placement
         {intent && !hasProse && (
           <p className="nemesis-intent-line text-[0.875rem] leading-relaxed text-(--ui-text-secondary)">{intent}</p>
         )}
-        {/* Keyed by phrase: a new phrase remounts the wrapper, replaying the CSS
-            fade (styles.css .nemesis-activity-phrase) — a quiet cross-fade with
-            no animation library. The inner span carries the live shimmer. */}
-        <span
-          className="nemesis-activity-phrase flex min-w-0 text-[length:var(--conversation-tool-font-size)] text-(--ui-text-tertiary)"
-          key={livePhrase || 'thinking'}
-        >
-          <span className="shimmer min-w-0 truncate">{livePhrase || 'Thinking'}</span>
-        </span>
+        {/* One status line — live square, shimmering phrase, turn timer — so the
+            "am I still working?" signals sit together instead of stacking as
+            two rows with dead air between them (owner ask, 2026-07-16). The
+            square and timer live OUTSIDE the keyed phrase wrapper so a phrase
+            change cross-fades only the text, not the whole row. */}
+        <div className="flex min-w-0 max-w-full items-center gap-2">
+          <span aria-hidden="true" className="dither inline-block size-3 shrink-0 rounded-[2px] text-midground/80 animate-pulse" />
+          {/* Keyed by phrase: a new phrase remounts the wrapper, replaying the CSS
+              fade (styles.css .nemesis-activity-phrase) — a quiet cross-fade with
+              no animation library. The inner span carries the live shimmer. */}
+          <span
+            className="nemesis-activity-phrase flex min-w-0 text-[length:var(--conversation-tool-font-size)] text-(--ui-text-tertiary)"
+            key={livePhrase || 'thinking'}
+          >
+            <span className="shimmer min-w-0 truncate">{livePhrase || 'Thinking'}</span>
+          </span>
+          {liveSeconds !== null && <ActivityTimerText seconds={liveSeconds} />}
+        </div>
       </div>
     )
   }

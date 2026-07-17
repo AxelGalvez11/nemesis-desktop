@@ -1874,6 +1874,17 @@ text-* variant utilities. */ .btn-arc {
   animation: nemesis-phrase-in 0.4s ease-out;
 }
 
+/* While the ActivityStrip's live row is visible it already shows the live
+   square + phrase + turn timer, so the stream-stall row right under it is a
+   duplicate signal with dead air between the two (owner ask, 2026-07-16).
+   Hide it via adjacency — the strip's own render is the single source of
+   truth for "is the live row showing" (when the strip returns null the `+`
+   no longer matches and the stall row surfaces as before). Compaction is the
+   exception: only the stall row announces "Summarizing thread". */
+[data-slot='aui_activity-phrase'] + [data-slot='aui_stream-stall']:not([data-compacting='true']) {
+  display: none;
+}
+
 /* Nemesis student build: live activity phrase in the ActivityStrip. The phrase
    wrapper remounts whenever the text changes (React key), so this enter fade
    plays between phrases — a subtle CSS-only cross-fade, no motion library. It

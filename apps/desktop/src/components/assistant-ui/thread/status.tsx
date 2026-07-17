@@ -153,9 +153,14 @@ export const StreamStallIndicator: FC = () => {
     return null
   }
 
+  // When the ActivityStrip's live row is showing, it already carries a live
+  // square + phrase + turn timer, so this row is redundant and styles.css
+  // hides it via sibling selector — UNLESS compaction is running, which only
+  // this row announces (data-compacting keeps it visible).
   return (
     <StatusRow
       className="mt-1.5"
+      data-compacting={compacting ? 'true' : undefined}
       data-slot="aui_stream-stall"
       label={compacting ? COMPACTION_LABEL : 'Nemesis is thinking'}
     >
