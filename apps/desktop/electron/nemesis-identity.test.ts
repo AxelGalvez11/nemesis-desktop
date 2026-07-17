@@ -132,6 +132,24 @@ test('upsertEnvVars handles export-prefixed assignments', () => {
   assert.equal(result, 'DEEPSEEK_BASE_URL=https://new/v1\n')
 })
 
+// The llm:sync contract: ONE sync wires both metered services — the LLM proxy
+// (DeepSeek override vars) and web search/page-reading (Firecrawl override vars
+// pointed at cloud/nemesis-search) — with the same device key. Guards against
+// the search half being dropped again (the agent then has no keyless page
+// reader at all; owner audit 2026-07-16).
+test('upsertEnvVars carries the LLM and search proxy vars together', () => {
+  const result = upsertEnvVars('', {
+    DEEPSEEK_API_KEY: 'nmk_abc',
+    DEEPSEEK_BASE_URL: 'https://proxy/functions/v1/nemesis-llm/v1',
+    FIRECRAWL_API_KEY: 'nmk_abc',
+    FIRECRAWL_API_URL: 'https://proxy/functions/v1/nemesis-search'
+  })
+
+  assert.ok(result.includes('DEEPSEEK_API_KEY=nmk_abc\n'))
+  assert.ok(result.includes('FIRECRAWL_API_KEY=nmk_abc\n'))
+  assert.ok(result.includes('FIRECRAWL_API_URL=https://proxy/functions/v1/nemesis-search\n'))
+})
+
 test('upsertEnvVars is idempotent', () => {
   const once = upsertEnvVars('KEEP=1\n', { DEEPSEEK_API_KEY: 'nmk_x', DEEPSEEK_BASE_URL: 'https://p/v1' })
   const twice = upsertEnvVars(once, { DEEPSEEK_API_KEY: 'nmk_x', DEEPSEEK_BASE_URL: 'https://p/v1' })

@@ -7161,7 +7161,16 @@ ipcMain.handle('hermes:backend:touch', async (_event, profile) => {
 // (the backend reads that file at spawn) and restarting any live local backend.
 // The device key is the only secret and it's the student's own, scoped + revocable
 // server-side. Fixed URL prefix — the renderer cannot point the backend anywhere else.
+//
+// The SAME sync also wires web search + page reading: the kit's firecrawl web
+// backend honors FIRECRAWL_API_URL, and cloud/nemesis-search implements the two
+// Firecrawl v2 routes it calls (/v2/search, /v2/scrape) behind the same device
+// key — Tavily→Linkup→Firecrawl server-side, one unit per call, daily-budgeted.
+// Without these two vars the agent has no keyless way to read pages at all
+// (ddgs is search-only), which is how the "found it but couldn't read it"
+// sessions happened (owner audit 2026-07-16).
 const NEMESIS_LLM_PROXY_BASE = 'https://qyjmivntajbigjswhahb.supabase.co/functions/v1/nemesis-llm/v1'
+const NEMESIS_SEARCH_PROXY_BASE = 'https://qyjmivntajbigjswhahb.supabase.co/functions/v1/nemesis-search'
 
 // On-device speech engine (recorder's accurate transcription pass).
 registerNemesisAsr()
@@ -7185,7 +7194,9 @@ ipcMain.handle('nemesis:llm:sync', async (_event, payload) => {
 
     const next = upsertEnvVars(current, {
       DEEPSEEK_API_KEY: deviceKey,
-      DEEPSEEK_BASE_URL: NEMESIS_LLM_PROXY_BASE
+      DEEPSEEK_BASE_URL: NEMESIS_LLM_PROXY_BASE,
+      FIRECRAWL_API_KEY: deviceKey,
+      FIRECRAWL_API_URL: NEMESIS_SEARCH_PROXY_BASE
     })
 
     if (next === current) {
