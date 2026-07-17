@@ -8,7 +8,6 @@ import { DesktopInstallOverlay } from '@/components/desktop-install-overlay'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NemesisAccountGate } from '@/components/nemesis-account-gate'
 import { hasAcceptedCurrentConsent, NemesisConsentGate } from '@/components/nemesis-consent-gate'
-import { NemesisUpdateBanner } from '@/components/nemesis-update-banner'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import { Pane, PaneMain } from '@/components/pane-shell'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
@@ -1139,7 +1138,8 @@ export function DesktopController() {
       {!isSecondaryWindow() && <DesktopInstallOverlay />}
       {!isSecondaryWindow() && <NemesisAccountGate />}
       {!isSecondaryWindow() && <NemesisConsentGate />}
-      {!isSecondaryWindow() && <NemesisUpdateBanner />}
+      {/* Update affordance moved into the sidebar footer (nemesis-relaunch-card):
+          silent download, one undismissable "Relaunch to update" card. */}
       {/* Student build: never show the upstream "connect a model provider" onboarding.
           Nemesis provisions the model through the metering proxy at sign-in
           (nemesis:llm:sync), so a provider/credential error is OUR bug, not a

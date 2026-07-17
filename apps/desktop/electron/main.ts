@@ -8939,11 +8939,12 @@ app.on('open-url', (event, url) => {
 
 // --- In-app auto-update (beta.6) -------------------------------------------
 // electron-updater against the public GitHub releases feed (package.json
-// build.publish). Downloads in the background; the THEMED in-app banner
-// (nemesis-update-banner, polling nemesis:updater:status) is the only update
-// surface — beta.10 dropped the native "Restart now" dialog, which was
-// unthemed and stacked on top of the banner saying the same thing. Users who
-// dismiss the banner still get the update on the next natural quit
+// build.publish). Downloads in the background SILENTLY; the sidebar-footer
+// card (nemesis-relaunch-card, polling nemesis:updater:status) is the only
+// update surface — beta.10 dropped the native "Restart now" dialog, and the
+// 2026-07-16 pass dropped the floating banner + its "downloading…" narration
+// and "Later" button (owner ask: match Claude Code's quiet relaunch card).
+// Users who ignore the card still get the update on the next natural quit
 // (autoInstallOnAppQuit). Packaged builds only; every failure is log-only.
 // Version lines are semver prereleases (0.1.0-beta.N), which electron-updater
 // orders correctly.
