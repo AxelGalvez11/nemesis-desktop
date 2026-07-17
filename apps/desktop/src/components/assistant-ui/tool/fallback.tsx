@@ -307,20 +307,33 @@ function ToolEntry({ part }: ToolEntryProps) {
   }, [inlineDiff, isPending, result, stablePart])
 
   // Surface a previewable artifact (HTML file / localhost URL) as a compact link
-  // in the composer status stack rather than a bulky inline card. Uses the same
-  // detected target the old inline card did, keyed to the active session the
-  // stack reads from. Idempotent + dedup'd, so re-renders don't churn.
-  const activeSessionId = useStore($activeSessionId)
+  // in the composer status stack rather than a bulky inline card. Recorded ONLY for
+  // a tool call observed streaming in this mount, into the session that was active
+  // while it streamed — historical rows re-rendered on a session switch must never
+  // re-register their files (they leaked chips into unrelated sessions and revived
+  // dismissed ones; owner report 2026-07-16). The latch is keyed to disclosureId so
+  // an in-place message swap (same component, new tool part) can't inherit it.
   const currentCwd = useStore($currentCwd)
   const previewTarget = view.previewTarget
+  const liveRunRef = useRef<null | { id: string; session: null | string }>(null)
+
+  if (messageRunning && liveRunRef.current?.id !== disclosureId) {
+    liveRunRef.current = { id: disclosureId, session: $activeSessionId.get() }
+  }
 
   useEffect(() => {
-    if (isPending || !activeSessionId || !previewTarget || !isPreviewableTarget(previewTarget)) {
+    const live = liveRunRef.current
+
+    if (isPending || !previewTarget || !isPreviewableTarget(previewTarget)) {
       return
     }
 
-    recordPreviewArtifact(activeSessionId, previewTarget, currentCwd || '')
-  }, [activeSessionId, currentCwd, isPending, previewTarget])
+    if (!live || live.id !== disclosureId || !live.session) {
+      return
+    }
+
+    recordPreviewArtifact(live.session, previewTarget, currentCwd || '')
+  }, [currentCwd, disclosureId, isPending, previewTarget])
 
   const detailSections = useMemo(() => {
     if (!view.detail) {
