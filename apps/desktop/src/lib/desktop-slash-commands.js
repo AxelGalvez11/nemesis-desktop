@@ -1,3 +1,4 @@
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_SLASH } from '@/nemesis';
 const exec = () => ({ kind: 'exec' });
 const action = (id) => ({ kind: 'action', action: id });
 const picker = (id) => ({ kind: 'picker', picker: id });
@@ -186,6 +187,9 @@ export function isDesktopSlashSuggestion(command) {
     const normalized = normalizeCommand(command);
     // Aliases stay hidden so the popover isn't cluttered with duplicates.
     if (ALIAS_TO_CANONICAL.has(normalized)) {
+        return false;
+    }
+    if (NEMESIS_STUDENT_BUILD && STUDENT_HIDDEN_SLASH.has(normalized)) {
         return false;
     }
     const spec = SPEC_BY_NAME.get(normalized);

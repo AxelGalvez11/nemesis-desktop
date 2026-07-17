@@ -2,6 +2,11 @@ import { atom } from 'nanostores';
 import { previewName } from '@/lib/preview-targets';
 const MAX_PER_SESSION = 4;
 export const $previewStatusBySession = atom({});
+// Dismissals are tombstones, not just removals: the tool rows re-register their
+// targets on later renders, so without a tombstone an ✕'d chip resurrects on the
+// next re-render pass. Cleared with clearPreviewArtifacts (a fresh run may
+// legitimately produce — and re-chip — the same file).
+const dismissedBySession = new Map();
 const writePreviews = (sid, items) => {
     const current = $previewStatusBySession.get();
     if (items.length === 0) {
@@ -25,6 +30,9 @@ export function recordPreviewArtifact(sid, target, cwd) {
     if (!sid || !raw) {
         return;
     }
+    if (dismissedBySession.get(sid)?.has(raw)) {
+        return;
+    }
     const list = $previewStatusBySession.get()[sid] ?? [];
     if (list.some(item => item.id === raw)) {
         return;
@@ -32,11 +40,15 @@ export function recordPreviewArtifact(sid, target, cwd) {
     writePreviews(sid, [...list, { cwd, id: raw, label: previewName(raw), target: raw }].slice(-MAX_PER_SESSION));
 }
 export function dismissPreviewArtifact(sid, id) {
+    const tombstones = dismissedBySession.get(sid) ?? new Set();
+    tombstones.add(id);
+    dismissedBySession.set(sid, tombstones);
     const list = $previewStatusBySession.get()[sid];
     if (list) {
         writePreviews(sid, list.filter(item => item.id !== id));
     }
 }
 export function clearPreviewArtifacts(sid) {
+    dismissedBySession.delete(sid);
     writePreviews(sid, []);
 }

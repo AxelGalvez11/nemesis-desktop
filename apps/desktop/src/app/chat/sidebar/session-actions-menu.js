@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input';
 import { renameSession } from '@/hermes';
 import { useI18n } from '@/i18n';
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis';
 import { triggerHaptic } from '@/lib/haptics';
 import { exportSession } from '@/lib/session-export';
 import { activeGateway } from '@/store/gateway';
@@ -91,8 +92,10 @@ function useSessionActions({ sessionId, title, pinned = false, profile, onPin, o
         },
         {
             disabled: !onBranch,
-            icon: 'git-branch',
-            label: r.branchFrom,
+            // Same fork-the-conversation feature; students get plain words, not git ones
+            // (mirrors assistant-message.tsx's "Continue in a new chat").
+            icon: NEMESIS_STUDENT_BUILD ? 'comment-discussion' : 'git-branch',
+            label: NEMESIS_STUDENT_BUILD ? 'Continue in a new chat' : r.branchFrom,
             onSelect: () => {
                 triggerHaptic('selection');
                 onBranch?.();
@@ -129,7 +132,7 @@ function useSessionActions({ sessionId, title, pinned = false, profile, onPin, o
         }
     ];
     const renderMenuItem = (Item, { className, disabled, icon, label, onSelect, variant }) => (_jsxs(Item, { className: className, disabled: disabled, onSelect: onSelect, variant: variant, children: [_jsx(Codicon, { name: icon, size: "0.875rem" }), _jsx("span", { children: label })] }, label));
-    const renderItems = (Item) => (_jsxs(_Fragment, { children: [renderMenuItem(Item, pinItem), _jsx(CopyButton, { appearance: Item === DropdownMenuItem ? 'menu-item' : 'context-menu-item', disabled: !sessionId, errorMessage: r.copyIdFailed, iconClassName: "size-3.5 text-current", label: r.copyId, onCopyError: err => notifyError(err, r.copyIdFailed), text: sessionId }, r.copyId), items.map(spec => renderMenuItem(Item, spec))] }));
+    const renderItems = (Item) => (_jsxs(_Fragment, { children: [renderMenuItem(Item, pinItem), !NEMESIS_STUDENT_BUILD && (_jsx(CopyButton, { appearance: Item === DropdownMenuItem ? 'menu-item' : 'context-menu-item', disabled: !sessionId, errorMessage: r.copyIdFailed, iconClassName: "size-3.5 text-current", label: r.copyId, onCopyError: err => notifyError(err, r.copyIdFailed), text: sessionId }, r.copyId)), items.map(spec => renderMenuItem(Item, spec))] }));
     const renameDialog = (_jsx(RenameSessionDialog, { currentTitle: title, onOpenChange: setRenameOpen, open: renameOpen, profile: profile, sessionId: sessionId }));
     return { renameDialog, renderItems };
 }

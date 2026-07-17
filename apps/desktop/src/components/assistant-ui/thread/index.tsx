@@ -7,6 +7,7 @@ import {
   CenteredThreadSpinner,
   ResponseLoadingIndicator
 } from '@/components/assistant-ui/thread/status'
+import { withStudentRestoreCopy } from '@/components/assistant-ui/thread/student-copy'
 import { SystemMessage } from '@/components/assistant-ui/thread/system-message'
 import { ThreadTimeline } from '@/components/assistant-ui/thread/timeline'
 import { type RestoreMessageTarget } from '@/components/assistant-ui/thread/types'
@@ -46,7 +47,7 @@ export const Thread: FC<{
   sessionKey
 }) => {
   const { t } = useI18n()
-  const copy = t.assistant.thread
+  const copy = withStudentRestoreCopy(t.assistant.thread)
 
   const [restoreConfirmTarget, setRestoreConfirmTarget] = useState<
     (RestoreMessageTarget & { messageId: string }) | null

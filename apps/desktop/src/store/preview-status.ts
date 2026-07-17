@@ -24,6 +24,12 @@ const MAX_PER_SESSION = 4
 
 export const $previewStatusBySession = atom<Record<string, PreviewArtifact[]>>({})
 
+// Dismissals are tombstones, not just removals: the tool rows re-register their
+// targets on later renders, so without a tombstone an ✕'d chip resurrects on the
+// next re-render pass. Cleared with clearPreviewArtifacts (a fresh run may
+// legitimately produce — and re-chip — the same file).
+const dismissedBySession = new Map<string, Set<string>>()
+
 const writePreviews = (sid: string, items: PreviewArtifact[]) => {
   const current = $previewStatusBySession.get()
 
@@ -54,6 +60,10 @@ export function recordPreviewArtifact(sid: string, target: string, cwd: string) 
     return
   }
 
+  if (dismissedBySession.get(sid)?.has(raw)) {
+    return
+  }
+
   const list = $previewStatusBySession.get()[sid] ?? []
 
   if (list.some(item => item.id === raw)) {
@@ -64,6 +74,10 @@ export function recordPreviewArtifact(sid: string, target: string, cwd: string) 
 }
 
 export function dismissPreviewArtifact(sid: string, id: string) {
+  const tombstones = dismissedBySession.get(sid) ?? new Set<string>()
+  tombstones.add(id)
+  dismissedBySession.set(sid, tombstones)
+
   const list = $previewStatusBySession.get()[sid]
 
   if (list) {
@@ -75,5 +89,6 @@ export function dismissPreviewArtifact(sid: string, id: string) {
 }
 
 export function clearPreviewArtifacts(sid: string) {
+  dismissedBySession.delete(sid)
   writePreviews(sid, [])
 }

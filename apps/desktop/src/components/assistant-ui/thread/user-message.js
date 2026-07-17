@@ -3,6 +3,7 @@ import { ActionBarPrimitive, BranchPickerPrimitive, MessagePrimitive, useAuiStat
 import { useCallback, useRef, useState } from 'react';
 import { DirectiveContent } from '@/components/assistant-ui/directive-text';
 import { messageAttachmentRefs, messageContentText } from '@/components/assistant-ui/thread/content';
+import { withStudentRestoreCopy } from '@/components/assistant-ui/thread/student-copy';
 import { UserMessageText } from '@/components/assistant-ui/thread/user-message-text';
 import { Codicon } from '@/components/ui/codicon';
 import { useResizeObserver } from '@/hooks/use-resize-observer';
@@ -44,7 +45,7 @@ const ProcessNotificationNote = ({ text }) => {
 };
 export const UserMessage = ({ onCancel, onRequestRestoreConfirm }) => {
     const { t } = useI18n();
-    const copy = t.assistant.thread;
+    const copy = withStudentRestoreCopy(t.assistant.thread);
     const messageId = useAuiState(s => s.message.id);
     const content = useAuiState(s => s.message.content);
     const messageText = messageContentText(content);

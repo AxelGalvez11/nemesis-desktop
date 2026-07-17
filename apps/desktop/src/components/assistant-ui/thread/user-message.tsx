@@ -3,6 +3,7 @@ import { type FC, type ReactNode, useCallback, useRef, useState } from 'react'
 
 import { DirectiveContent } from '@/components/assistant-ui/directive-text'
 import { messageAttachmentRefs, messageContentText } from '@/components/assistant-ui/thread/content'
+import { withStudentRestoreCopy } from '@/components/assistant-ui/thread/student-copy'
 import { type RestoreMessageTarget } from '@/components/assistant-ui/thread/types'
 import { UserMessageText } from '@/components/assistant-ui/thread/user-message-text'
 import { Codicon } from '@/components/ui/codicon'
@@ -102,7 +103,7 @@ export const UserMessage: FC<{
   onRequestRestoreConfirm?: (messageId: string, target: RestoreMessageTarget) => void
 }> = ({ onCancel, onRequestRestoreConfirm }) => {
   const { t } = useI18n()
-  const copy = t.assistant.thread
+  const copy = withStudentRestoreCopy(t.assistant.thread)
   const messageId = useAuiState(s => s.message.id)
   const content = useAuiState(s => s.message.content)
   const messageText = messageContentText(content)

@@ -15,7 +15,7 @@ import { type ComponentType, type Ref, useEffect, useImperativeHandle, useRef } 
 
 import { Button } from '@/components/ui/button'
 
-import { livePreview, noteMarkdown, noteTheme, tableField, type ImageContext } from './note-decorations'
+import { livePreview, noteMarkdown, noteTheme, tableExtension, type ImageContext } from './note-decorations'
 import { cycleHeading, toggleBold, toggleBulletList, toggleItalic } from './note-format'
 import { VAULT_DIR } from './vault'
 import { wikilinkCompletionSource, type WikilinkTarget } from './wikilink-autocomplete'
@@ -121,7 +121,10 @@ export function NoteEditor({
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.lineWrapping,
         noteMarkdown,
-        tableField,
+        tableExtension(
+          target => onOpenRef.current(target),
+          target => isResolvedRef.current(target)
+        ),
         livePreview(
           target => onOpenRef.current(target),
           target => isResolvedRef.current(target),
