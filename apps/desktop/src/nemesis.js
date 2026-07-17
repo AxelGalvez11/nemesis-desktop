@@ -41,6 +41,20 @@ export const STUDENT_HIDDEN_STATUSBAR = new Set([
     'cron',
     'terminal'
 ]);
+/** Composer "/" popover entries hidden for students — git words (branch), checkpoint/
+ *  context/dev-ops jargon. The commands still execute if typed (same philosophy as the
+ *  palette: hidden, not disabled); this only keeps the suggestion list in plain English. */
+export const STUDENT_HIDDEN_SLASH = new Set([
+    '/agents',
+    '/branch',
+    '/browser',
+    '/compress',
+    '/debug',
+    '/rollback',
+    '/save',
+    '/tools',
+    '/yolo'
+]);
 /** ⌘K palette entries hidden for students, beyond STUDENT_HIDDEN_PALETTE — the whole
  *  command-center / gateway / dev-nav surface plus the granular technical lists
  *  (capability tabs, per-field settings search, MCP servers). Matched by id prefix

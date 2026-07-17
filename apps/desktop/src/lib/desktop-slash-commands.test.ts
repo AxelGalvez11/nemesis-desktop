@@ -15,12 +15,18 @@ import {
 describe('desktop slash command curation', () => {
   it('keeps core desktop chat commands in suggestions', () => {
     expect(isDesktopSlashSuggestion('/new')).toBe(true)
-    expect(isDesktopSlashSuggestion('/branch')).toBe(true)
     expect(isDesktopSlashSuggestion('/skin')).toBe(true)
     expect(isDesktopSlashSuggestion('/usage')).toBe(true)
     expect(isDesktopSlashSuggestion('/version')).toBe(true)
-    expect(isDesktopSlashSuggestion('/yolo')).toBe(true)
     expect(isDesktopSlashCommand('/yolo')).toBe(true)
+  })
+
+  it('hides dev-jargon commands from the student popover but keeps them executable', () => {
+    // STUDENT_HIDDEN_SLASH (nemesis.ts): hidden, not disabled — typing them still works.
+    for (const command of ['/branch', '/yolo', '/browser', '/compress', '/debug', '/rollback', '/save', '/tools', '/agents']) {
+      expect(isDesktopSlashSuggestion(command), command).toBe(false)
+      expect(isDesktopSlashCommand(command), command).toBe(true)
+    }
   })
 
   it('surfaces skill and quick commands (extensions) in suggestions and lets them run', () => {
@@ -41,8 +47,6 @@ describe('desktop slash command curation', () => {
   })
 
   it('surfaces /tools, /save, and /personality on the desktop', () => {
-    expect(isDesktopSlashSuggestion('/tools')).toBe(true)
-    expect(isDesktopSlashSuggestion('/save')).toBe(true)
     expect(isDesktopSlashSuggestion('/personality')).toBe(true)
     expect(isDesktopSlashCommand('/tools')).toBe(true)
     expect(isDesktopSlashCommand('/save')).toBe(true)
@@ -66,7 +70,6 @@ describe('desktop slash command curation', () => {
     // /browser used to be terminal-only; it now resolves to a desktop action
     // handler that routes browser.manage RPC when the gateway is local.
     expect(isDesktopSlashCommand('/browser')).toBe(true)
-    expect(isDesktopSlashSuggestion('/browser')).toBe(true)
     expect(desktopSlashUnavailableMessage('/browser')).toBeNull()
     expect(resolveDesktopCommand('/browser')?.surface).toEqual({ kind: 'action', action: 'browser' })
     // Bare /browser expands to its sub-action options in the popover.

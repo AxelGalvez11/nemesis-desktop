@@ -1,3 +1,5 @@
+import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_SLASH } from '@/nemesis'
+
 export interface CommandsCatalogSection {
   name: string
   pairs: [string, string][]
@@ -305,6 +307,10 @@ export function isDesktopSlashSuggestion(command: string): boolean {
 
   // Aliases stay hidden so the popover isn't cluttered with duplicates.
   if (ALIAS_TO_CANONICAL.has(normalized)) {
+    return false
+  }
+
+  if (NEMESIS_STUDENT_BUILD && STUDENT_HIDDEN_SLASH.has(normalized)) {
     return false
   }
 

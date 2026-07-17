@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/components/ui/input'
 import { renameSession } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { triggerHaptic } from '@/lib/haptics'
 import { exportSession } from '@/lib/session-export'
 import { activeGateway } from '@/store/gateway'
@@ -142,8 +143,10 @@ function useSessionActions({
     },
     {
       disabled: !onBranch,
-      icon: 'git-branch',
-      label: r.branchFrom,
+      // Same fork-the-conversation feature; students get plain words, not git ones
+      // (mirrors assistant-message.tsx's "Continue in a new chat").
+      icon: NEMESIS_STUDENT_BUILD ? 'comment-discussion' : 'git-branch',
+      label: NEMESIS_STUDENT_BUILD ? 'Continue in a new chat' : r.branchFrom,
       onSelect: () => {
         triggerHaptic('selection')
         onBranch?.()
@@ -190,16 +193,19 @@ function useSessionActions({
   const renderItems = (Item: MenuItem) => (
     <>
       {renderMenuItem(Item, pinItem)}
-      <CopyButton
-        appearance={Item === DropdownMenuItem ? 'menu-item' : 'context-menu-item'}
-        disabled={!sessionId}
-        errorMessage={r.copyIdFailed}
-        iconClassName="size-3.5 text-current"
-        key={r.copyId}
-        label={r.copyId}
-        onCopyError={err => notifyError(err, r.copyIdFailed)}
-        text={sessionId}
-      />
+      {/* Raw session IDs are a support/debugging affordance — hidden from students. */}
+      {!NEMESIS_STUDENT_BUILD && (
+        <CopyButton
+          appearance={Item === DropdownMenuItem ? 'menu-item' : 'context-menu-item'}
+          disabled={!sessionId}
+          errorMessage={r.copyIdFailed}
+          iconClassName="size-3.5 text-current"
+          key={r.copyId}
+          label={r.copyId}
+          onCopyError={err => notifyError(err, r.copyIdFailed)}
+          text={sessionId}
+        />
+      )}
       {items.map(spec => renderMenuItem(Item, spec))}
     </>
   )

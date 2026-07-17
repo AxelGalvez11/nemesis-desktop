@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { AssistantMessage } from '@/components/assistant-ui/thread/assistant-message';
 import { ThreadMessageList } from '@/components/assistant-ui/thread/list';
 import { BackgroundResumeNotice, CenteredThreadSpinner, ResponseLoadingIndicator } from '@/components/assistant-ui/thread/status';
+import { withStudentRestoreCopy } from '@/components/assistant-ui/thread/student-copy';
 import { SystemMessage } from '@/components/assistant-ui/thread/system-message';
 import { ThreadTimeline } from '@/components/assistant-ui/thread/timeline';
 import { UserEditComposer } from '@/components/assistant-ui/thread/user-edit-composer';
@@ -13,7 +14,7 @@ import { useI18n } from '@/i18n';
 import { notifyError } from '@/store/notifications';
 export const Thread = ({ clampToComposer = false, cwd = null, gateway = null, intro, loading, onBranchInNewChat, onCancel, onDismissError, onRestoreToMessage, sessionId = null, sessionKey }) => {
     const { t } = useI18n();
-    const copy = t.assistant.thread;
+    const copy = withStudentRestoreCopy(t.assistant.thread);
     const [restoreConfirmTarget, setRestoreConfirmTarget] = useState(null);
     const closeRestoreConfirm = useCallback(() => setRestoreConfirmTarget(null), []);
     const confirmRestore = useCallback(() => {
