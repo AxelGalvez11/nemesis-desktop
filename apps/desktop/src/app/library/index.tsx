@@ -14,6 +14,7 @@ import {
   IconFolderPlus,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconLayoutSidebarRightExpand,
   IconPaperclip,
   IconPencil,
   IconPhoto,
@@ -77,6 +78,9 @@ function countWords(value: string): number {
 }
 
 const SIDEBAR_KEY = 'nemesis.library.sidebar.v1'
+// Outline/Links rail visibility — owned here (not by NoteRail) so hiding it unmounts
+// the rail and the editor reclaims the width, exactly like the left sidebar.
+const RAIL_KEY = 'nemesis.library.rail.v1'
 // Folder-tree expansion, persisted. Folders start COLLAPSED (empty set) so a big vault
 // opens tidy; only folders the student explicitly opened stay open across sessions.
 const EXPANDED_KEY = 'nemesis.library.expanded.v1'
@@ -193,6 +197,13 @@ export function LibraryView() {
       return true
     }
   })
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      return window.localStorage.getItem(RAIL_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
   const [nav, setNavState] = useState<NavHistory>({ pos: -1, stack: [] })
   const navRef = useRef(nav)
   navRef.current = nav
@@ -209,6 +220,16 @@ export function LibraryView() {
 
     try {
       window.localStorage.setItem(SIDEBAR_KEY, open ? '1' : '0')
+    } catch {
+      // persistence is best-effort
+    }
+  }, [])
+
+  const setRail = useCallback((open: boolean) => {
+    setRailOpen(open)
+
+    try {
+      window.localStorage.setItem(RAIL_KEY, open ? '1' : '0')
     } catch {
       // persistence is best-effort
     }
@@ -973,12 +994,19 @@ export function LibraryView() {
               </div>
             ))}
             </div>
-            <div className="flex shrink-0 items-center border-l border-(--ui-stroke-quaternary) px-1.5">
+            <div className="flex shrink-0 items-center gap-0.5 border-l border-(--ui-stroke-quaternary) px-1.5">
               <Tip label={activeNote ? `Ask the agent about “${activeNote.title}”` : 'Ask the agent'}>
                 <Button aria-label="Ask the agent" onClick={askAgent} size="icon-xs" variant="ghost">
                   <IconSparkles />
                 </Button>
               </Tip>
+              {activeNote && !railOpen && (
+                <Tip label="Show note panel">
+                  <Button aria-label="Show note panel" onClick={() => setRail(true)} size="icon-xs" variant="ghost">
+                    <IconLayoutSidebarRightExpand />
+                  </Button>
+                </Tip>
+              )}
             </div>
           </div>
         )}
@@ -1058,14 +1086,20 @@ export function LibraryView() {
         )}
       </main>
 
-      {/* Outline/Links rail (notes only) */}
-      {activeNote && index && (
+      {/* Outline/Links rail (notes only) — hides like the left sidebar: fully unmounted,
+          with the reopen button living in the tab strip's right cluster. */}
+      {activeNote && index && railOpen && (
         <NoteRail
           activeNote={activeNote}
           index={index}
           notes={contents.notes}
+          onCollapse={() => setRail(false)}
           onCreateUnresolved={target => void openWikilink(target)}
           onOpenNote={note => openInPlace({ kind: 'note', note })}
+          onSearchTag={tag => {
+            setSidebar(true)
+            onSearchChange(`#${tag}`)
+          }}
           onSelectHeading={handleSelectHeading}
         />
       )}

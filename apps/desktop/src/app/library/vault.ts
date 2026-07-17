@@ -3,6 +3,7 @@
 // construction (a student can point Obsidian at the same folder). Wiki-links use the
 // Obsidian syntax family: [[Title]], [[Title|alias]], [[Title#heading]].
 // The link index built here also feeds the Graph page (node = note, edge = wikilink).
+import { keysForNote } from './links'
 
 export const VAULT_DIR = '~/Documents/Nemesis Library'
 
@@ -59,7 +60,9 @@ export function extractWikilinks(markdown: string): string[] {
   const targets: string[] = []
 
   for (const match of markdown.matchAll(WIKILINK)) {
-    const target = match[1].trim()
+    // "[[target\|alias]]" (the escaped-pipe form wikilinks take inside markdown
+    // tables) leaves a trailing backslash on the captured target — strip it.
+    const target = match[1].replace(/\\$/, '').trim()
 
     if (target && !seen.has(target.toLowerCase())) {
       seen.add(target.toLowerCase())
@@ -109,6 +112,83 @@ export function extractRelativeMdLinks(markdown: string): string[] {
   return targets
 }
 
+const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/
+// A tag starts with a letter so "#1" (a number) and "# Heading" (space) never count.
+const INLINE_TAG_RE = /(^|[\s(])#([A-Za-z][\w/-]*)/g
+
+/** Extract a note's tags (deduped, order kept): frontmatter `tags:` (inline list,
+ *  comma string, or a `- item` block) plus Obsidian-style inline #tags in the body.
+ *  Inline tags inside fenced code blocks don't count (a Python "#comment" isn't a tag). */
+export function extractTags(markdown: string): string[] {
+  const seen = new Set<string>()
+  const tags: string[] = []
+
+  const add = (raw: string) => {
+    const tag = raw.trim().replace(/^['"]|['"]$/g, '').replace(/^#/, '').trim()
+
+    if (tag && !seen.has(tag.toLowerCase())) {
+      seen.add(tag.toLowerCase())
+      tags.push(tag)
+    }
+  }
+
+  const fm = FRONTMATTER_RE.exec(markdown)
+  let body = markdown
+
+  if (fm) {
+    body = markdown.slice(fm[0].length)
+    const lines = fm[1].split('\n')
+
+    for (let i = 0; i < lines.length; i++) {
+      const match = /^tags?\s*:\s*(.*)$/i.exec(lines[i])
+
+      if (!match) {
+        continue
+      }
+
+      const inline = match[1].trim().replace(/^\[|\]$/g, '')
+
+      if (inline) {
+        inline.split(',').forEach(add)
+      } else {
+        for (let j = i + 1; j < lines.length; j++) {
+          const item = /^\s*-\s*(.+)$/.exec(lines[j])
+
+          if (!item) {
+            break
+          }
+
+          add(item[1])
+        }
+      }
+
+      break
+    }
+  }
+
+  let fenceChar: null | string = null
+
+  for (const line of body.split('\n')) {
+    const fence = FENCE.exec(line.trim())
+
+    if (fence) {
+      fenceChar = fenceChar === fence[1][0] ? null : (fenceChar ?? fence[1][0])
+
+      continue
+    }
+
+    if (fenceChar) {
+      continue
+    }
+
+    for (const match of line.matchAll(INLINE_TAG_RE)) {
+      add(match[2])
+    }
+  }
+
+  return tags
+}
+
 export interface NoteHeading {
   /** ATX heading level — the Outline tab is a table of contents for h1–h3 only. */
   level: 1 | 2 | 3
@@ -150,9 +230,19 @@ export function extractHeadings(markdown: string): NoteHeading[] {
 }
 
 /** Build the link/backlink index. Pure. Links come from both [[wikilinks]] and
- *  relative ".md" markdown links; backlinks are simply the reverse of that graph. */
+ *  relative ".md" markdown links; backlinks are simply the reverse of that graph.
+ *  Targets resolve by the SAME rule the editor styles/opens them with (links.ts's
+ *  keysForNote): bare title OR folder-qualified "folder/Title" — an index that only
+ *  knew bare titles dropped folder-qualified links and mislabeled them unresolved. */
 export function buildIndex(notes: VaultNote[]): VaultIndex {
-  const byLower = new Map(notes.map(note => [note.title.toLowerCase(), note.title]))
+  const byLower = new Map<string, string>()
+
+  for (const note of notes) {
+    for (const key of keysForNote(note)) {
+      byLower.set(key, note.title)
+    }
+  }
+
   const links = new Map<string, string[]>()
   const backlinks = new Map<string, string[]>(notes.map(note => [note.title, []]))
 

@@ -9,7 +9,7 @@ function normalizeWikilinkKey(value) {
 /** The lookup keys a note is reachable by: its bare title, plus its folder-qualified
  *  "folder/Title" path when it's not a root note (matches the two forms the agent and the
  *  editor both write — see vault.ts's SEED_NOTES and index.tsx's openWikilink). */
-function keysForNote(note) {
+export function keysForNote(note) {
     const keys = [normalizeWikilinkKey(note.title)];
     if (note.folder) {
         keys.push(normalizeWikilinkKey(`${note.folder}/${note.title}`));

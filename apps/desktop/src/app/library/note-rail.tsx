@@ -1,25 +1,28 @@
 // NoteRail — the right sidebar for the active note. Outline is a table of contents
 // parsed from its markdown headers (h1–h3); Links is its outgoing [[wikilinks]] +
-// relative .md links plus the notes that link back to it. Collapses to a thin strip,
-// Obsidian-style, with the collapsed state remembered across sessions.
+// relative .md links plus the notes that link back to it, and its #tags. Show/hide
+// works like the LEFT sidebar: the parent (index.tsx) owns the open state and
+// unmounts the rail entirely, so the editor reclaims the full width.
 import {
+  IconArrowLeft,
+  IconArrowUpRight,
+  IconFileText,
+  IconHash,
   IconLayoutSidebarRightCollapse,
-  IconLayoutSidebarRightExpand,
   IconLink,
-  IconListTree
+  IconListTree,
+  IconPlus
 } from '@tabler/icons-react'
-import { useMemo, useState } from 'react'
+import { type ReactNode, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SegmentedControl, type SegmentedControlOption } from '@/components/ui/segmented-control'
 import { Tip } from '@/components/ui/tooltip'
-import { persistBoolean, storedBoolean } from '@/lib/storage'
 import { cn } from '@/lib/utils'
 
-import { extractHeadings, extractWikilinks, type NoteHeading, type VaultIndex, type VaultNote } from './vault'
-
-const COLLAPSED_KEY = 'hermes.desktop.library.rightRailCollapsed'
+import { buildResolvableTitleSet, isWikilinkResolved } from './links'
+import { extractHeadings, extractTags, extractWikilinks, type NoteHeading, type VaultIndex, type VaultNote } from './vault'
 
 type RailTab = 'outline' | 'links'
 
@@ -34,38 +37,43 @@ export interface NoteRailProps {
   activeNote: VaultNote
   index: VaultIndex
   notes: VaultNote[]
+  /** Hide the rail — the parent unmounts it and shows a reopen button in the tab strip,
+   *  mirroring how the left file-list sidebar collapses. */
+  onCollapse: () => void
   /** Create-and-open the note an unresolved [[wikilink]] target points at — clicking an
-   *  Unresolved pill is the same "make this link real" affordance as clicking the link
+   *  Unresolved row is the same "make this link real" affordance as clicking the link
    *  itself in the editor (index.tsx's openWikilink). */
   onCreateUnresolved: (target: string) => void
   onOpenNote: (note: VaultNote) => void
+  /** Filter the library by a tag (fills the search box with "#tag"). */
+  onSearchTag: (tag: string) => void
   onSelectHeading: (line: number) => void
 }
 
-export function NoteRail({ activeNote, index, notes, onCreateUnresolved, onOpenNote, onSelectHeading }: NoteRailProps) {
-  const [collapsed, setCollapsed] = useState(() => storedBoolean(COLLAPSED_KEY, false))
+export function NoteRail({
+  activeNote,
+  index,
+  notes,
+  onCollapse,
+  onCreateUnresolved,
+  onOpenNote,
+  onSearchTag,
+  onSelectHeading
+}: NoteRailProps) {
   const [tab, setTab] = useState<RailTab>('outline')
 
-  const toggleCollapsed = () => {
-    setCollapsed(current => {
-      const next = !current
-      persistBoolean(COLLAPSED_KEY, next)
-
-      return next
-    })
-  }
-
   const headings = useMemo(() => extractHeadings(activeNote.content), [activeNote.content])
+  const tags = useMemo(() => extractTags(activeNote.content), [activeNote.content])
   const outgoing = index.links.get(activeNote.title) ?? []
   const incoming = index.backlinks.get(activeNote.title) ?? []
 
-  const unresolved = useMemo(
-    () =>
-      extractWikilinks(activeNote.content).filter(
-        target => !notes.some(note => note.title.toLowerCase() === target.toLowerCase())
-      ),
-    [activeNote.content, notes]
-  )
+  // Same folder-aware resolution rule the editor uses — a [[folder/Title]] link to a
+  // real note is resolved, not "unresolved with a path for a name".
+  const unresolved = useMemo(() => {
+    const resolvable = buildResolvableTitleSet(notes)
+
+    return extractWikilinks(activeNote.content).filter(target => !isWikilinkResolved(target, resolvable))
+  }, [activeNote.content, notes])
 
   const openByTitle = (title: string) => {
     const note = notes.find(n => n.title === title)
@@ -76,69 +84,96 @@ export function NoteRail({ activeNote, index, notes, onCreateUnresolved, onOpenN
   }
 
   return (
-    <aside
-      className={cn(
-        'hidden shrink-0 flex-col border-l border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) lg:flex',
-        collapsed ? 'w-10' : 'w-64'
-      )}
-    >
+    <aside className="hidden w-64 shrink-0 flex-col border-l border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) lg:flex">
       <div className="flex h-(--titlebar-height) shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) px-2">
-        {!collapsed && <SegmentedControl onChange={setTab} options={RAIL_TABS} value={tab} />}
-        <Tip label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+        <SegmentedControl onChange={setTab} options={RAIL_TABS} value={tab} />
+        <Tip label="Hide note panel">
           <Button
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label="Hide note panel"
             className="ml-auto shrink-0 transition-transform duration-200 ease-out active:scale-[0.98]"
-            onClick={toggleCollapsed}
+            onClick={onCollapse}
             size="icon-xs"
             variant="ghost"
           >
-            {collapsed ? <IconLayoutSidebarRightExpand /> : <IconLayoutSidebarRightCollapse />}
+            <IconLayoutSidebarRightCollapse />
           </Button>
         </Tip>
       </div>
 
-      {!collapsed && (
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="flex flex-col gap-3 px-3 pb-4 pt-3">
-            {tab === 'outline' ? (
-              <OutlineList headings={headings} onSelect={onSelectHeading} />
-            ) : (
-              <>
-                <LinkGroup
-                  emptyLabel="Write [[Note title]] or a relative .md link to connect ideas."
-                  onOpen={openByTitle}
-                  title="Links"
-                  titles={outgoing}
-                />
-                <LinkGroup emptyLabel="Nothing links here yet." onOpen={openByTitle} title="Backlinks" titles={incoming} />
-                {unresolved.length > 0 && (
-                  <div className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-                    <div className="mb-2 flex items-center justify-between">
-                      <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">
-                        Unresolved
-                      </h3>
-                      <span className="text-[0.65rem] tabular-nums text-(--ui-text-quaternary)">{unresolved.length}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {unresolved.map(target => (
-                        <Tip key={target} label={`Create “${target}”`}>
-                          <button
-                            className="rounded-full border border-dashed border-(--ui-stroke-secondary) px-2.5 py-1 text-[0.6875rem] text-muted-foreground transition-[color,border-color,background-color] duration-200 ease-out hover:border-(--theme-primary)/50 hover:bg-(--ui-bg-primary) hover:text-foreground active:scale-[0.98]"
-                            onClick={() => onCreateUnresolved(target)}
-                            type="button"
-                          >
-                            {target}
-                          </button>
-                        </Tip>
-                      ))}
-                    </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex flex-col gap-4 px-3 pb-4 pt-3">
+          {tab === 'outline' ? (
+            <OutlineList headings={headings} onSelect={onSelectHeading} />
+          ) : (
+            <>
+              <RailSection
+                count={outgoing.length}
+                emptyLabel="Write [[Note title]] or a relative .md link to connect ideas."
+                title="Links"
+              >
+                {outgoing.map(title => (
+                  <NoteRow icon={<IconArrowUpRight size={13} />} key={title} label={title} onClick={() => openByTitle(title)} />
+                ))}
+              </RailSection>
+
+              <RailSection count={incoming.length} emptyLabel="Nothing links here yet." title="Backlinks">
+                {incoming.map(title => (
+                  <NoteRow icon={<IconArrowLeft size={13} />} key={title} label={title} onClick={() => openByTitle(title)} />
+                ))}
+              </RailSection>
+
+              {tags.length > 0 && (
+                <RailSection count={tags.length} emptyLabel="" title="Tags">
+                  <div className="flex flex-wrap gap-1.5 px-1 pt-0.5">
+                    {tags.map(tag => (
+                      <Tip key={tag} label={`Show notes tagged #${tag}`}>
+                        <button
+                          className="flex items-center gap-0.5 rounded-md bg-(--ui-bg-quaternary) px-1.5 py-0.5 text-[0.6875rem] font-medium text-(--ui-text-secondary) transition-colors duration-200 ease-out hover:bg-(--ui-row-hover-background) hover:text-foreground active:scale-[0.98]"
+                          onClick={() => onSearchTag(tag)}
+                          type="button"
+                        >
+                          <IconHash className="opacity-55" size={11} />
+                          {tag}
+                        </button>
+                      </Tip>
+                    ))}
                   </div>
-                )}
-              </>
-            )}
-          </div>
-        </ScrollArea>
-      )}
+                </RailSection>
+              )}
+
+              {unresolved.length > 0 && (
+                <RailSection count={unresolved.length} emptyLabel="" title="Unresolved">
+                  {unresolved.map(target => {
+                    const slash = target.lastIndexOf('/')
+                    const name = slash >= 0 ? target.slice(slash + 1) : target
+                    const folder = slash >= 0 ? target.slice(0, slash) : ''
+
+                    return (
+                      <Tip key={target} label={`Create “${target}”`}>
+                        <button
+                          className="group flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out hover:bg-(--ui-row-hover-background) active:scale-[0.98]"
+                          onClick={() => onCreateUnresolved(target)}
+                          type="button"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[0.8125rem] text-muted-foreground group-hover:text-foreground">
+                              {name}
+                            </span>
+                            {folder && (
+                              <span className="block truncate text-[0.625rem] text-(--ui-text-quaternary)">{folder}</span>
+                            )}
+                          </span>
+                          <IconPlus className="shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-60" size={13} />
+                        </button>
+                      </Tip>
+                    )
+                  })}
+                </RailSection>
+              )}
+            </>
+          )}
+        </div>
+      </ScrollArea>
     </aside>
   )
 }
@@ -175,44 +210,48 @@ function OutlineList({ headings, onSelect }: { headings: NoteHeading[]; onSelect
   )
 }
 
-function LinkGroup({
+/** One titled group in the Links tab — heading + count, then full-width rows (not pills:
+ *  long note titles and folder paths truncate instead of overflowing the rail). */
+function RailSection({
+  children,
+  count,
   emptyLabel,
-  onOpen,
-  title,
-  titles
+  title
 }: {
+  children: ReactNode
+  count: number
   emptyLabel: string
-  onOpen: (title: string) => void
   title: string
-  titles: string[]
 }) {
   return (
-    <div className="rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-card) p-3 shadow-[inset_0_1px_0_var(--ui-stroke-quaternary)]">
-      <div className="mb-2.5 flex items-center justify-between gap-2">
+    <div className="min-w-0">
+      <div className="mb-1 flex items-center justify-between gap-2 px-2">
         <h3 className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-muted-foreground">{title}</h3>
-        <span className="rounded-full bg-(--ui-bg-quaternary) px-1.5 py-0.5 text-[0.625rem] font-medium tabular-nums text-(--ui-text-tertiary)">
-          {titles.length}
-        </span>
+        <span className="text-[0.65rem] tabular-nums text-(--ui-text-quaternary)">{count}</span>
       </div>
-      {titles.length ? (
-        <div className="flex flex-wrap gap-1.5">
-          {titles.map(target => (
-            <button
-              className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2.5 py-1 text-[0.6875rem] text-(--ui-text-secondary) transition-[transform,color,border-color,background-color] duration-200 ease-out hover:border-(--theme-primary)/40 hover:bg-(--ui-bg-primary) hover:text-foreground active:scale-[0.98]"
-              key={target}
-              onClick={() => onOpen(target)}
-              type="button"
-            >
-              {target}
-            </button>
-          ))}
-        </div>
+      {count > 0 ? (
+        <div className="flex flex-col gap-0.5">{children}</div>
       ) : (
-        <div className="rounded-lg border border-dashed border-(--ui-stroke-tertiary) px-3 py-3">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.09em] text-(--ui-text-quaternary)">None yet</p>
-          <p className="mt-1 text-[0.6875rem] leading-relaxed text-muted-foreground">{emptyLabel}</p>
-        </div>
+        <p className="px-2 py-1 text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">{emptyLabel}</p>
       )}
     </div>
+  )
+}
+
+function NoteRow({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      className="group flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out hover:bg-(--ui-row-hover-background) active:scale-[0.98]"
+      onClick={onClick}
+      type="button"
+    >
+      <span className="shrink-0 text-(--ui-text-quaternary) transition-colors duration-200 group-hover:text-(--ui-text-secondary)">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-(--ui-text-secondary) transition-colors duration-200 group-hover:text-foreground">
+        {label}
+      </span>
+      <IconFileText className="shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-40" size={13} />
+    </button>
   )
 }
