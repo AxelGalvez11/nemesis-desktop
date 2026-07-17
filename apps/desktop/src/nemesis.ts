@@ -21,8 +21,11 @@ export const STUDENT_HIDDEN_PALETTE: ReadonlySet<string> = new Set(['nav-termina
 // 2026-07-14: 'connections' hidden — the page confused testers; students now hand their
 // school/webmail addresses to the agent in chat and it writes portals.json itself
 // (school-portal skill). The page code stays for when a settings surface earns it back.
+// 2026-07-16: 'phone' added — pair the iPhone app for E2EE read-only library sync
+// (phone-sync-settings.tsx; spec: nemesis-phone-readonly-sync-2026-07.md).
 export const STUDENT_SETTINGS_KEEP: ReadonlySet<string> = new Set([
   'usage',
+  'phone',
   'keybinds',
   'config:appearance',
   'config:chat',

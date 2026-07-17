@@ -18,6 +18,7 @@ import {
   Link,
   RefreshCw,
   Settings2,
+  Smartphone,
   Upload,
   Wrench,
   Zap
@@ -40,6 +41,7 @@ import { SECTIONS } from './constants'
 import { GatewaySettings } from './gateway-settings'
 import { KEYS_VIEWS, KeysSettings, type KeysView } from './keys-settings'
 import { NotificationsSettings } from './notifications-settings'
+import { PhoneSyncSettings } from './phone-sync-settings'
 import { PROVIDER_VIEWS, ProvidersSettings, type ProviderView } from './providers-settings'
 import { SessionsSettings } from './sessions-settings'
 import type { SettingsPageProps, SettingsView as SettingsViewId } from './types'
@@ -47,6 +49,7 @@ import { UsageSettings } from './usage-settings'
 
 const SETTINGS_VIEWS_ALL: readonly SettingsViewId[] = [
   'usage',
+  'phone',
   'connections',
   ...SECTIONS.map(s => `config:${s.id}` as SettingsViewId),
   'providers',
@@ -151,6 +154,13 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
       id: 'usage',
       label: 'Account & usage',
       onSelect: () => setActiveView('usage')
+    },
+    {
+      active: activeView === 'phone',
+      icon: Smartphone,
+      id: 'phone',
+      label: 'Phone',
+      onSelect: () => setActiveView('phone')
     },
     {
       active: activeView === 'connections',
@@ -306,6 +316,8 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
         <OverlayMain className="overflow-y-auto overscroll-contain px-0 pb-0">
           {activeView === 'usage' ? (
             <UsageSettings />
+          ) : activeView === 'phone' ? (
+            <PhoneSyncSettings />
           ) : activeView === 'connections' ? (
             <ConnectionsSettings onClose={onClose} />
           ) : activeView === 'config:appearance' ? (
