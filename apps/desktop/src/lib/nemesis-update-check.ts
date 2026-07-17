@@ -10,8 +10,6 @@ const RELEASES_LATEST_API = 'https://api.github.com/repos/AxelGalvez11/nemesis-d
 // builds keep working if release hosting ever moves.
 export const UPDATE_DOWNLOAD_URL = 'https://app.enternemesis.com/api/download/mac'
 
-export const UPDATE_DISMISS_STORAGE_KEY = 'nemesis.update.dismissed'
-
 export function normalizeVersion(version: string): string {
   return version.trim().replace(/^[vV]/, '')
 }

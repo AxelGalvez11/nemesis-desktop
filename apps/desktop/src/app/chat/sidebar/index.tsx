@@ -5,6 +5,7 @@ import type * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { PlatformAvatar } from '@/app/messaging/platform-icon'
+import { NemesisRelaunchCard } from '@/components/nemesis-relaunch-card'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
@@ -1468,6 +1469,10 @@ function StudentSidebarFooter({ onOpenSettings }: StudentSidebarFooterProps) {
 
   return (
     <SidebarFooter className="sticky bottom-0 shrink-0 gap-1 border-t border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2.5 py-2">
+      {/* Update affordance lives HERE, above the account row (not a floating
+          toast): silent background download, then one undismissable card —
+          see nemesis-relaunch-card.tsx. */}
+      <NemesisRelaunchCard />
       {/* One control, one destination: the account row IS the settings opener
           (owner ask — a separate gear next to it doubled the same journey).
           Account/plan details live inside Settings, so nothing is lost. */}
