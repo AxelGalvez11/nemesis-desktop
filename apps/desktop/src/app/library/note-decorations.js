@@ -511,11 +511,13 @@ function buildDecorations(view, onOpen, isResolved, getImageContext) {
     const mathInline = [];
     for (const { from, to } of view.visibleRanges) {
         const text = doc.sliceString(from, to);
-        // Code wins over math: a `$` inside `inline code` or a ``` fenced ``` block is literal, not
-        // a math delimiter (critical for shell/code notes like `if [ "$a" = "$b" ]`). Ranges are
-        // collected during the syntax-tree pass below, then used to reject math candidates.
-        const codeRanges = [];
-        const insideCode = (pos) => codeRanges.some(range => pos >= range.from && pos < range.to);
+        // Ranges an inline `$…$` must NOT fire inside: code (a `$` in `inline code`/a ``` fence is
+        // literal — think `if [ "$a" = "$b" ]`), plus wikilinks and images whose alias/label holds a
+        // formula (`[[ACE|$K_i$]]`, `![$x$](d.png)`). Each of those emits its OWN replace over the whole
+        // construct; a math replace nested inside would be a second, overlapping replace and crash CM.
+        // Collected across the tree pass + regex scans below; the math scan runs LAST so all are known.
+        const protectedRanges = [];
+        const insideProtected = (pos) => protectedRanges.some(range => pos >= range.from && pos < range.to);
         syntaxTree(view.state).iterate({
             enter: node => {
                 const type = node.name;
@@ -547,12 +549,12 @@ function buildDecorations(view, onOpen, isResolved, getImageContext) {
                     return;
                 }
                 if (type === 'InlineCode') {
-                    codeRanges.push({ from: node.from, to: node.to });
+                    protectedRanges.push({ from: node.from, to: node.to });
                     decorations.push(Decoration.mark({ class: 'cm-np-code' }).range(node.from, node.to));
                     return;
                 }
                 if (type === 'FencedCode') {
-                    codeRanges.push({ from: node.from, to: node.to });
+                    protectedRanges.push({ from: node.from, to: node.to });
                     const first = doc.lineAt(node.from).number;
                     const last = doc.lineAt(node.to).number;
                     for (let n = first; n <= last; n++) {
@@ -601,6 +603,7 @@ function buildDecorations(view, onOpen, isResolved, getImageContext) {
                 if (type === 'Image') {
                     // Standard "![alt](path)" — Obsidian's "![[name]]" embed is regex-matched below,
                     // same reason wikilinks are (lezer's grammar doesn't know that syntax).
+                    protectedRanges.push({ from: node.from, to: node.to });
                     if (!selectionTouches(node.from, node.to)) {
                         const urlNode = node.node.getChild('URL');
                         const rawUrl = urlNode ? doc.sliceString(urlNode.from, urlNode.to) : '';
@@ -624,20 +627,11 @@ function buildDecorations(view, onOpen, isResolved, getImageContext) {
             from,
             to
         });
-        // Inline math (`$…$`) — collected after the tree pass so codeRanges is populated. The
-        // widgets are appended (and colliding markdown decos dropped) after the loop; see below.
-        for (const match of text.matchAll(INLINE_MATH_RE)) {
-            const start = from + (match.index ?? 0);
-            const end = start + match[0].length;
-            if (insideCode(start) || !MATH_SIGNAL_RE.test(match[1]) || selectionTouches(start, end)) {
-                continue;
-            }
-            mathInline.push({ from: start, tex: match[1], to: end });
-        }
         // Wikilinks by regex — lezer's markdown grammar doesn't know Obsidian's [[...]].
         for (const match of text.matchAll(WIKILINK_RE)) {
             const start = from + (match.index ?? 0);
             const end = start + match[0].length;
+            protectedRanges.push({ from: start, to: end });
             // A "\|"-escaped alias pipe (table syntax) leaves a trailing backslash on the
             // captured target — strip it so the link resolves to the real note.
             const target = match[1].replace(/\\$/, '').trim();
@@ -658,6 +652,7 @@ function buildDecorations(view, onOpen, isResolved, getImageContext) {
             const start = from + (match.index ?? 0);
             const end = start + match[0].length;
             const name = match[1].trim();
+            protectedRanges.push({ from: start, to: end });
             if (!name || selectionTouches(start, end)) {
                 continue;
             }
@@ -665,6 +660,18 @@ function buildDecorations(view, onOpen, isResolved, getImageContext) {
             if (src) {
                 decorations.push(Decoration.replace({ widget: new ImageWidget(src, name) }).range(start, end));
             }
+        }
+        // Inline math (`$…$`) — LAST, so every protected range (code, wikilinks, images) is known.
+        // Skipped inside those (their replace would collide) and inside `code`; bare numbers/currency
+        // fail the signal check. Widgets are appended (and colliding markdown decos dropped) after the
+        // loop; see below.
+        for (const match of text.matchAll(INLINE_MATH_RE)) {
+            const start = from + (match.index ?? 0);
+            const end = start + match[0].length;
+            if (insideProtected(start) || !MATH_SIGNAL_RE.test(match[1]) || selectionTouches(start, end)) {
+                continue;
+            }
+            mathInline.push({ from: start, tex: match[1], to: end });
         }
     }
     // Tables AND callouts render via separate StateFields (below) — CodeMirror forbids

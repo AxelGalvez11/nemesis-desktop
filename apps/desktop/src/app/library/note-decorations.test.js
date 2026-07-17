@@ -63,6 +63,11 @@ describe('note editor extensions mounted together (smoke test)', () => {
         // Currency + a bare number: valid delimiters but no math signal, so both stay literal text.
         'Currency $5 and $10 and $5$ stay literal.',
         '',
+        // Enclosing case: a wikilink whose alias holds a formula. The link emits a replace over the
+        // whole [[…]] (start OUTSIDE the $…$); math must be suppressed inside it or the two replaces
+        // overlap and crash CM at construction. (Images use the same protected-range guard.)
+        'Alias math: [[Pharmacology|$K_a$]] and bare [[$x$ notes]].',
+        '',
         // A "$" inside a code fence must NOT render as math (code wins).
         '```bash',
         'if [ "$a" = "$b" ]; then echo $x; fi',
@@ -211,8 +216,9 @@ describe('note editor extensions mounted together (smoke test)', () => {
     });
     it('renders inline "$…$" as KaTeX (underscores and bold-nested math do not crash the mount)', () => {
         const { view } = mount(target => target === 'Real Note');
-        // Two real inline equations: "x_1 + y_2 = z" and the one nested inside **bold**.
-        const inline = [...view.dom.querySelectorAll('.cm-np-math-inline')];
+        // Two real inline equations in the body: "x_1 + y_2 = z" and the one nested inside **bold**
+        // (the callout body has its own inline math, asserted separately, so exclude it here).
+        const inline = [...view.dom.querySelectorAll('.cm-np-math-inline')].filter(el => !el.closest('.cm-np-callout'));
         expect(inline.length).toBe(2);
         expect(inline.every(el => el.querySelector('.katex') !== null)).toBe(true);
         view.destroy();
@@ -237,6 +243,15 @@ describe('note editor extensions mounted together (smoke test)', () => {
         // No inline-math widget swallowed part of the shell line.
         const maths = [...view.dom.querySelectorAll('.cm-np-math')];
         expect(maths.every(el => !(el.textContent ?? '').includes('a" = "'))).toBe(true);
+        view.destroy();
+    });
+    it('does not crash when a wikilink alias contains inline math (enclosing replace)', () => {
+        const { view } = mount(target => target === 'Pharmacology');
+        // The aliased link renders; the inner "$K_a$" is NOT a separate math widget inside it (which
+        // would overlap the link's replace and crash CM). Mounting without throwing is the real check.
+        const aliased = [...view.dom.querySelectorAll('.cm-np-wikilink')].find(el => (el.textContent ?? '').includes('K_a'));
+        expect(aliased).toBeDefined();
+        expect(view.dom.querySelector('.cm-np-wikilink .cm-np-math-inline')).toBeNull();
         view.destroy();
     });
 });
