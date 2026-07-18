@@ -29,6 +29,13 @@ export const noteMarkdown = markdown({ base: markdownLanguage, extensions: [Stri
 const WIKILINK_RE = /(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]/g
 const IMAGE_EMBED_RE = /!\[\[([^\]|#\n]+)(?:[^\]\n]*)?\]\]/g
 
+// Obsidian callout header: `> [!type]` with an optional fold char (`-` = collapsed by
+// default, `+`/none = expanded) and an optional title. Subsequent `>` lines are the body.
+// This is the "hide the worked solution until you've attempted it" primitive: the agent
+// writes `> [!solution]- Steps` and the note renders it as a fold-to-reveal card.
+const CALLOUT_HEAD_RE = /^\s*>\s*\[!([A-Za-z][\w-]*)\]([-+]?)\s?(.*)$/
+const QUOTE_LINE_RE = /^\s*>/
+
 /** Context the editor supplies for resolving image sources — the note's own folder (for
  *  `![alt](relative/path)`) and the vault's file list (for `![[name]]` embeds, which Obsidian
  *  resolves by filename across the whole vault, not just the current folder). */
@@ -291,6 +298,66 @@ class TableWidget extends WidgetType {
   }
 }
 
+/** Obsidian callout → a fold-to-reveal card. The summary (type or title) is always shown;
+ *  the body collapses when the header uses `-`. Native <details> owns the open/close so no
+ *  CodeMirror state is needed; eq() keeps the same DOM across rebuilds so a user's toggle
+ *  survives edits elsewhere in the note. ignoreEvent lets the summary click through to the
+ *  browser's own fold rather than the editor. */
+class CalloutWidget extends WidgetType {
+  constructor(
+    readonly type: string,
+    readonly title: string,
+    readonly collapsed: boolean,
+    readonly body: readonly string[],
+    readonly onOpen: (target: string) => void,
+    readonly isResolved: (target: string) => boolean
+  ) {
+    super()
+  }
+
+  eq(other: CalloutWidget): boolean {
+    return (
+      this.type === other.type &&
+      this.title === other.title &&
+      this.collapsed === other.collapsed &&
+      this.body.length === other.body.length &&
+      this.body.every((line, i) => line === other.body[i])
+    )
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = `cm-np-callout cm-np-callout-${this.type}`
+
+    const details = document.createElement('details')
+    details.open = !this.collapsed
+
+    const summary = document.createElement('summary')
+    summary.className = 'cm-np-callout-title'
+    summary.textContent = this.title || `${this.type.charAt(0).toUpperCase()}${this.type.slice(1)}`
+    details.appendChild(summary)
+
+    const bodyEl = document.createElement('div')
+    bodyEl.className = 'cm-np-callout-body'
+
+    for (const line of this.body) {
+      const row = document.createElement('div')
+      row.className = 'cm-np-callout-line'
+      appendInlineMarkdown(row, line, this.onOpen, this.isResolved)
+      bodyEl.appendChild(row)
+    }
+
+    details.appendChild(bodyEl)
+    wrap.appendChild(details)
+
+    return wrap
+  }
+}
+
 /** GFM table blocks in the doc: a header row, a `|---|` separator, then body rows.
  *  Returned as whole-line ranges so the caller can block-replace or skip them. */
 function findTableBlocks(doc: EditorView['state']['doc']): { from: number; to: number; header: string[]; rows: string[][] }[] {
@@ -320,6 +387,58 @@ function findTableBlocks(doc: EditorView['state']['doc']): { from: number; to: n
     }
 
     blocks.push({ from: header.from, header: tableCells(header.text), rows, to: doc.line(last).to })
+    n = last
+  }
+
+  return blocks
+}
+
+interface CalloutBlock {
+  from: number
+  to: number
+  type: string
+  title: string
+  collapsed: boolean
+  body: string[]
+}
+
+/** Obsidian callout blocks: a `> [!type]±? title` header line plus the run of `>` lines
+ *  under it. Whole-line ranges so the caller can block-replace them (exported for tests). */
+export function findCalloutBlocks(doc: EditorView['state']['doc']): CalloutBlock[] {
+  const blocks: CalloutBlock[] = []
+  const total = doc.lines
+
+  for (let n = 1; n <= total; n++) {
+    const head = doc.line(n)
+    const match = CALLOUT_HEAD_RE.exec(head.text)
+
+    if (!match) {
+      continue
+    }
+
+    const body: string[] = []
+    let last = n
+
+    for (let m = n + 1; m <= total; m++) {
+      const line = doc.line(m)
+
+      if (!QUOTE_LINE_RE.test(line.text)) {
+        break
+      }
+
+      // Strip the leading `>` and one optional space so the body reads as plain markdown.
+      body.push(line.text.replace(/^\s*>\s?/, ''))
+      last = m
+    }
+
+    blocks.push({
+      body,
+      collapsed: match[2] === '-',
+      from: head.from,
+      title: match[3].trim(),
+      to: doc.line(last).to,
+      type: match[1].toLowerCase()
+    })
     n = last
   }
 
@@ -550,14 +669,16 @@ function buildDecorations(
     }
   }
 
-  // Tables render via a separate StateField (tableField below) — CodeMirror forbids
+  // Tables AND callouts render via separate StateFields (below) — CodeMirror forbids
   // block-replace-across-lines decorations from a ViewPlugin. Here we only DROP the
-  // inline decorations that fall inside a rendered table block so they don't collide
-  // with the StateField's block widget.
-  const renderedTables = findTableBlocks(doc).filter(block => !selectionTouches(block.from, block.to))
+  // inline/line decorations that fall inside a rendered block so they don't collide
+  // with the StateField's block widget (e.g. the per-line quote styling on callout lines).
+  const renderedBlocks = [...findTableBlocks(doc), ...findCalloutBlocks(doc)].filter(
+    block => !selectionTouches(block.from, block.to)
+  )
 
-  if (renderedTables.length > 0) {
-    const inRendered = (pos: number) => renderedTables.some(block => pos >= block.from && pos <= block.to)
+  if (renderedBlocks.length > 0) {
+    const inRendered = (pos: number) => renderedBlocks.some(block => pos >= block.from && pos <= block.to)
 
     return Decoration.set(decorations.filter(range => !inRendered(range.from)), true)
   }
@@ -602,6 +723,48 @@ function buildTableDecorations(
           block.from,
           block.to
         )
+      )
+    }
+  }
+
+  return Decoration.set(ranges, true)
+}
+
+/** Callout block-replace decorations. Same StateField requirement as tables (block
+ *  decorations across line breaks can't come from a ViewPlugin). The caret entering the
+ *  callout reverts it to raw `> [!type]` markdown for editing. */
+export function calloutExtension(
+  onOpen: (target: string) => void,
+  isResolved: (target: string) => boolean
+): Extension {
+  const build = (state: EditorState) => buildCalloutDecorations(state, onOpen, isResolved)
+
+  return StateField.define<DecorationSet>({
+    create: build,
+    provide: field => EditorView.decorations.from(field),
+    update(value, tr) {
+      return tr.docChanged || tr.selection ? build(tr.state) : value
+    }
+  })
+}
+
+function buildCalloutDecorations(
+  state: EditorState,
+  onOpen: (target: string) => void,
+  isResolved: (target: string) => boolean
+): DecorationSet {
+  const doc = state.doc
+  const ranges: Range<Decoration>[] = []
+
+  for (const block of findCalloutBlocks(doc)) {
+    const touched = state.selection.ranges.some(r => r.to >= block.from && r.from <= block.to)
+
+    if (!touched) {
+      ranges.push(
+        Decoration.replace({
+          block: true,
+          widget: new CalloutWidget(block.type, block.title, block.collapsed, block.body, onOpen, isResolved)
+        }).range(block.from, block.to)
       )
     }
   }
@@ -751,6 +914,38 @@ export const noteTheme = EditorView.theme({
   '.cm-np-table tbody tr:nth-child(even)': {
     backgroundColor: 'color-mix(in srgb, var(--ui-bg-quaternary) 45%, transparent)'
   },
+  '.cm-np-callout': {
+    backgroundColor: 'color-mix(in srgb, var(--theme-primary) 5%, var(--ui-bg-quaternary))',
+    border: '1px solid var(--ui-stroke-tertiary)',
+    borderLeft: '3px solid var(--theme-primary)',
+    borderRadius: '8px',
+    margin: '0.7em 0',
+    overflow: 'hidden'
+  },
+  '.cm-np-callout summary': {
+    color: 'var(--theme-primary)',
+    cursor: 'pointer',
+    fontWeight: '650',
+    letterSpacing: '0.01em',
+    listStyle: 'none',
+    padding: '0.5em 0.85em',
+    userSelect: 'none'
+  },
+  '.cm-np-callout summary::-webkit-details-marker': { display: 'none' },
+  '.cm-np-callout summary::before': {
+    content: '"▸"',
+    display: 'inline-block',
+    fontSize: '0.85em',
+    marginRight: '0.55em',
+    transition: 'transform 120ms ease'
+  },
+  '.cm-np-callout details[open] summary::before': { transform: 'rotate(90deg)' },
+  '.cm-np-callout-body': {
+    borderTop: '1px solid var(--ui-stroke-quaternary)',
+    color: 'var(--ui-text-secondary)',
+    padding: '0.55em 0.85em 0.7em'
+  },
+  '.cm-np-callout-line': { minHeight: '1.2em' },
   '.cm-tooltip.cm-tooltip-autocomplete': {
     backgroundColor: 'var(--ui-bg-elevated)',
     border: '1px solid var(--ui-stroke-secondary)',

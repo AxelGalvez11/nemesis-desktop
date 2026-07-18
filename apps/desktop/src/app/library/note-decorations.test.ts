@@ -8,7 +8,16 @@ import { EditorView } from '@codemirror/view'
 import { describe, expect, it } from 'vitest'
 
 import type { ImageContext } from './note-decorations'
-import { isTaskChecked, livePreview, noteMarkdown, noteTheme, tableExtension, toggleTaskChar } from './note-decorations'
+import {
+  calloutExtension,
+  findCalloutBlocks,
+  isTaskChecked,
+  livePreview,
+  noteMarkdown,
+  noteTheme,
+  tableExtension,
+  toggleTaskChar
+} from './note-decorations'
 
 describe('isTaskChecked', () => {
   it('is true for "[x]" and "[X]"', () => {
@@ -56,6 +65,10 @@ describe('note editor extensions mounted together (smoke test)', () => {
     '| Drug | Class |',
     '|------|-------|',
     '| **Lisinopril** | [[Pharmacology/ACE inhibitors\\|ACE inhibitors]] |',
+    '',
+    '> [!solution]- Worked answer',
+    '> Step 1: **isolate** x',
+    '> Step 2: see [[Real Note]]',
     ''
   ].join('\n')
 
@@ -77,7 +90,13 @@ describe('note editor extensions mounted together (smoke test)', () => {
       parent: host,
       state: EditorState.create({
         doc,
-        extensions: [noteMarkdown, tableExtension(onOpen, isResolved), livePreview(onOpen, isResolved, () => imageContext), noteTheme]
+        extensions: [
+          noteMarkdown,
+          tableExtension(onOpen, isResolved),
+          calloutExtension(onOpen, isResolved),
+          livePreview(onOpen, isResolved, () => imageContext),
+          noteTheme
+        ]
       })
     })
 
@@ -223,5 +242,50 @@ describe('note editor extensions mounted together (smoke test)', () => {
     expect(opened).toEqual(['Pharmacology/ACE inhibitors'])
 
     view.destroy()
+  })
+
+  it('renders a "[!solution]-" callout as a collapsed fold-to-reveal card', () => {
+    const { view } = mount(target => target === 'Real Note')
+
+    const callout = view.dom.querySelector('.cm-np-callout')
+    expect(callout).not.toBeNull()
+
+    const details = callout?.querySelector('details')
+    // The "-" fold char means the solution starts hidden (attempt-first).
+    expect(details?.open).toBe(false)
+    expect(callout?.querySelector('summary')?.textContent).toBe('Worked answer')
+
+    // Body markdown renders (bold melts, wikilink becomes a link) even while collapsed.
+    expect(callout?.querySelector('.cm-np-strong')?.textContent).toBe('isolate')
+    expect(callout?.querySelector('.cm-np-wikilink')?.textContent).toBe('Real Note')
+    expect(callout?.textContent).not.toContain('[!solution]')
+
+    view.destroy()
+  })
+})
+
+describe('findCalloutBlocks', () => {
+  const docOf = (text: string) => EditorState.create({ doc: text, extensions: [noteMarkdown] }).doc
+
+  it('parses a collapsed callout with a title and strips the quote markers from the body', () => {
+    const blocks = findCalloutBlocks(docOf(['> [!solution]- Steps', '> line one', '> line two', '', 'after'].join('\n')))
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].type).toBe('solution')
+    expect(blocks[0].collapsed).toBe(true)
+    expect(blocks[0].title).toBe('Steps')
+    expect(blocks[0].body).toEqual(['line one', 'line two'])
+  })
+
+  it('treats a bare "[!type]" (no fold char) and "+" as expanded', () => {
+    const bare = findCalloutBlocks(docOf('> [!note] Heads up\n> body'))
+    const plus = findCalloutBlocks(docOf('> [!tip]+ Pro tip\n> body'))
+
+    expect(bare[0].collapsed).toBe(false)
+    expect(plus[0].collapsed).toBe(false)
+  })
+
+  it('ignores a plain blockquote that is not a callout', () => {
+    expect(findCalloutBlocks(docOf('> just a quote\n> more quote'))).toHaveLength(0)
   })
 })
