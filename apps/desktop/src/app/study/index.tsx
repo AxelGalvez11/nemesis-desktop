@@ -10,6 +10,7 @@ import {
   IconDots,
   IconFileImport,
   IconFolderPlus,
+  IconMessage,
   IconPencil,
   IconPlayerPause,
   IconPlus,
@@ -20,6 +21,8 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { assembleCardContext } from '@/app/note-chat/context'
+import { NoteChatPanel } from '@/app/note-chat/note-chat-panel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -510,6 +513,26 @@ export function StudyView() {
     setRevealed(false)
   }, [lastUndo, update])
 
+  // Mini-chat about the card under review: a slide-in overlay, 'c' toggles it. Keyed
+  // (via NoteChatPanel) to the card's scope, so it follows the card and stays walled
+  // off from the main chat.
+  const [reviewChatOpen, setReviewChatOpen] = useState(false)
+  const reviewCardContext = useMemo(() => {
+    if (!current) {
+      return null
+    }
+
+    const deck = state.decks.find(entry => entry.id === current.deckId)
+
+    return assembleCardContext({
+      card: current.card,
+      clozeIndex: current.clozeIndex,
+      deckId: current.deckId,
+      deckName: current.deckName,
+      sourceFile: deck?.sourceFile
+    })
+  }, [current, state.decks])
+
   // Anki muscle memory: Space/Enter flips, 1-4 grades, Escape leaves the session.
   useEffect(() => {
     if (!reviewing) {
@@ -520,6 +543,14 @@ export function StudyView() {
       const target = event.target as HTMLElement | null
 
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return
+      }
+
+      // 'c' toggles the card mini-chat overlay (guarded above: never while typing).
+      if (event.key === 'c') {
+        event.preventDefault()
+        setReviewChatOpen(open => !open)
+
         return
       }
 
@@ -723,15 +754,17 @@ export function StudyView() {
   // no tabs, nothing but the review. Esc (or the back button) returns.
   if (reviewing && current) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+      <div className="relative flex h-full min-h-0 flex-col overflow-y-auto">
         <ReviewSurface
           activeCategory={categoryForQueueItem(current, state)}
+          chatOpen={reviewChatOpen}
           flip={flip}
           intervals={previewIntervals(state, current.scheduleKey, now)}
           item={current}
           onExit={exitReview}
           onGrade={grade}
           onReveal={() => setRevealed(true)}
+          onToggleChat={() => setReviewChatOpen(open => !open)}
           onUndo={lastUndo ? undoGrade : null}
           position={Math.min(done + 1, sessionTotal)}
           remainingCounts={remainingCounts}
@@ -739,6 +772,17 @@ export function StudyView() {
           sessionTotal={sessionTotal}
           showIntervalHints={settings.showIntervalHints}
         />
+        {reviewCardContext && (
+          <div
+            aria-hidden={!reviewChatOpen}
+            className={cn(
+              'absolute inset-y-0 right-0 z-30 flex w-[340px] max-w-[85vw] border-l border-border bg-background shadow-xl transition-transform duration-200 ease-out',
+              reviewChatOpen ? 'translate-x-0' : 'pointer-events-none translate-x-full'
+            )}
+          >
+            <NoteChatPanel context={reviewCardContext} onClose={() => setReviewChatOpen(false)} />
+          </div>
+        )}
       </div>
     )
   }
@@ -2521,12 +2565,14 @@ function MatchGame({ deck, onExit }: { deck: null | StudyDeck; onExit: () => voi
 
 function ReviewSurface({
   activeCategory,
+  chatOpen,
   flip,
   intervals,
   item,
   onExit,
   onGrade,
   onReveal,
+  onToggleChat,
   onUndo,
   position,
   remainingCounts,
@@ -2535,6 +2581,8 @@ function ReviewSurface({
   showIntervalHints
 }: {
   activeCategory: ReviewCategory
+  /** Whether the card mini-chat overlay is open (drives the toggle's pressed state). */
+  chatOpen: boolean
   flip: boolean
   intervals: Record<StudyRating, string>
   item: QueueItem
@@ -2542,6 +2590,8 @@ function ReviewSurface({
   onExit: () => void
   onGrade: (rating: StudyRating) => void
   onReveal: () => void
+  /** Toggle the card mini-chat slide-in overlay. */
+  onToggleChat: () => void
   /** Take back the previous grade; null hides the affordance (nothing graded yet). */
   onUndo: (() => void) | null
   position: number
@@ -2589,6 +2639,19 @@ function ReviewSurface({
           </span>
 
           <div className="flex shrink-0 items-center gap-4">
+            <button
+              aria-label="Chat about this card"
+              aria-pressed={chatOpen}
+              className={cn(
+                'flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50',
+                chatOpen && 'text-foreground'
+              )}
+              onClick={onToggleChat}
+              type="button"
+            >
+              <IconMessage size={13} />
+              chat <span className="text-[10px] opacity-60">c</span>
+            </button>
             {onUndo && (
               <Button onClick={onUndo} size="inline" variant="text">
                 Undo <span className="text-[10px] opacity-60">u</span>
