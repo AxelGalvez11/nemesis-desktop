@@ -13,7 +13,6 @@ import {
   IconPencil,
   IconPlayerPause,
   IconPlus,
-  IconSettings,
   IconSitemap,
   IconSparkles,
   IconTrash
@@ -699,7 +698,6 @@ export function StudyView() {
           onReveal={() => setRevealed(true)}
           onUndo={lastUndo ? undoGrade : null}
           position={Math.min(done + 1, sessionTotal)}
-          progress={sessionTotal > 0 ? done / sessionTotal : 0}
           remainingCounts={remainingCounts}
           revealed={revealed}
           sessionTotal={sessionTotal}
@@ -735,17 +733,6 @@ export function StudyView() {
                 <span aria-hidden="true" className="size-1.5 rounded-full bg-(--theme-primary)" />
                 Ask the agent
               </Button>
-
-              <Tip label="Study settings">
-                <Button
-                  aria-label="Study settings"
-                  onClick={() => setSettingsOpen(true)}
-                  size="icon-xs"
-                  variant="ghost"
-                >
-                  <IconSettings />
-                </Button>
-              </Tip>
             </>
           )}
         </div>
@@ -2502,7 +2489,6 @@ function ReviewSurface({
   onReveal,
   onUndo,
   position,
-  progress,
   remainingCounts,
   revealed,
   sessionTotal,
@@ -2519,8 +2505,6 @@ function ReviewSurface({
   /** Take back the previous grade; null hides the affordance (nothing graded yet). */
   onUndo: (() => void) | null
   position: number
-  /** Session completion 0..1 for the hairline progress bar. */
-  progress: number
   remainingCounts: ReviewCategoryCounts
   revealed: boolean
   sessionTotal: number
@@ -2594,13 +2578,6 @@ function ReviewSurface({
               ))}
             </span>
           </div>
-        </div>
-
-        <div aria-hidden="true" className="mb-4 h-0.5 overflow-hidden rounded-full bg-(--ui-bg-quaternary)">
-          <div
-            className="h-full rounded-full bg-(--theme-primary) transition-[width] duration-300 ease-out"
-            style={{ width: `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%` }}
-          />
         </div>
 
         {flip ? (

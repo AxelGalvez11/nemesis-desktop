@@ -8,11 +8,11 @@ import { Codicon } from '@/components/ui/codicon';
 import { GlyphSpinner } from '@/components/ui/glyph-spinner';
 import { useI18n } from '@/i18n';
 import { Activity, AlertCircle, Clock, Command, Hash, Loader2, Terminal, Zap, ZapFilled } from '@/lib/icons';
-import { contextBarLabel, LiveDuration, usageContextLabel } from '@/lib/statusbar';
+import { contextBarLabel, usageContextLabel } from '@/lib/statusbar';
 import { cn } from '@/lib/utils';
 import { setGlobalYolo, setSessionYolo } from '@/lib/yolo-session';
 import { NEMESIS_STUDENT_BUILD, STUDENT_HIDDEN_STATUSBAR } from '@/nemesis';
-import { $activeSessionId, $busy, $connection, $currentUsage, $sessionStartedAt, $turnStartedAt, $yoloActive, setYoloActive } from '@/store/session';
+import { $activeSessionId, $connection, $currentUsage, $yoloActive, setYoloActive } from '@/store/session';
 import { $subagentsBySession, activeSubagentCount, failedSubagentCount } from '@/store/subagents';
 import { $gatewayRestarting } from '@/store/system-actions';
 import { $backendUpdateApply, $backendUpdateStatus, $desktopVersion, $updateApply, $updateStatus, openUpdateOverlayFor } from '@/store/updates';
@@ -23,11 +23,8 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
     const activeSessionId = useStore($activeSessionId);
     const terminalTakeover = useStore($terminalTakeover);
     const yoloActive = useStore($yoloActive);
-    const busy = useStore($busy);
     const currentUsage = useStore($currentUsage);
     const gatewayRestarting = useStore($gatewayRestarting);
-    const sessionStartedAt = useStore($sessionStartedAt);
-    const turnStartedAt = useStore($turnStartedAt);
     const subagentsBySession = useStore($subagentsBySession);
     const updateStatus = useStore($updateStatus);
     const updateApply = useStore($updateApply);
@@ -239,15 +236,6 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
     ]);
     const coreRightStatusbarItems = useMemo(() => [
         {
-            detail: _jsx(LiveDuration, { since: turnStartedAt }),
-            hidden: !busy || !turnStartedAt,
-            icon: _jsx(Loader2, { className: "size-3 animate-spin" }),
-            id: 'running-timer',
-            label: copy.turnRunning,
-            title: copy.currentTurnElapsed,
-            variant: 'text'
-        },
-        {
             detail: contextBar || undefined,
             hidden: !contextUsage,
             id: 'context-usage',
@@ -257,14 +245,6 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
             menuContent: (_jsx(ContextUsagePanel, { currentUsage: currentUsage, requestGateway: requestGateway, sessionId: activeSessionId })),
             title: copy.openContextUsage,
             variant: 'menu'
-        },
-        {
-            detail: _jsx(LiveDuration, { since: sessionStartedAt }),
-            hidden: !sessionStartedAt,
-            id: 'session-timer',
-            label: copy.session,
-            title: copy.runtimeSessionElapsed,
-            variant: 'text'
         },
         {
             className: cn('px-1', yoloActive && 'bg-(--chrome-action-hover)'),
@@ -289,7 +269,6 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
     ], [
         activeSessionId,
         backendVersionItem,
-        busy,
         chatOpen,
         clientVersionItem,
         contextBar,
@@ -297,11 +276,9 @@ export function useStatusbarItems({ agentsOpen, chatOpen, commandCenterOpen, ext
         copy,
         currentUsage,
         requestGateway,
-        sessionStartedAt,
         showYoloToggle,
         terminalTakeover,
         toggleYolo,
-        turnStartedAt,
         yoloActive
     ]);
     const leftStatusbarItems = useMemo(() => [...coreLeftStatusbarItems, ...extraLeftItems].filter(item => !NEMESIS_STUDENT_BUILD || !STUDENT_HIDDEN_STATUSBAR.has(item.id)), [coreLeftStatusbarItems, extraLeftItems]);

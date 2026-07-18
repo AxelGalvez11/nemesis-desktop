@@ -6,7 +6,6 @@ import {
   IconArrowLeft,
   IconArrowRight,
   IconChevronRight,
-  IconDots,
   IconFilePlus,
   IconFileText,
   IconFileTypePdf,
@@ -30,12 +29,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { SearchField } from '@/components/ui/search-field'
@@ -182,9 +175,6 @@ export function LibraryView() {
   const [creating, setCreating] = useState<null | 'folder' | 'note'>(null)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
-  // Notes open read-only for calm reading; the header's Edit toggle turns typing on.
-  // Reset to read-only whenever a different note is opened (effect below).
-  const [editing, setEditing] = useState(false)
   const [renameTarget, setRenameTarget] = useState<FsTarget | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<FsTarget | null>(null)
   // Global search: the input's live value vs. the debounced value actually used to filter,
@@ -515,12 +505,6 @@ export function LibraryView() {
   }, [activeTab, contents, tabs])
 
   const activeNote = selection?.kind === 'note' ? selection.note : null
-
-  // Every note opens read-only; switching notes drops back to reading mode.
-  const activeNotePath = activeNote?.path ?? null
-  useEffect(() => {
-    setEditing(false)
-  }, [activeNotePath])
 
   const navigate = useNavigate()
 
@@ -1053,43 +1037,11 @@ export function LibraryView() {
                 <div className="flex shrink-0 items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)">
                   <span className="tabular-nums">{countWords(selection.note.content)} words</span>
                   {saving && <span className="text-(--ui-text-quaternary)">Saving…</span>}
-                  {/* Read-only by default; Edit turns typing on, Done returns to reading. */}
-                  <Button
-                    aria-pressed={editing}
-                    onClick={() => setEditing(value => !value)}
-                    size="xs"
-                    variant={editing ? 'secondary' : 'ghost'}
-                  >
-                    {editing ? 'Done' : 'Edit'}
-                  </Button>
-                  <DropdownMenu>
-                    <Tip label="More">
-                      <DropdownMenuTrigger asChild>
-                        <Button aria-label="More note actions" size="icon-xs" variant="ghost">
-                          <IconDots />
-                        </Button>
-                      </DropdownMenuTrigger>
-                    </Tip>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => setRenameTarget({ kind: 'note', note: selection.note })}>
-                        <IconPencil />
-                        Rename note
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="text-(--dt-destructive)"
-                        onSelect={() => setDeleteTarget({ kind: 'note', note: selection.note })}
-                      >
-                        <IconTrash />
-                        Delete note
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                 </div>
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden px-7 pb-3">
               <NoteEditor
-                editable={editing}
                 imageContext={{ files: imageFiles, noteFolder: selection.note.folder, vaultDir: VAULT_DIR }}
                 initialValue={selection.note.content}
                 isResolved={target => isWikilinkResolved(target, resolvable)}
