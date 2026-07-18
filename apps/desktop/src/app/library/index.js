@@ -6,6 +6,8 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { IconArrowLeft, IconArrowRight, IconChevronRight, IconFilePlus, IconFileText, IconFileTypePdf, IconFolder, IconFolderOpen, IconFolderPlus, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconLayoutSidebarRightExpand, IconPaperclip, IconPencil, IconPhoto, IconPresentation, IconCards, IconChecklist, IconSitemap, IconSparkles, IconTrash, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { setNoteChatContext } from '@/app/note-chat/active-context';
+import { assembleNoteContext } from '@/app/note-chat/context';
 import { formatRefValue } from '@/components/assistant-ui/directive-text';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -365,6 +367,18 @@ export function LibraryView() {
         return tab;
     }, [activeTab, contents, tabs]);
     const activeNote = selection?.kind === 'note' ? selection.note : null;
+    // Publish the open note as the mini-chat's scope so the docked note-chat pane can talk
+    // about it; clear it when leaving the Library so the pane goes dormant elsewhere. Scope
+    // is path-keyed, so content edits don't churn the conversation.
+    useEffect(() => {
+        if (!activeNote) {
+            setNoteChatContext(null);
+            return;
+        }
+        setNoteChatContext(assembleNoteContext({ content: activeNote.content, path: activeNote.path }));
+        return () => setNoteChatContext(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeNote?.path]);
     const navigate = useNavigate();
     // Library's one line to the agent: land in the CURRENT conversation (owner
     // call — no new session per click), pre-filling the composer with whatever

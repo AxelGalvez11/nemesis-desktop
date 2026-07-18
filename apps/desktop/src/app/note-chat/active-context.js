@@ -9,3 +9,6 @@ export const $noteChatContext = atom(null);
 export function setNoteChatContext(context) {
     $noteChatContext.set(context);
 }
+// Pane id for the docked mini-chat panel (Library / Study), registered in the
+// app-wide PaneShell. Shared so the pages can open it via setPaneOpen.
+export const NOTE_CHAT_PANE_ID = 'note-chat';

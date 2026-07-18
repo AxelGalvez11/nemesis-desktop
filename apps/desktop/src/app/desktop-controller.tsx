@@ -106,6 +106,8 @@ import { useKeybinds } from './hooks/use-keybinds'
 import { SIDEBAR_COLLAPSE_MEDIA_QUERY } from './layout-constants'
 import { ModelPickerOverlay } from './model-picker-overlay'
 import { ModelVisibilityOverlay } from './model-visibility-overlay'
+import { $noteChatContext, NOTE_CHAT_PANE_ID } from './note-chat/active-context'
+import { NoteChatPanel } from './note-chat/note-chat-panel'
 import { PetGenerateOverlay } from './pet-generate/pet-generate-overlay'
 import { RightSidebarPane } from './right-sidebar'
 import { FileActionDialogs } from './right-sidebar/file-actions'
@@ -1302,6 +1304,10 @@ export function DesktopController() {
   const sidebarSide = panesFlipped ? 'right' : 'left'
   const railSide = panesFlipped ? 'left' : 'right'
 
+  // The mini-chat pane is enabled only when a Library note / Study card publishes
+  // its context; those pages clear it on unmount, so the pane is dormant elsewhere.
+  const noteChatContext = useStore($noteChatContext)
+
   // Other sidebars docked as real columns on the terminal's rail. Force-collapsed
   // hover-reveal overlays (narrow window) don't take a column, so they don't count.
   const railColumnOpen =
@@ -1427,6 +1433,25 @@ export function DesktopController() {
       >
         <TerminalPaneChrome />
       </div>
+    </Pane>
+  )
+
+  const noteChatPane = (
+    <Pane
+      defaultOpen={false}
+      disabled={!noteChatContext}
+      forceCollapsed={narrowViewport}
+      hoverReveal
+      id={NOTE_CHAT_PANE_ID}
+      key="note-chat"
+      maxWidth={520}
+      minWidth={300}
+      overlayWidth={320}
+      resizable
+      side={railSide}
+      width="360px"
+    >
+      {noteChatContext ? <NoteChatPanel context={noteChatContext} /> : null}
     </Pane>
   )
 
@@ -1568,6 +1593,7 @@ export function DesktopController() {
       {panesFlipped ? fileBrowserPane : terminalPane}
       {previewPane}
       {reviewPane}
+      {noteChatPane}
       {panesFlipped ? terminalPane : fileBrowserPane}
     </AppShell>
   )
