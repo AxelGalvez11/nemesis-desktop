@@ -55,6 +55,13 @@ course header automatically. If none exists, ask the student once and save it to
      Optional hint: `{{c1::term::hint shown in the blank}}`. This is the cheapest high-value
      card type — several tested facts from one written line — so prefer it for lists and
      paired terms. (Malformed markers just show as text; keep the `{{cN::…}}` shape exact.)
+     - **NEVER leak a clozed term's own answer elsewhere on the line.** On the card where a
+       term is blanked, every OTHER part of the line is still visible — so a synonym or
+       definition of the hidden term sitting in a non-clozed parenthetical hands the answer
+       over. BAD: `...and {{c2::NETosis}} (extruding NETs)` — on the c2 card the student sees
+       `[...] (extruding NETs)`, which *is* the answer. FIX: clozify the giveaway too
+       (`{{c2::NETosis}} ({{c2::extruding NETs}})`) or drop the parenthetical. The back is a
+       source/why note only — never the answer restated (that back shows on every card).
 3. 8–20 cards is the sweet spot. Application-level questions (mechanisms, adverse
    effects, interactions, monitoring, "patient on X develops Y — why?"), one concept per
    card, no "what is X" filler. Card-quality rules: **one fact per card** (back ≤ 1

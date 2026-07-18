@@ -22,19 +22,29 @@ export function parseCardPaste(text: string): ParsedCard[] {
       continue
     }
 
-    const parsed = splitLine(line)
+    if (hasClozeMarker(line)) {
+      // Cloze cards are one-sided — the blank IS the answer, so the back is
+      // optional. But a TAB still separates the deletion text from a trailing
+      // title/context field (the deck format the skill writes: "<cloze>\t<title>").
+      // A literal tab never appears inside a {{cN::…}} marker, so splitting on it
+      // is safe; comma and " - " are NOT used to split a cloze line because those
+      // routinely occur inside the deletion text and would shred it. Without this
+      // split the whole line (title included) became the front, so the title
+      // rendered right on the cloze prompt (owner-reported: "…[...]<TAB>Title").
+      const tab = line.indexOf('\t')
+      const back = tab > 0 ? line.slice(tab + 1).trim() : ''
 
-    if (parsed && !hasClozeMarker(parsed.front)) {
-      cards.push(parsed)
+      cards.push(back ? { back, front: line.slice(0, tab).trim() } : { back: '', front: line })
 
       continue
     }
 
-    // A front carrying {{cN::…}} keeps the whole line: cloze cards are one-sided
-    // (the blank IS the answer, back optional), and separators inside markers —
-    // commas, " - " — would otherwise shred the deletion text.
-    if (hasClozeMarker(line)) {
-      cards.push({ back: '', front: line })
+    // Cloze-free line: term/definition on tab / " - " / comma (the cloze case
+    // returned above, so parsed.front here can never carry a marker).
+    const parsed = splitLine(line)
+
+    if (parsed) {
+      cards.push(parsed)
     }
   }
 

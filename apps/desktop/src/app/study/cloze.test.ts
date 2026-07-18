@@ -103,10 +103,26 @@ describe('parseCardPaste with cloze lines', () => {
     expect(parseCardPaste(line)).toEqual([{ back: '', front: line }])
   })
 
-  it('keeps the whole line when a separator follows the marker', () => {
+  it('keeps a cloze line whole for a " - " separator (only TAB splits clozes)', () => {
     const line = '{{c1::metoprolol}} - beta-1 selective'
 
     expect(parseCardPaste(line)).toEqual([{ back: '', front: line }])
+  })
+
+  it('splits a cloze line on a TAB, peeling the trailing title to the back', () => {
+    // The deck format the skill writes: "<cloze text>\t<title>". A tab never
+    // occurs inside a marker, so the title must NOT bleed onto the cloze prompt.
+    expect(
+      parseCardPaste('Neutrophils use {{c1::NETosis}} (extruding NETs)\tNeutrophil effector functions.')
+    ).toEqual([
+      { back: 'Neutrophil effector functions.', front: 'Neutrophils use {{c1::NETosis}} (extruding NETs)' }
+    ])
+  })
+
+  it('a cloze line with a trailing tab but no title after it stays whole', () => {
+    expect(parseCardPaste('{{c1::furosemide}} blocks NKCC2\t')).toEqual([
+      { back: '', front: '{{c1::furosemide}} blocks NKCC2' }
+    ])
   })
 
   it('leaves plain lines and cloze-free splitting untouched', () => {
