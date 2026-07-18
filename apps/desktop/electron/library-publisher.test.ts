@@ -3,6 +3,7 @@
 // splitting, state-only-advances-on-2xx, and the vault walker's exclusions.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { gcm } from '@noble/ciphers/aes'
 import { bytesToUtf8, utf8ToBytes } from '@noble/ciphers/utils'
 import { generateVaultKey } from './library-crypto'
@@ -99,6 +100,10 @@ function makeHarness(overrides?: Partial<LibraryPublisherDeps>) {
 
 // A settled file: modified well before NOW so the quiet rule lets it through.
 const settled = (content: string) => ({ content, mtimeMs: NOW - 60_000 })
+
+// The publisher's own content hash (sha256 of the utf8 bytes) — lets a test
+// pre-seed state.files exactly as a prior publish would have recorded it.
+const sha256 = (content: string) => createHash('sha256').update(content, 'utf8').digest('hex')
 
 test('first tick publishes every settled file and the phone primitive can open the rows', async () => {
   const h = makeHarness()
@@ -480,4 +485,92 @@ test('a failed readable-copy upsert is logged but never stops the E2EE publish f
   // state (incl. the hash-sweep) only ever advances off the E2EE loop.
   assert.equal(readableCalls(h.calls).length, 0)
   assert.ok(h.logs.some(line => line.includes('readable-copy publish failed')))
+})
+
+// ——— One-time backfill of readable_library_documents ———
+// The gap this closes: notes published to library_documents before the readable
+// mirror existed already have recorded hashes, so they never enter `changed` and
+// would stay out of the mirror forever. The backfill mirrors the whole vault once,
+// gated on a persisted flag so it runs exactly once and is idempotent on failure.
+
+test('one-time backfill mirrors already-published notes that predate the readable table', async () => {
+  let st: PublisherState | null = null
+  const h = makeHarness({
+    loadState: async () => st,
+    saveState: async next => {
+      st = next
+    }
+  })
+  h.vault.set('a.md', settled('# Alpha'))
+  h.vault.set('deep/b.md', settled('# Beta'))
+  // The pre-upgrade world: both notes already E2EE-published (hashes on record),
+  // no readableBackfilledAt, and the mirror table empty.
+  st = {
+    v: 1,
+    files: { 'a.md': { hash: sha256('# Alpha') }, 'deep/b.md': { hash: sha256('# Beta') } }
+  }
+
+  await h.publisher.tick()
+
+  // Nothing changed, so the E2EE pipeline sends nothing...
+  assert.equal(e2eeCalls(h.calls).length, 0)
+  // ...but the backfill mirrors every existing note into the readable table.
+  const rc = readableCalls(h.calls)
+  assert.equal(rc.length, 1)
+  assert.deepEqual(
+    rc[0].rows.map(r => r.path).sort(),
+    ['a.md', 'deep/b.md']
+  )
+  assert.ok(rc[0].rows.every(r => r.kind === 'note' && r.deleted === false))
+  assert.equal(typeof st!.readableBackfilledAt, 'number')
+
+  // Runs exactly once: a later unchanged tick sends no further readable requests.
+  await h.publisher.tick()
+  assert.equal(readableCalls(h.calls).length, 1)
+})
+
+test('a failed backfill upsert leaves the flag unset so the next tick retries', async () => {
+  let st: PublisherState | null = { v: 1, files: { 'a.md': { hash: sha256('# Alpha') } } }
+  const h = makeHarness({
+    loadState: async () => st,
+    saveState: async next => {
+      st = next
+    }
+  })
+  h.vault.set('a.md', settled('# Alpha'))
+  h.setFailUrl('readable_library_documents', 1)
+
+  await h.publisher.tick()
+  // The failed sweep must not stamp the flag — otherwise the notes are lost.
+  assert.equal(st!.readableBackfilledAt, undefined)
+  assert.equal(readableCalls(h.calls).length, 0)
+
+  await h.publisher.tick()
+  const rc = readableCalls(h.calls)
+  assert.equal(rc.length, 1)
+  assert.deepEqual(rc[0].rows.map(r => r.path), ['a.md'])
+  assert.equal(typeof st!.readableBackfilledAt, 'number')
+})
+
+test('the backfill still mirrors a note that is momentarily quiet at the upgrade tick', async () => {
+  let st: PublisherState | null = { v: 1, files: { 'a.md': { hash: sha256('# Alpha') } } }
+  const h = makeHarness({
+    loadState: async () => st,
+    saveState: async next => {
+      st = next
+    }
+  })
+  // Recorded + unchanged, but just touched (within the quiet window) exactly when
+  // the upgrade tick fires.
+  h.vault.set('a.md', { content: '# Alpha', mtimeMs: NOW - 1_000 })
+
+  await h.publisher.tick()
+
+  // E2EE still respects the quiet rule (no publish)...
+  assert.equal(e2eeCalls(h.calls).length, 0)
+  // ...but the one-time backfill mirrors it anyway, so it isn't stranded.
+  const rc = readableCalls(h.calls)
+  assert.equal(rc.length, 1)
+  assert.deepEqual(rc[0].rows.map(r => r.path), ['a.md'])
+  assert.equal(typeof st!.readableBackfilledAt, 'number')
 })

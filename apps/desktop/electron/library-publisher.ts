@@ -48,6 +48,12 @@ export type PublisherState = {
   files: Record<string, { hash: string }>
   /** sha256 of the last ICS text confirmed upserted into calendar_feeds. */
   calendarFeedHash?: string
+  /** Set once the one-time readable_library_documents backfill has swept the
+   *  whole vault. Absent on installs that published to library_documents before
+   *  the readable mirror existed: those notes already have recorded hashes, so
+   *  they never enter `changed` and would stay out of the mirror forever. The
+   *  backfill mirrors them once, then stamps this so it never repeats. */
+  readableBackfilledAt?: number
 }
 
 export type PublishResult = { at: number; published: number; deleted: number; total: number }
@@ -144,8 +150,13 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
       const userId = userIdFromToken(token)
 
       const state = (await deps.loadState()) ?? emptyPublisherState()
+      const backfillNeeded = state.readableBackfilledAt === undefined
       const files = await deps.listVaultFiles()
       const seen = new Set<string>()
+      // On the one-time backfill tick only, every current note's content (quiet
+      // ones included) is collected here so the readable mirror below can seed
+      // the whole vault. Empty on every normal tick.
+      const allNotes: { relPath: string; content: string }[] = []
 
       // Which files changed since the last confirmed publish?
       const changed: {
@@ -167,8 +178,14 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
         // Quiet rule: the agent writes in bursts; let a file settle before upload.
         // It stays in `seen` so it isn't mistaken for a deletion meanwhile.
         seen.add(file.relPath)
-        if (now() - file.mtimeMs < QUIET_MS) continue
+        const quiet = now() - file.mtimeMs < QUIET_MS
+        // Normal tick: skip quiet files entirely. Backfill tick: still read them,
+        // so a note mid-settle at the exact upgrade tick isn't stranded out of the
+        // mirror (its recorded hash keeps it out of `changed` on later ticks too).
+        if (quiet && !backfillNeeded) continue
         const content = await deps.readFileText(file.relPath)
+        if (backfillNeeded) allNotes.push({ relPath: file.relPath, content })
+        if (quiet) continue
         const hash = createHash('sha256').update(content, 'utf8').digest('hex')
         if (state.files[file.relPath]?.hash === hash) continue
         changed.push({ relPath: file.relPath, mtimeMs: file.mtimeMs, hash, content })
@@ -251,19 +268,45 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
       // failure here (network blip, table not migrated yet, whatever) must
       // never stop the encrypted publish above from confirming its state —
       // that publish is what the phone depends on.
+      let backfilledNow = false
       try {
-        const changedNotes = changed.filter(entry => entry.kind === undefined)
-        for (let i = 0; i < changedNotes.length; i += UPSERT_BATCH) {
-          const batch = changedNotes.slice(i, i + UPSERT_BATCH)
-          const rows = batch.map(entry => ({
-            user_id: userId,
-            path: entry.relPath.normalize('NFC'),
-            kind: 'note',
-            title: titleFromFilename(entry.relPath),
-            content: entry.content,
-            deleted: false
-          }))
-          await upsertReadable(token, rows)
+        if (backfillNeeded) {
+          // One-time sweep: mirror every current note into readable_library_documents.
+          // Existing notes already have recorded hashes, so they never appear in
+          // `changed`; without this pass they'd stay invisible to the server-readable
+          // web/phone reader until each was next edited. The flag is only stamped
+          // after a clean sweep, and upserts are on_conflict merges, so a partial
+          // failure just retries next tick.
+          for (let i = 0; i < allNotes.length; i += UPSERT_BATCH) {
+            const batch = allNotes.slice(i, i + UPSERT_BATCH)
+            const rows = batch.map(entry => ({
+              user_id: userId,
+              path: entry.relPath.normalize('NFC'),
+              kind: 'note',
+              title: titleFromFilename(entry.relPath),
+              content: entry.content,
+              deleted: false
+            }))
+            await upsertReadable(token, rows)
+          }
+          backfilledNow = true
+          if (allNotes.length) {
+            log(`[phone-sync] readable backfill: mirrored ${allNotes.length} existing note(s)`)
+          }
+        } else {
+          const changedNotes = changed.filter(entry => entry.kind === undefined)
+          for (let i = 0; i < changedNotes.length; i += UPSERT_BATCH) {
+            const batch = changedNotes.slice(i, i + UPSERT_BATCH)
+            const rows = batch.map(entry => ({
+              user_id: userId,
+              path: entry.relPath.normalize('NFC'),
+              kind: 'note',
+              title: titleFromFilename(entry.relPath),
+              content: entry.content,
+              deleted: false
+            }))
+            await upsertReadable(token, rows)
+          }
         }
 
         const removedNotes = removed.filter(relPath => !relPath.startsWith('.'))
@@ -314,12 +357,18 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
         }
       }
 
-      const dirty = published > 0 || deleted > 0 || calendarFeedHash !== state.calendarFeedHash
+      const readableBackfilledAt = backfilledNow ? now() : state.readableBackfilledAt
+      const dirty =
+        published > 0 ||
+        deleted > 0 ||
+        calendarFeedHash !== state.calendarFeedHash ||
+        readableBackfilledAt !== state.readableBackfilledAt
       if (dirty) {
         await deps.saveState({
           v: 1,
           files: nextFiles,
-          ...(calendarFeedHash ? { calendarFeedHash } : {})
+          ...(calendarFeedHash ? { calendarFeedHash } : {}),
+          ...(readableBackfilledAt ? { readableBackfilledAt } : {})
         })
       }
       lastResult = { at: now(), published, deleted, total: files.length + derived.length }
