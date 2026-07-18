@@ -137,11 +137,43 @@ export function StudyView() {
     const [testAttempts, setTestAttempts] = useState(() => loadTestAttempts());
     const [viewingMindmap, setViewingMindmap] = useState(null);
     const [takingTest, setTakingTest] = useState(null);
-    const now = useMemo(() => new Date(), [state, reviewing]);
+    // `now` advances on a timer while the Study page is open (not only when state
+    // changes), so due cards — especially just-learned cards on their short 1–10 min
+    // FSRS steps — resurface without needing a keystroke, and the deck-list due
+    // counts stay live. Reset on entering/leaving review so a session starts fresh.
+    const [now, setNow] = useState(() => new Date());
+    useEffect(() => {
+        setNow(new Date());
+        const id = window.setInterval(() => setNow(new Date()), 15_000);
+        return () => window.clearInterval(id);
+    }, [reviewing]);
     const queue = useMemo(() => (reviewing ? buildQueue(state, reviewDeckId, now) : []), [state, reviewDeckId, reviewing, now]);
-    const current = queue[0];
+    // Pin the on-screen card by its schedule key so a background queue refresh (the
+    // timer tick that resurfaces a card learned earlier this session) can't swap the
+    // card out from under the user mid-review. It changes only when they grade the
+    // pinned card (dropping it from the queue) or the queue empties.
+    const [currentKey, setCurrentKey] = useState(null);
+    const current = useMemo(() => {
+        if (!reviewing)
+            return undefined;
+        const pinned = currentKey ? queue.find(item => item.scheduleKey === currentKey) : undefined;
+        return pinned ?? queue[0];
+    }, [reviewing, queue, currentKey]);
+    useEffect(() => {
+        const key = current?.scheduleKey ?? null;
+        if (key !== currentKey)
+            setCurrentKey(key);
+    }, [current, currentKey]);
     const remainingCounts = useMemo(() => countQueueCategories(queue, state), [queue, state]);
     const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state]);
+    // When the live queue is empty, how many cards become due within the next 20
+    // minutes (learning cards on their short FSRS steps) — drives the "coming back
+    // soon" hint on the caught-up screen so the student keeps the window open.
+    const comingBackSoon = useMemo(() => {
+        if (!reviewing || current)
+            return 0;
+        return buildQueue(state, reviewDeckId, new Date(now.getTime() + 20 * 60_000)).length;
+    }, [reviewing, current, now, state, reviewDeckId]);
     const sections = useMemo(() => groupDecks(state, now)
         .map(group => group.course)
         .filter(course => course.toLocaleLowerCase() !== 'other'), [now, state]);
@@ -450,9 +482,11 @@ export function StudyView() {
                             }, size: "sm", variant: "outline", children: "Back to decks" })) : (_jsx(_Fragment, { children: _jsxs(Button, { onClick: () => askAgent(), size: "sm", variant: "outline", children: [_jsx("span", { "aria-hidden": "true", className: "size-1.5 rounded-full bg-(--theme-primary)" }), "Ask the agent"] }) })) })] }), !inSubSurface && !reviewing && (_jsx("nav", { "aria-label": "Study sections", className: "mx-6 mb-3 flex items-center gap-1 border-b border-(--ui-stroke-tertiary)", children: STUDY_TABS.map(option => {
                     const count = option.id === 'cards' ? todayQueue.length : option.id === 'tests' ? tests.length : mindmaps.length;
                     return (_jsxs("button", { "aria-current": tab === option.id ? 'page' : undefined, className: cn('relative -mb-px flex items-center gap-1.5 border-b-2 border-transparent px-2.5 pb-2 pt-1 text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50', tab === option.id && 'border-(--theme-primary) text-foreground'), onClick: () => switchTab(option.id), type: "button", children: [option.icon, option.label, count > 0 && _jsx("span", { className: "tabular-nums text-(--ui-text-quaternary)", children: count })] }, option.id));
-                }) })), autoImported.length > 0 && !reviewing && !browseDeckId && tab === 'cards' && (_jsxs("div", { className: "mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs", children: [_jsxs("span", { children: ["Nemesis added ", autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`, ":", ' ', autoImported.join(', ')] }), _jsx("button", { className: "text-muted-foreground hover:text-foreground", onClick: () => setAutoImported([]), type: "button", children: "Dismiss" })] })), reviewing ? (_jsx(EmptyState, { className: "flex-1", description: done > 0
-                    ? `${sessionRecapLine(done, sessionGrades)} Come back when the next ones are due.`
-                    : 'Nothing is due right now.', title: "All caught up" })) : matchDeckId ? (_jsx(MatchGame, { deck: state.decks.find(deck => deck.id === matchDeckId) ?? null, onExit: () => setMatchDeckId(null) })) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), onMatch: () => startMatch(browseDeckId), onMoveDeck: section => moveDeck(browseDeckId, section), onRename: renameBrowsedDeck, sections: sections, state: state })) : tab === 'cards' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mx-6 mb-1 flex items-center gap-4", children: [todayQueue.length > 0 && (_jsxs(Button, { onClick: () => startReview(null), size: "inline", variant: "textStrong", children: ["Study all due (", todayQueue.length, ")"] })), _jsxs(Button, { onClick: () => setNewDeckSection(''), size: "inline", variant: "text", children: [_jsx(IconPlus, { size: 13 }), "New deck"] }), _jsxs(Button, { onClick: () => setImportOpen(true), size: "inline", variant: "text", children: [_jsx(IconFileImport, { size: 13 }), "Import"] }), _jsxs(Button, { onClick: () => setNewSectionOpen(true), size: "inline", variant: "text", children: [_jsx(IconFolderPlus, { size: 13 }), "New section"] })] }), _jsx(DeckBrowser, { collapsedSections: collapsedSections, onBrowse: setBrowseDeckId, onCreateDeck: setNewDeckSection, onDeleteDeck: removeDeck, onDeleteSection: course => update(deleteSection(state, course)), onMatch: startMatch, onMoveDeck: moveDeck, onStudy: startReview, onToggleSection: toggleSection, queueCounts: queueCountsByDeck, state: state })] })) : tab === 'tests' ? (_jsx(TestsBrowser, { collapsedSections: collapsedSections, mindmaps: mindmaps, onAskAgent: askAgent, onStartTest: setTakingTest, onToggleSection: toggleSection, state: state, testAttempts: testAttempts, tests: tests })) : (_jsx(MindmapsBrowser, { collapsedSections: collapsedSections, mindmaps: mindmaps, onAskAgent: askAgent, onOpenMindmap: setViewingMindmap, onToggleSection: toggleSection, state: state, tests: tests })), _jsx(MindmapViewerDialog, { file: viewingMindmap, onOpenChange: open => !open && setViewingMindmap(null) }), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen, sections: sections }), newDeckSection !== null && (_jsx(NewDeckDialog, { initialSection: newDeckSection, onClose: () => setNewDeckSection(null), onCreate: createDeck, sections: sections })), newSectionOpen && (_jsx(NewSectionDialog, { onClose: () => setNewSectionOpen(false), onCreate: createSection, sections: sections })), _jsx(StudySettingsDialog, { onChange: patch => update(setSettings(state, patch)), onOpenChange: setSettingsOpen, open: settingsOpen, settings: settings })] }));
+                }) })), autoImported.length > 0 && !reviewing && !browseDeckId && tab === 'cards' && (_jsxs("div", { className: "mx-6 mb-1 flex items-center justify-between rounded-md border border-(--theme-primary)/40 bg-(--theme-primary)/10 px-3 py-1.5 text-xs", children: [_jsxs("span", { children: ["Nemesis added ", autoImported.length === 1 ? 'a new deck' : `${autoImported.length} new decks`, ":", ' ', autoImported.join(', ')] }), _jsx("button", { className: "text-muted-foreground hover:text-foreground", onClick: () => setAutoImported([]), type: "button", children: "Dismiss" })] })), reviewing ? (_jsx(EmptyState, { className: "flex-1", description: comingBackSoon > 0
+                    ? `${done > 0 ? `${sessionRecapLine(done, sessionGrades)} ` : ''}${comingBackSoon} card${comingBackSoon === 1 ? '' : 's'} will be ready in a few minutes — keep this open and they'll come back.`
+                    : done > 0
+                        ? `${sessionRecapLine(done, sessionGrades)} Come back when the next ones are due.`
+                        : 'Nothing is due right now.', title: comingBackSoon > 0 ? 'Caught up for now' : 'All caught up' })) : matchDeckId ? (_jsx(MatchGame, { deck: state.decks.find(deck => deck.id === matchDeckId) ?? null, onExit: () => setMatchDeckId(null) })) : browseDeckId ? (_jsx(CardBrowser, { deck: state.decks.find(deck => deck.id === browseDeckId) ?? null, onChange: update, onDeleteDeck: () => removeDeck(browseDeckId), onMatch: () => startMatch(browseDeckId), onMoveDeck: section => moveDeck(browseDeckId, section), onRename: renameBrowsedDeck, sections: sections, state: state })) : tab === 'cards' ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "mx-6 mb-1 flex items-center gap-4", children: [todayQueue.length > 0 && (_jsxs(Button, { onClick: () => startReview(null), size: "inline", variant: "textStrong", children: ["Study all due (", todayQueue.length, ")"] })), _jsxs(Button, { onClick: () => setNewDeckSection(''), size: "inline", variant: "text", children: [_jsx(IconPlus, { size: 13 }), "New deck"] }), _jsxs(Button, { onClick: () => setImportOpen(true), size: "inline", variant: "text", children: [_jsx(IconFileImport, { size: 13 }), "Import"] }), _jsxs(Button, { onClick: () => setNewSectionOpen(true), size: "inline", variant: "text", children: [_jsx(IconFolderPlus, { size: 13 }), "New section"] })] }), _jsx(DeckBrowser, { collapsedSections: collapsedSections, onBrowse: setBrowseDeckId, onCreateDeck: setNewDeckSection, onDeleteDeck: removeDeck, onDeleteSection: course => update(deleteSection(state, course)), onMatch: startMatch, onMoveDeck: moveDeck, onStudy: startReview, onToggleSection: toggleSection, queueCounts: queueCountsByDeck, state: state })] })) : tab === 'tests' ? (_jsx(TestsBrowser, { collapsedSections: collapsedSections, mindmaps: mindmaps, onAskAgent: askAgent, onStartTest: setTakingTest, onToggleSection: toggleSection, state: state, testAttempts: testAttempts, tests: tests })) : (_jsx(MindmapsBrowser, { collapsedSections: collapsedSections, mindmaps: mindmaps, onAskAgent: askAgent, onOpenMindmap: setViewingMindmap, onToggleSection: toggleSection, state: state, tests: tests })), _jsx(MindmapViewerDialog, { file: viewingMindmap, onOpenChange: open => !open && setViewingMindmap(null) }), _jsx(ImportDialog, { onImport: importCards, onOpenChange: setImportOpen, open: importOpen, sections: sections }), newDeckSection !== null && (_jsx(NewDeckDialog, { initialSection: newDeckSection, onClose: () => setNewDeckSection(null), onCreate: createDeck, sections: sections })), newSectionOpen && (_jsx(NewSectionDialog, { onClose: () => setNewSectionOpen(false), onCreate: createSection, sections: sections })), _jsx(StudySettingsDialog, { onChange: patch => update(setSettings(state, patch)), onOpenChange: setSettingsOpen, open: settingsOpen, settings: settings })] }));
 }
 const OTHER_SECTION_VALUE = '__other__';
 function SectionSelect({ label, onChange, sections, value }) {

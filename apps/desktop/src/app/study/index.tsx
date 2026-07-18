@@ -245,14 +245,36 @@ export function StudyView() {
   const [viewingMindmap, setViewingMindmap] = useState<MindmapFile | null>(null)
   const [takingTest, setTakingTest] = useState<null | TestFile>(null)
 
-  const now = useMemo(() => new Date(), [state, reviewing])
+  // `now` advances on a timer while the Study page is open (not only when state
+  // changes), so due cards — especially just-learned cards on their short 1–10 min
+  // FSRS steps — resurface without needing a keystroke, and the deck-list due
+  // counts stay live. Reset on entering/leaving review so a session starts fresh.
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    setNow(new Date())
+    const id = window.setInterval(() => setNow(new Date()), 15_000)
+    return () => window.clearInterval(id)
+  }, [reviewing])
 
   const queue = useMemo(
     () => (reviewing ? buildQueue(state, reviewDeckId, now) : []),
     [state, reviewDeckId, reviewing, now]
   )
 
-  const current: QueueItem | undefined = queue[0]
+  // Pin the on-screen card by its schedule key so a background queue refresh (the
+  // timer tick that resurfaces a card learned earlier this session) can't swap the
+  // card out from under the user mid-review. It changes only when they grade the
+  // pinned card (dropping it from the queue) or the queue empties.
+  const [currentKey, setCurrentKey] = useState<string | null>(null)
+  const current: QueueItem | undefined = useMemo(() => {
+    if (!reviewing) return undefined
+    const pinned = currentKey ? queue.find(item => item.scheduleKey === currentKey) : undefined
+    return pinned ?? queue[0]
+  }, [reviewing, queue, currentKey])
+  useEffect(() => {
+    const key = current?.scheduleKey ?? null
+    if (key !== currentKey) setCurrentKey(key)
+  }, [current, currentKey])
 
   const remainingCounts = useMemo(
     () => countQueueCategories(queue, state),
@@ -260,6 +282,14 @@ export function StudyView() {
   )
 
   const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state])
+
+  // When the live queue is empty, how many cards become due within the next 20
+  // minutes (learning cards on their short FSRS steps) — drives the "coming back
+  // soon" hint on the caught-up screen so the student keeps the window open.
+  const comingBackSoon = useMemo(() => {
+    if (!reviewing || current) return 0
+    return buildQueue(state, reviewDeckId, new Date(now.getTime() + 20 * 60_000)).length
+  }, [reviewing, current, now, state, reviewDeckId])
 
   const sections = useMemo(
     () =>
@@ -784,11 +814,13 @@ export function StudyView() {
         <EmptyState
           className="flex-1"
           description={
-            done > 0
-              ? `${sessionRecapLine(done, sessionGrades)} Come back when the next ones are due.`
-              : 'Nothing is due right now.'
+            comingBackSoon > 0
+              ? `${done > 0 ? `${sessionRecapLine(done, sessionGrades)} ` : ''}${comingBackSoon} card${comingBackSoon === 1 ? '' : 's'} will be ready in a few minutes — keep this open and they'll come back.`
+              : done > 0
+                ? `${sessionRecapLine(done, sessionGrades)} Come back when the next ones are due.`
+                : 'Nothing is due right now.'
           }
-          title="All caught up"
+          title={comingBackSoon > 0 ? 'Caught up for now' : 'All caught up'}
         />
       ) : matchDeckId ? (
         <MatchGame
