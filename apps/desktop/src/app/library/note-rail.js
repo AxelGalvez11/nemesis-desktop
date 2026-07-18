@@ -12,7 +12,7 @@ import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Tip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { buildResolvableTitleSet, isWikilinkResolved } from './links';
-import { extractHeadings, extractTags, extractWikilinks } from './vault';
+import { extractHeadings, extractTags, extractTypedLinks, extractWikilinks } from './vault';
 const RAIL_TABS = [
     { id: 'outline', icon: IconListTree, label: 'Outline' },
     { id: 'links', icon: IconLink, label: 'Links' }
@@ -30,6 +30,9 @@ export function NoteRail({ activeNote, index, notes, onCollapse, onCreateUnresol
         const resolvable = buildResolvableTitleSet(notes);
         return extractWikilinks(activeNote.content).filter(target => !isWikilinkResolved(target, resolvable));
     }, [activeNote.content, notes]);
+    // Library Brain phase 2's link grammar (skills/nemesis-notes/SKILL.md): a "## Related"
+    // bullet with a leading "word:" that isn't one of the five allowed relationship types.
+    const offGrammarLinks = useMemo(() => extractTypedLinks(activeNote.content).filter(link => link.type === null), [activeNote.content]);
     const openByTitle = (title) => {
         const note = notes.find(n => n.title === title);
         if (note) {
@@ -41,7 +44,7 @@ export function NoteRail({ activeNote, index, notes, onCollapse, onCreateUnresol
                                     const name = slash >= 0 ? target.slice(slash + 1) : target;
                                     const folder = slash >= 0 ? target.slice(0, slash) : '';
                                     return (_jsx(Tip, { label: `Create “${target}”`, children: _jsxs("button", { className: "group flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 ease-out hover:bg-(--ui-row-hover-background) active:scale-[0.98]", onClick: () => onCreateUnresolved(target), type: "button", children: [_jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate text-[0.8125rem] text-muted-foreground group-hover:text-foreground", children: name }), folder && (_jsx("span", { className: "block truncate text-[0.625rem] text-(--ui-text-quaternary)", children: folder }))] }), _jsx(IconPlus, { className: "shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-60", size: 13 })] }) }, target));
-                                }) }))] })) }) })] }));
+                                }) })), offGrammarLinks.length > 0 && (_jsxs(RailSection, { count: offGrammarLinks.length, emptyLabel: "", title: "Off-grammar links", children: [_jsx("p", { className: "px-2 pb-1 text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)", children: "Only the five grammar words resolve as typed relationships \u2014 see nemesis-notes." }), offGrammarLinks.map((link, i) => (_jsxs("div", { className: "flex min-w-0 items-center gap-1.5 px-2 py-1", children: [_jsx("span", { className: "truncate text-[0.8125rem] text-(--ui-text-secondary)", children: link.prefix }), _jsx("span", { className: "shrink-0 text-(--ui-text-quaternary)", children: '→' }), _jsxs("span", { className: "min-w-0 flex-1 truncate text-[0.8125rem] text-muted-foreground", children: ["[[", link.target, "]]"] })] }, `${link.prefix}::${link.target}::${i}`)))] }))] })) }) })] }));
 }
 function OutlineList({ headings, onSelect }) {
     if (!headings.length) {

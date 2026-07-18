@@ -93,6 +93,45 @@ increase peaking ~24 wk. Ramp-up titration mitigates — same family behavior as
 5. Don't overwrite an existing note blindly — if `Retatrutide.md` exists, MERGE new
    material into it (keep the student's own edits; append/weave, don't clobber).
 
+## Link grammar (the 5 relationship types)
+
+Under a note's `## Related` section, a bullet MAY start with a relationship word before
+the `[[link]]` — e.g. `- Prerequisite of: [[Beta blockers]]`. If you use one, it MUST be
+one of these five (case-insensitive, trailing colon required). A plain bullet with no
+relationship word (`- [[Note]]` or `- [[Note]] — one-line note`, like the ones in the
+example above) is still fine — you don't have to type every link, only never invent a
+sixth relationship word when you do.
+
+1. **`Prerequisite of:`** — this note must be understood before the target makes sense.
+   `Adrenergic receptors.md` → `- Prerequisite of: [[Beta blockers]]`
+2. **`Part of:`** — this note is a member of the target's larger class/group.
+   `ACE inhibitors.md` → `- Part of: [[RAAS-targeting drugs]]`
+3. **`Related to:`** — associated, same family or topic, no hierarchy between them.
+   `Retatrutide.md` → `- Related to: [[Tirzepatide]]`
+4. **`Contrasts with:`** — meaningfully different from the target; the comparison is the point.
+   `Dabigatran.md` → `- Contrasts with: [[Warfarin]]`
+5. **`Applied in:`** — this concept is used/demonstrated in the target context. Alias:
+   `Example of:`, for phrasing it from the other direction ("this note IS an example of
+   the target").
+   `ACE inhibitors.md` → `- Applied in: [[Heart failure with reduced ejection fraction]]`
+   `Lisinopril.md` → `- Example of: [[ACE inhibitors]]`
+
+**No other relationship word.** Not "Causes:", not "Leads to:", not "See also:" — if none
+of the five fit, use `Related to:` or leave the link untyped. The app's note panel flags
+any `## Related`/`## Connections` bullet whose relationship word isn't one of these five
+as "Off-grammar links" — that's a signal to fix the note, not license to invent a sixth type.
+
+**Root-relative links only — never `../`.** Write `[[Beta blockers]]` or
+`[[Pharmacology/Beta blockers]]`, never `[[../Pharmacology/Beta blockers]]`. The resolver
+(`keysForNote` in `links.ts`) only indexes a note by its bare title and its
+vault-root-relative `folder/Title` path — it never walks `../` segments, so a `../` link
+shows broken forever even when the target file exists exactly where you think it is.
+
+**Cite your source.** Every note carries a `Source:` line (near the top, under the title,
+or as frontmatter `source:`) naming the file and slide/page the material came from, e.g.
+`Source: Incretins Lecture 4.pptx, slide 12`. That's what lets a claim be traced back to
+the lecture it came from.
+
 ## Tone
 
 Notes are for the student's own review: dense, factual, exam-oriented — headings,
