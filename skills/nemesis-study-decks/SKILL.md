@@ -13,6 +13,23 @@ Use this skill whenever the student asks you to make flashcards, a deck, or stud
 from the current chat, a lecture note, a topic, or a document. You create decks by
 WRITING A FILE; the Study page imports it automatically.
 
+## Scoped generation — when the student picks a specific source
+
+If the request says to use ONLY specific attached file(s) or source(s) — e.g. the Library's
+"Generate flashcards/test from this source" buttons seed *"Using ONLY the attached source (…)
+and no other material…"* — treat that as a HARD boundary:
+
+- Build the deck/test STRICTLY from those file(s). Do NOT pull in other lectures, other notes,
+  or general knowledge to pad it out — the student deliberately scoped it to that material.
+- Read the attached file(s) fully first (a PDF/slide's TEXT layer — read as text, per the cost
+  rules below), then build cards/questions only from what is actually in them.
+- Name the deck/test after the source, and START your reply by stating exactly which file(s)
+  you built from (e.g. "Built 24 cards from ONLY: <filename>"), so the student can verify the
+  scope. Do NOT write a `# source:` line into the deck file itself — the deck parser would
+  mis-read a filename containing " - " or "," as a card.
+
+When no explicit source restriction is given, the normal discretion below applies.
+
 ## First: pick the deliverable that fits the FIELD (don't default to cards)
 
 Flashcards are the right study tool for **memorization-heavy** fields — pharmacology,
