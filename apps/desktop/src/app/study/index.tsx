@@ -80,7 +80,6 @@ import {
   adoptLegacyDeckFiles,
   assignDeckSection,
   buildQueue,
-  deckStats,
   DEFAULT_STUDY_SETTINGS,
   deleteCard,
   deleteDeck,
@@ -103,7 +102,6 @@ import {
   setSettings,
   type StudyCard,
   type StudyDeck,
-  studyMotivation,
   type StudyRating,
   type StudySettings,
   type StudyState,
@@ -263,8 +261,6 @@ export function StudyView() {
   )
 
   const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state])
-
-  const totals = deckStats(state, null, now)
 
   const sections = useMemo(
     () =>
@@ -718,9 +714,6 @@ export function StudyView() {
       <header className="flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold tracking-tight">Study</h1>
-          <p className="mt-0.5 text-[0.65rem] font-medium tabular-nums text-(--ui-text-tertiary)">
-            {totals.due} due · {totals.fresh} new · {totals.total} cards
-          </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
@@ -1871,8 +1864,8 @@ function DeleteDeckDialog({
   )
 }
 
-// Contribution grid of review activity with streak stats, month labels, hover tooltips,
-// legend, and a today marker.
+// Contribution grid of review activity — month labels, hover tooltips, legend, and a
+// today marker. Always visible, centered near the bottom of the cards tab.
 const HEAT_MIX = ['', '14%', '24%', '38%', '54%']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -1883,29 +1876,13 @@ function heatColor(level: number): string {
     : `color-mix(in srgb, var(--ui-text-primary) ${HEAT_MIX[level]}, transparent)`
 }
 
-function Stat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <span className="flex items-baseline gap-1">
-      <span className="text-sm font-semibold text-foreground">{value}</span>
-      <span className="text-muted-foreground">{label}</span>
-    </span>
-  )
-}
-
 function Heatmap({ state }: { state: StudyState }) {
-  const [expanded, setExpanded] = useState(false)
   const todayIso = new Date().toISOString()
-  const { cells, total } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso])
-  const stats = useMemo(() => studyMotivation(state, todayIso), [state, todayIso])
+  const { cells } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso])
   // Local calendar day — must match the cell dates reviewHeatmap now emits.
   const todayKey = localDayKey(new Date(todayIso))
   const firstDayOffset = cells[0] ? new Date(`${cells[0].date}T00:00:00.000Z`).getUTCDay() : 0
   const weeks = Math.ceil((firstDayOffset + cells.length) / 7)
-  const daysIntoWeek = new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 1
-
-  const reviewsThisWeek = cells
-    .slice(-daysIntoWeek)
-    .reduce((sum, cell) => sum + cell.count, 0)
 
   const monthLabels: { col: number; label: string }[] = []
 
@@ -1925,107 +1902,68 @@ function Heatmap({ state }: { state: StudyState }) {
   }
 
   return (
-    <section className="px-8 pb-2 pt-8">
-      <div className="rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)">
-        <button
-          aria-expanded={expanded}
-          className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          onClick={() => setExpanded(value => !value)}
-          type="button"
-        >
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold">Review history</h2>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[0.6875rem] tabular-nums text-muted-foreground">
-              <span>{stats.currentStreak} day streak</span>
-              <span aria-hidden="true">·</span>
-              <span>{stats.retentionPct === null ? '—' : `${stats.retentionPct}%`} 30-day retention</span>
-              <span aria-hidden="true">·</span>
-              <span>{reviewsThisWeek} reviews this week</span>
-            </p>
-          </div>
-          <IconChevronDown
-            aria-hidden="true"
-            className={cn('shrink-0 text-muted-foreground transition-transform', !expanded && '-rotate-90')}
-            size={15}
-          />
-        </button>
-
-        {expanded && (
-          <div className="border-t border-(--ui-stroke-tertiary) px-4 pb-4 pt-3">
-            <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs">
-              <Stat label="longest streak" value={stats.longestStreak} />
-              <Stat label="days active" value={`${stats.daysLearnedPct}%`} />
-              <span className="text-muted-foreground">{total} reviews · past 12 months</span>
+    <div className="flex shrink-0 justify-center px-6 pb-10 pt-4">
+      <div className="overflow-x-auto pb-1">
+        <div className="min-w-max">
+          <div className="grid grid-cols-[2rem_auto] gap-x-2 gap-y-1">
+            <div />
+            <div className="relative h-3 text-[9px] text-muted-foreground" style={{ width: `${weeks * 14}px` }}>
+              {monthLabels.map(month => (
+                <span
+                  className="absolute"
+                  key={`${month.label}-${month.col}`}
+                  style={{ left: `${month.col * 14}px` }}
+                >
+                  {month.label}
+                </span>
+              ))}
             </div>
 
-            {total === 0 && (
-              <p className="mb-3 text-xs text-muted-foreground">Your history fills in as you grade cards.</p>
-            )}
+            <div
+              className="grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground"
+              style={{ gridTemplateRows: 'repeat(7, 11px)' }}
+            >
+              {WEEKDAYS.map(day => (
+                <span key={day}>{day}</span>
+              ))}
+            </div>
 
-            <div className="overflow-x-auto pb-1">
-              <div className="min-w-max">
-                <div className="grid grid-cols-[2rem_auto] gap-x-2 gap-y-1">
-                  <div />
-                  <div className="relative h-3 text-[9px] text-muted-foreground" style={{ width: `${weeks * 14}px` }}>
-                    {monthLabels.map(month => (
-                      <span
-                        className="absolute"
-                        key={`${month.label}-${month.col}`}
-                        style={{ left: `${month.col * 14}px` }}
-                      >
-                        {month.label}
-                      </span>
-                    ))}
-                  </div>
-
+            <div
+              className="grid grid-flow-col grid-rows-7 gap-[3px]"
+              style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}
+            >
+              {Array.from({ length: firstDayOffset }, (_, index) => (
+                <span aria-hidden="true" key={`leading-${index}`} />
+              ))}
+              {cells.map(cell => (
+                <Tip
+                  key={cell.date}
+                  label={`${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`}
+                  side="top"
+                >
                   <div
-                    className="grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground"
-                    style={{ gridTemplateRows: 'repeat(7, 11px)' }}
-                  >
-                    {WEEKDAYS.map(day => (
-                      <span key={day}>{day}</span>
-                    ))}
-                  </div>
-
-                  <div
-                    className="grid grid-flow-col grid-rows-7 gap-[3px]"
-                    style={{ gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }}
-                  >
-                    {Array.from({ length: firstDayOffset }, (_, index) => (
-                      <span aria-hidden="true" key={`leading-${index}`} />
-                    ))}
-                    {cells.map(cell => (
-                      <Tip
-                        key={cell.date}
-                        label={`${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`}
-                        side="top"
-                      >
-                        <div
-                          className={cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60')}
-                          style={{ backgroundColor: heatColor(cell.level) }}
-                        />
-                      </Tip>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
-                  <span>Less</span>
-                  {[0, 1, 2, 3, 4].map(level => (
-                    <span
-                      className="size-2.5 rounded-[2px]"
-                      key={level}
-                      style={{ backgroundColor: heatColor(level) }}
-                    />
-                  ))}
-                  <span>More</span>
-                </div>
-              </div>
+                    className={cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60')}
+                    style={{ backgroundColor: heatColor(cell.level) }}
+                  />
+                </Tip>
+              ))}
             </div>
           </div>
-        )}
+
+          <div className="mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground">
+            <span>Less</span>
+            {[0, 1, 2, 3, 4].map(level => (
+              <span
+                className="size-2.5 rounded-[2px]"
+                key={level}
+                style={{ backgroundColor: heatColor(level) }}
+              />
+            ))}
+            <span>More</span>
+          </div>
+        </div>
       </div>
-    </section>
+    </div>
   )
 }
 

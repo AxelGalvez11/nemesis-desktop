@@ -30,7 +30,7 @@ import { STUDY_STATE_EXTERNAL_CHANGE_EVENT } from './phone-sync';
 import { bestAttempt, groupExtras, lastAttempt, loadTestAttempts, saveTestAttempts, scanMindmapFiles, scanTestFiles } from './extras';
 import { parseCardPaste } from './import-cards';
 import { MindmapViewerDialog } from './mindmap-viewer';
-import { addCard, addSection, adoptLegacyDeckFiles, assignDeckSection, buildQueue, deckStats, DEFAULT_STUDY_SETTINGS, deleteCard, deleteDeck, deleteSection, freshId, getSettings, gradeCard, groupDecks, LEECH_TAG, loadState, localDayKey, previewIntervals, reconcileDeckFiles, renameDeck, reviewHeatmap, saveState, setSettings, studyMotivation, toggleSuspendCard, undoLastGrade, updateCard } from './model';
+import { addCard, addSection, adoptLegacyDeckFiles, assignDeckSection, buildQueue, DEFAULT_STUDY_SETTINGS, deleteCard, deleteDeck, deleteSection, freshId, getSettings, gradeCard, groupDecks, LEECH_TAG, loadState, localDayKey, previewIntervals, reconcileDeckFiles, renameDeck, reviewHeatmap, saveState, setSettings, toggleSuspendCard, undoLastGrade, updateCard } from './model';
 import { TestSurface } from './test-mode';
 const GRADES = [
     { key: '1', label: 'Again', rating: 'again' },
@@ -142,7 +142,6 @@ export function StudyView() {
     const current = queue[0];
     const remainingCounts = useMemo(() => countQueueCategories(queue, state), [queue, state]);
     const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state]);
-    const totals = deckStats(state, null, now);
     const sections = useMemo(() => groupDecks(state, now)
         .map(group => group.course)
         .filter(course => course.toLocaleLowerCase() !== 'other'), [now, state]);
@@ -444,7 +443,7 @@ export function StudyView() {
     if (reviewing && current) {
         return (_jsx("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: _jsx(ReviewSurface, { activeCategory: categoryForQueueItem(current, state), flip: flip, intervals: previewIntervals(state, current.scheduleKey, now), item: current, onExit: exitReview, onGrade: grade, onReveal: () => setRevealed(true), onUndo: lastUndo ? undoGrade : null, position: Math.min(done + 1, sessionTotal), progress: sessionTotal > 0 ? done / sessionTotal : 0, remainingCounts: remainingCounts, revealed: revealed, sessionTotal: sessionTotal, showIntervalHints: settings.showIntervalHints }) }));
     }
-    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: [_jsxs("header", { className: "flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5", children: [_jsxs("div", { className: "min-w-0", children: [_jsx("h1", { className: "text-lg font-semibold tracking-tight", children: "Study" }), _jsxs("p", { className: "mt-0.5 text-[0.65rem] font-medium tabular-nums text-(--ui-text-tertiary)", children: [totals.due, " due \u00B7 ", totals.fresh, " new \u00B7 ", totals.total, " cards"] })] }), _jsx("div", { className: "flex shrink-0 items-center gap-1.5", children: inSubSurface || reviewing ? (_jsx(Button, { onClick: () => {
+    return (_jsxs("div", { className: "flex h-full min-h-0 flex-col overflow-y-auto", children: [_jsxs("header", { className: "flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5", children: [_jsx("div", { className: "min-w-0", children: _jsx("h1", { className: "text-lg font-semibold tracking-tight", children: "Study" }) }), _jsx("div", { className: "flex shrink-0 items-center gap-1.5", children: inSubSurface || reviewing ? (_jsx(Button, { onClick: () => {
                                 exitReview();
                                 setBrowseDeckId(null);
                                 setMatchDeckId(null);
@@ -641,8 +640,8 @@ function DeckTableRow({ counts, deck, onBrowse, onDelete, onMatch, onMove, onStu
 function DeleteDeckDialog({ deck, onClose, onConfirm }) {
     return (_jsx(Dialog, { onOpenChange: open => !open && onClose(), open: Boolean(deck), children: _jsxs(DialogContent, { className: "sm:max-w-md", children: [_jsxs(DialogHeader, { children: [_jsx(DialogTitle, { children: "Delete deck?" }), _jsx(DialogDescription, { children: deck ? `“${deck.name}” and its local review schedule will be removed.` : 'This deck will be removed.' })] }), _jsxs(DialogFooter, { children: [_jsx(Button, { onClick: onClose, variant: "outline", children: "Cancel" }), _jsx(Button, { onClick: onConfirm, variant: "destructive", children: "Delete deck" })] })] }) }));
 }
-// Contribution grid of review activity with streak stats, month labels, hover tooltips,
-// legend, and a today marker.
+// Contribution grid of review activity — month labels, hover tooltips, legend, and a
+// today marker. Always visible, centered near the bottom of the cards tab.
 const HEAT_MIX = ['', '14%', '24%', '38%', '54%'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -651,22 +650,13 @@ function heatColor(level) {
         ? 'color-mix(in srgb, var(--ui-text-primary) 8%, transparent)'
         : `color-mix(in srgb, var(--ui-text-primary) ${HEAT_MIX[level]}, transparent)`;
 }
-function Stat({ label, value }) {
-    return (_jsxs("span", { className: "flex items-baseline gap-1", children: [_jsx("span", { className: "text-sm font-semibold text-foreground", children: value }), _jsx("span", { className: "text-muted-foreground", children: label })] }));
-}
 function Heatmap({ state }) {
-    const [expanded, setExpanded] = useState(false);
     const todayIso = new Date().toISOString();
-    const { cells, total } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso]);
-    const stats = useMemo(() => studyMotivation(state, todayIso), [state, todayIso]);
+    const { cells } = useMemo(() => reviewHeatmap(state, todayIso), [state, todayIso]);
     // Local calendar day — must match the cell dates reviewHeatmap now emits.
     const todayKey = localDayKey(new Date(todayIso));
     const firstDayOffset = cells[0] ? new Date(`${cells[0].date}T00:00:00.000Z`).getUTCDay() : 0;
     const weeks = Math.ceil((firstDayOffset + cells.length) / 7);
-    const daysIntoWeek = new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 1;
-    const reviewsThisWeek = cells
-        .slice(-daysIntoWeek)
-        .reduce((sum, cell) => sum + cell.count, 0);
     const monthLabels = [];
     if (cells[0]) {
         monthLabels.push({ col: 0, label: MONTHS[Number(cells[0].date.slice(5, 7)) - 1] });
@@ -680,7 +670,7 @@ function Heatmap({ state }) {
             }
         }
     }
-    return (_jsx("section", { className: "px-8 pb-2 pt-8", children: _jsxs("div", { className: "rounded-lg border border-(--ui-stroke-tertiary) bg-(--ui-bg-card)", children: [_jsxs("button", { "aria-expanded": expanded, className: "flex w-full items-center justify-between gap-4 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50", onClick: () => setExpanded(value => !value), type: "button", children: [_jsxs("div", { className: "min-w-0", children: [_jsx("h2", { className: "text-sm font-semibold", children: "Review history" }), _jsxs("p", { className: "mt-1 flex flex-wrap items-center gap-x-2 text-[0.6875rem] tabular-nums text-muted-foreground", children: [_jsxs("span", { children: [stats.currentStreak, " day streak"] }), _jsx("span", { "aria-hidden": "true", children: "\u00B7" }), _jsxs("span", { children: [stats.retentionPct === null ? '—' : `${stats.retentionPct}%`, " 30-day retention"] }), _jsx("span", { "aria-hidden": "true", children: "\u00B7" }), _jsxs("span", { children: [reviewsThisWeek, " reviews this week"] })] })] }), _jsx(IconChevronDown, { "aria-hidden": "true", className: cn('shrink-0 text-muted-foreground transition-transform', !expanded && '-rotate-90'), size: 15 })] }), expanded && (_jsxs("div", { className: "border-t border-(--ui-stroke-tertiary) px-4 pb-4 pt-3", children: [_jsxs("div", { className: "mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-xs", children: [_jsx(Stat, { label: "longest streak", value: stats.longestStreak }), _jsx(Stat, { label: "days active", value: `${stats.daysLearnedPct}%` }), _jsxs("span", { className: "text-muted-foreground", children: [total, " reviews \u00B7 past 12 months"] })] }), total === 0 && (_jsx("p", { className: "mb-3 text-xs text-muted-foreground", children: "Your history fills in as you grade cards." })), _jsx("div", { className: "overflow-x-auto pb-1", children: _jsxs("div", { className: "min-w-max", children: [_jsxs("div", { className: "grid grid-cols-[2rem_auto] gap-x-2 gap-y-1", children: [_jsx("div", {}), _jsx("div", { className: "relative h-3 text-[9px] text-muted-foreground", style: { width: `${weeks * 14}px` }, children: monthLabels.map(month => (_jsx("span", { className: "absolute", style: { left: `${month.col * 14}px` }, children: month.label }, `${month.label}-${month.col}`))) }), _jsx("div", { className: "grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground", style: { gridTemplateRows: 'repeat(7, 11px)' }, children: WEEKDAYS.map(day => (_jsx("span", { children: day }, day))) }), _jsxs("div", { className: "grid grid-flow-col grid-rows-7 gap-[3px]", style: { gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }, children: [Array.from({ length: firstDayOffset }, (_, index) => (_jsx("span", { "aria-hidden": "true" }, `leading-${index}`))), cells.map(cell => (_jsx(Tip, { label: `${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`, side: "top", children: _jsx("div", { className: cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60'), style: { backgroundColor: heatColor(cell.level) } }) }, cell.date)))] })] }), _jsxs("div", { className: "mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground", children: [_jsx("span", { children: "Less" }), [0, 1, 2, 3, 4].map(level => (_jsx("span", { className: "size-2.5 rounded-[2px]", style: { backgroundColor: heatColor(level) } }, level))), _jsx("span", { children: "More" })] })] }) })] }))] }) }));
+    return (_jsx("div", { className: "flex shrink-0 justify-center px-6 pb-10 pt-4", children: _jsx("div", { className: "overflow-x-auto pb-1", children: _jsxs("div", { className: "min-w-max", children: [_jsxs("div", { className: "grid grid-cols-[2rem_auto] gap-x-2 gap-y-1", children: [_jsx("div", {}), _jsx("div", { className: "relative h-3 text-[9px] text-muted-foreground", style: { width: `${weeks * 14}px` }, children: monthLabels.map(month => (_jsx("span", { className: "absolute", style: { left: `${month.col * 14}px` }, children: month.label }, `${month.label}-${month.col}`))) }), _jsx("div", { className: "grid grid-rows-7 gap-[3px] text-[9px] leading-[11px] text-muted-foreground", style: { gridTemplateRows: 'repeat(7, 11px)' }, children: WEEKDAYS.map(day => (_jsx("span", { children: day }, day))) }), _jsxs("div", { className: "grid grid-flow-col grid-rows-7 gap-[3px]", style: { gridAutoColumns: '11px', gridTemplateRows: 'repeat(7, 11px)' }, children: [Array.from({ length: firstDayOffset }, (_, index) => (_jsx("span", { "aria-hidden": "true" }, `leading-${index}`))), cells.map(cell => (_jsx(Tip, { label: `${cell.count} review${cell.count === 1 ? '' : 's'} · ${new Date(`${cell.date}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })}`, side: "top", children: _jsx("div", { className: cn('rounded-[2px]', cell.date === todayKey && 'ring-1 ring-foreground/60'), style: { backgroundColor: heatColor(cell.level) } }) }, cell.date)))] })] }), _jsxs("div", { className: "mt-2 flex items-center justify-end gap-1 text-[9px] text-muted-foreground", children: [_jsx("span", { children: "Less" }), [0, 1, 2, 3, 4].map(level => (_jsx("span", { className: "size-2.5 rounded-[2px]", style: { backgroundColor: heatColor(level) } }, level))), _jsx("span", { children: "More" })] })] }) }) }));
 }
 function CardBrowser({ deck, onChange, onDeleteDeck, onMatch, onMoveDeck, onRename, sections, state }) {
     const [editing, setEditing] = useState(null);
