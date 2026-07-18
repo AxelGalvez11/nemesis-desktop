@@ -13,6 +13,17 @@
  * Same DI shape as mission-dispatcher: raw PostgREST via injected fetch, the
  * renderer-pushed Supabase user JWT (RLS `user_id = auth.uid()`), everything
  * else injected so library-publisher.test.ts drives it with fakes.
+ *
+ * Additive, alongside the encrypted rows: vault notes (decks/calendar are
+ * excluded) also get a plaintext mirror in public.readable_library_documents,
+ * for server-side features that can't hold the vault key. Same auth, same
+ * PostgREST upsert shape, same change-detected file set as the encrypted
+ * pipeline — a file that doesn't get resent to library_documents doesn't get
+ * resent here either. It rides this same tick, so it inherits the same
+ * phone-pairing gate as everything else below (`getVaultKey`): a Mac that has
+ * never paired a phone won't populate this table either. A failure writing
+ * this mirror is logged and swallowed — it must never break the encrypted
+ * publish, which the phone depends on.
  */
 import { createHash } from 'node:crypto'
 import { encryptDoc, pathHashHex, type DocKind } from './library-crypto'
@@ -66,6 +77,15 @@ export function emptyPublisherState(): PublisherState {
   return { v: 1, files: {} }
 }
 
+/** readable_library_documents' title: literally the filename minus its
+ * extension. Deliberately NOT library-crypto's titleFromMarkdown (which
+ * prefers the first `# ` heading) — this table is a plain server-side
+ * mirror, not the phone's note list, and the spec calls for the filename. */
+function titleFromFilename(relPath: string): string {
+  const base = relPath.split('/').pop() ?? relPath
+  return base.replace(/\.md$/i, '')
+}
+
 export function createLibraryPublisher(deps: LibraryPublisherDeps) {
   const doFetch = deps.fetchImpl ?? fetch
   const now = deps.now ?? Date.now
@@ -93,6 +113,24 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
       }
     )
     if (!res.ok) throw new Error(`postgrest ${res.status} on library_documents`)
+  }
+
+  /** Same PostgREST upsert shape as `upsert` above, pointed at the plaintext
+   * mirror table instead. Kept as a separate function (rather than a
+   * parameterized table name) so the E2EE `upsert` above stays byte-for-byte
+   * untouched. */
+  const upsertReadable = async (token: string, rows: Record<string, unknown>[]) => {
+    const res = await doFetch(`${deps.supabaseUrl}/rest/v1/readable_library_documents?on_conflict=user_id,path`, {
+      method: 'POST',
+      headers: {
+        apikey: deps.anonKey,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal'
+      },
+      body: JSON.stringify(rows)
+    })
+    if (!res.ok) throw new Error(`postgrest ${res.status} on readable_library_documents`)
   }
 
   async function tick(): Promise<void> {
@@ -200,6 +238,51 @@ export function createLibraryPublisher(deps: LibraryPublisherDeps) {
         await upsert(token, rows)
         for (const relPath of batch) delete nextFiles[relPath]
         deleted += batch.length
+      }
+
+      // Additive plaintext mirror (readable_library_documents): notes only —
+      // decks/calendar are Mac-derived docs and are always dot-path-prefixed
+      // (see walkVaultMarkdown's exclusion), so filtering them out here can
+      // never accidentally drop or misfile a real note. Rides the same
+      // `changed`/`removed` sets the encrypted loops above already computed,
+      // so it inherits the quiet rule, the size cap, and the hash-sweep for
+      // free — a file whose hash didn't change isn't resent to this table
+      // either. Wrapped in its own try/catch: this table is a bonus, and a
+      // failure here (network blip, table not migrated yet, whatever) must
+      // never stop the encrypted publish above from confirming its state —
+      // that publish is what the phone depends on.
+      try {
+        const changedNotes = changed.filter(entry => entry.kind === undefined)
+        for (let i = 0; i < changedNotes.length; i += UPSERT_BATCH) {
+          const batch = changedNotes.slice(i, i + UPSERT_BATCH)
+          const rows = batch.map(entry => ({
+            user_id: userId,
+            path: entry.relPath.normalize('NFC'),
+            kind: 'note',
+            title: titleFromFilename(entry.relPath),
+            content: entry.content,
+            deleted: false
+          }))
+          await upsertReadable(token, rows)
+        }
+
+        const removedNotes = removed.filter(relPath => !relPath.startsWith('.'))
+        for (let i = 0; i < removedNotes.length; i += UPSERT_BATCH) {
+          const batch = removedNotes.slice(i, i + UPSERT_BATCH)
+          const rows = batch.map(relPath => ({
+            user_id: userId,
+            path: relPath.normalize('NFC'),
+            deleted: true,
+            content: null
+          }))
+          await upsertReadable(token, rows)
+        }
+      } catch (error) {
+        log(
+          `[phone-sync] readable-copy publish failed, E2EE publish unaffected: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        )
       }
 
       // Native-calendar ICS feed (plaintext by owner-scoped exception): its own

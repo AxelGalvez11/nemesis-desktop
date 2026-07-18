@@ -22,10 +22,19 @@ const TOKEN = `h.${Buffer.from(JSON.stringify({ sub: 'user-1' })).toString('base
 
 type Call = { url: string; rows: Record<string, unknown>[] }
 
+// The E2EE and readable-copy pipelines share one fetchImpl, so most tests that
+// care about one pipeline's call shape/count filter to it by URL (same idiom
+// as `feedCalls` further down for calendar_feeds).
+const e2eeCalls = (calls: Call[]) => calls.filter(c => c.url.includes('/rest/v1/library_documents?'))
+const readableCalls = (calls: Call[]) => calls.filter(c => c.url.includes('/rest/v1/readable_library_documents?'))
+
 function makeHarness(overrides?: Partial<LibraryPublisherDeps>) {
   const key = generateVaultKey()
   const calls: Call[] = []
+  const logs: string[] = []
   let failNext = 0
+  let failUrlSubstring: string | null = null
+  let failUrlCount = 0
   const vault = new Map<string, { content: string; mtimeMs: number }>()
   let state: PublisherState | null = null
 
@@ -51,6 +60,10 @@ function makeHarness(overrides?: Partial<LibraryPublisherDeps>) {
     },
     now: () => NOW,
     fetchImpl: (async (url: string, init?: RequestInit) => {
+      if (failUrlSubstring && failUrlCount > 0 && String(url).includes(failUrlSubstring)) {
+        failUrlCount -= 1
+        return { ok: false, status: 500, text: async () => '' } as unknown as Response
+      }
       if (failNext > 0) {
         failNext -= 1
         return { ok: false, status: 500, text: async () => '' } as unknown as Response
@@ -58,17 +71,27 @@ function makeHarness(overrides?: Partial<LibraryPublisherDeps>) {
       calls.push({ url: String(url), rows: JSON.parse(String(init?.body)) })
       return { ok: true, status: 201, text: async () => '' } as unknown as Response
     }) as unknown as typeof fetch,
-    log: () => {},
+    log: line => {
+      logs.push(line)
+    },
     ...overrides
   }
 
   return {
     key,
     calls,
+    logs,
     vault,
     getState: () => state,
     setFailNext: (n: number) => {
       failNext = n
+    },
+    /** Fails only requests whose URL contains `substring`, `n` times — lets a
+     * test target one pipeline's upsert (e.g. the readable table) without
+     * disturbing the other's. */
+    setFailUrl: (substring: string, n = 1) => {
+      failUrlSubstring = substring
+      failUrlCount = n
     },
     publisher: createLibraryPublisher(deps)
   }
@@ -84,10 +107,11 @@ test('first tick publishes every settled file and the phone primitive can open t
 
   await h.publisher.tick()
 
-  assert.equal(h.calls.length, 1)
-  assert.equal(h.calls[0].rows.length, 2)
-  assert.ok(h.calls[0].url.includes('on_conflict=user_id,path_hash'))
-  for (const row of h.calls[0].rows) {
+  const e2ee = e2eeCalls(h.calls)
+  assert.equal(e2ee.length, 1)
+  assert.equal(e2ee[0].rows.length, 2)
+  assert.ok(e2ee[0].url.includes('on_conflict=user_id,path_hash'))
+  for (const row of e2ee[0].rows) {
     assert.equal(row.user_id, 'user-1')
     assert.equal(row.deleted, false)
     const raw = Buffer.from(String(row.payload), 'base64')
@@ -115,11 +139,11 @@ test('quiet rule: a just-written file waits, then publishes once it settles', as
   const h = makeHarness()
   h.vault.set('fresh.md', { content: '# Fresh', mtimeMs: NOW - 2_000 })
   await h.publisher.tick()
-  assert.equal(h.calls.length, 0)
+  assert.equal(e2eeCalls(h.calls).length, 0)
 
   h.vault.set('fresh.md', { content: '# Fresh', mtimeMs: NOW - 10_000 })
   await h.publisher.tick()
-  assert.equal(h.calls.length, 1)
+  assert.equal(e2eeCalls(h.calls).length, 1)
 })
 
 test('a quiet-rule skip is not mistaken for a deletion', async () => {
@@ -140,8 +164,9 @@ test('files over the size cap are skipped', async () => {
   h.vault.set('huge.md', settled('x'.repeat(MAX_DOC_BYTES + 1)))
   h.vault.set('ok.md', settled('# Fits'))
   await h.publisher.tick()
-  assert.equal(h.calls.length, 1)
-  assert.equal(h.calls[0].rows.length, 1)
+  const e2ee = e2eeCalls(h.calls)
+  assert.equal(e2ee.length, 1)
+  assert.equal(e2ee[0].rows.length, 1)
   assert.equal(h.getState()!.files['huge.md'], undefined)
 })
 
@@ -154,7 +179,8 @@ test('a deleted file becomes a tombstone row and leaves the state', async () => 
   h.vault.delete('b.md')
   await h.publisher.tick()
 
-  const tombstones = h.calls[h.calls.length - 1].rows
+  const e2ee = e2eeCalls(h.calls)
+  const tombstones = e2ee[e2ee.length - 1].rows
   assert.equal(tombstones.length, 1)
   assert.equal(tombstones[0].deleted, true)
   assert.equal(tombstones[0].payload, null)
@@ -171,7 +197,7 @@ test('a failed batch leaves state untouched so the next tick retries', async () 
   assert.equal(h.getState(), null) // nothing confirmed, nothing saved
 
   await h.publisher.tick() // retry succeeds
-  assert.equal(h.calls.length, 1)
+  assert.equal(e2eeCalls(h.calls).length, 1)
   assert.ok(h.getState()!.files['a.md'])
 })
 
@@ -180,7 +206,7 @@ test('changes are split into batches of 20', async () => {
   for (let i = 0; i < 45; i++) h.vault.set(`n${i}.md`, settled(`# Note ${i}`))
   await h.publisher.tick()
   assert.deepEqual(
-    h.calls.map(c => c.rows.length),
+    e2eeCalls(h.calls).map(c => c.rows.length),
     [20, 20, 5]
   )
 })
@@ -351,4 +377,107 @@ test('a regenerated feed token re-upserts even when the ICS text is unchanged', 
   const feedCalls = h.calls.filter(call => call.url.includes('calendar_feeds'))
   assert.equal(feedCalls.length, 2)
   assert.equal(feedCalls[1].rows[0].token, 'd'.repeat(64))
+})
+
+// ——— Additive plaintext mirror: readable_library_documents ———
+// Same auth, same batching, same changed/removed sets as the encrypted
+// pipeline above; the one new behavior worth proving on its own is failure
+// isolation (a broken readable-copy upsert must never cost the E2EE publish
+// its confirmed state).
+
+test('a changed note also gets a plaintext row in readable_library_documents', async () => {
+  const h = makeHarness()
+  h.vault.set('PHCY 1205/b.md', settled('# Beta\nbody'))
+
+  await h.publisher.tick()
+
+  const rc = readableCalls(h.calls)
+  assert.equal(rc.length, 1)
+  assert.ok(rc[0].url.includes('on_conflict=user_id,path'))
+  assert.deepEqual(rc[0].rows, [
+    {
+      user_id: 'user-1',
+      path: 'PHCY 1205/b.md',
+      kind: 'note',
+      title: 'b',
+      content: '# Beta\nbody',
+      deleted: false
+    }
+  ])
+})
+
+test('an unchanged file produces no new readable-copy request on the next tick', async () => {
+  const h = makeHarness()
+  h.vault.set('a.md', settled('# Alpha'))
+  await h.publisher.tick()
+  const before = readableCalls(h.calls).length
+  await h.publisher.tick()
+  assert.equal(readableCalls(h.calls).length, before)
+})
+
+test('a deleted note becomes a readable tombstone: {user_id, path, deleted:true, content:null}', async () => {
+  const h = makeHarness()
+  h.vault.set('a.md', settled('# Alpha'))
+  h.vault.set('b.md', settled('# Beta'))
+  await h.publisher.tick()
+
+  h.vault.delete('b.md')
+  await h.publisher.tick()
+
+  const rc = readableCalls(h.calls)
+  const tombstone = rc[rc.length - 1]
+  assert.deepEqual(tombstone.rows, [{ user_id: 'user-1', path: 'b.md', deleted: true, content: null }])
+})
+
+test('readable-copy changes are also split into batches of 20', async () => {
+  const h = makeHarness()
+  for (let i = 0; i < 45; i++) h.vault.set(`n${i}.md`, settled(`# Note ${i}`))
+  await h.publisher.tick()
+  assert.deepEqual(
+    readableCalls(h.calls).map(c => c.rows.length),
+    [20, 20, 5]
+  )
+})
+
+test('decks and calendar never reach the readable table (notes only)', async () => {
+  const h = derivedHarness()
+  h.derived.set('.study/sync/deck/deck-1', {
+    path: '.study/sync/deck/deck-1',
+    kind: 'deck',
+    title: 'Cardio Exam 2',
+    content: JSON.stringify({ v: 1, id: 'deck-1', queue: [] }),
+    mtimeMs: NOW - 60_000
+  })
+  h.vault.set('a.md', settled('# Alpha'))
+
+  await h.publisher.tick()
+  const rc = readableCalls(h.calls)
+  assert.equal(rc.length, 1) // the note only, not the deck
+  assert.deepEqual(
+    rc[0].rows.map(r => r.path),
+    ['a.md']
+  )
+
+  // The deck's source disappears — its tombstone must not reach this table either.
+  h.derived.clear()
+  await h.publisher.tick()
+  assert.equal(readableCalls(h.calls).length, 1) // unchanged: no new readable call
+})
+
+test('a failed readable-copy upsert is logged but never stops the E2EE publish from confirming', async () => {
+  const h = makeHarness()
+  h.setFailUrl('readable_library_documents', 1)
+  h.vault.set('a.md', settled('# Alpha'))
+
+  await h.publisher.tick()
+
+  // E2EE side: fully confirmed, exactly as if the readable table didn't exist.
+  assert.equal(e2eeCalls(h.calls).length, 1)
+  assert.ok(h.getState()!.files['a.md'])
+  assert.deepEqual(h.publisher.lastResult(), { at: NOW, published: 1, deleted: 0, total: 1 })
+
+  // Readable side: attempted, failed, logged — not silently retried, since
+  // state (incl. the hash-sweep) only ever advances off the E2EE loop.
+  assert.equal(readableCalls(h.calls).length, 0)
+  assert.ok(h.logs.some(line => line.includes('readable-copy publish failed')))
 })
