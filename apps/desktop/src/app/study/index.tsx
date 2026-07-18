@@ -1312,7 +1312,7 @@ function DeckBrowser({
   }
 
   return (
-    <div className="pb-10">
+    <div className="flex flex-1 flex-col pb-10">
       <div className="px-8 pt-3">
         <DeckColumnHeader />
       </div>
@@ -1902,7 +1902,7 @@ function Heatmap({ state }: { state: StudyState }) {
   }
 
   return (
-    <div className="flex shrink-0 justify-center px-6 pb-10 pt-4">
+    <div className="mt-auto flex shrink-0 justify-center px-6 pb-10 pt-4">
       <div className="overflow-x-auto pb-1">
         <div className="min-w-max">
           <div className="grid grid-cols-[2rem_auto] gap-x-2 gap-y-1">
