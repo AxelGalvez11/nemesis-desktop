@@ -9,6 +9,7 @@ import {
 } from '@/lib/session-source'
 import { setCronJobs } from '@/store/cron'
 import { $pinnedSessionIds, $sessionsLimit, bumpSessionsLimit, SIDEBAR_SESSIONS_PAGE_SIZE } from '@/store/layout'
+import { NOTE_CHAT_SESSION_SOURCE } from '@/store/note-chat'
 import { ALL_PROFILES, normalizeProfileKey } from '@/store/profile'
 import {
   $messagingSessions,
@@ -36,7 +37,11 @@ import { sameCronSignature } from '../../desktop-controller-utils'
 // self-managed sidebar section (refreshMessagingSessions). Excluding both here
 // keeps "Load more" paging through interactive local chats instead of
 // interleaving gateway threads that bury them.
-const SIDEBAR_EXCLUDED_SOURCES = ['cron', 'subagent', 'tool', ...MESSAGING_SESSION_SOURCE_IDS]
+// note-chat: per-note/card mini-chat sessions are real backend sessions but must
+// never appear in the main Sessions list (they're scoped to a note/card, not the
+// conversation history). Same bucketing as cron/subagent/tool. (Command palette,
+// session picker, and session SEARCH are not yet filtered — a documented v1 gap.)
+const SIDEBAR_EXCLUDED_SOURCES = ['cron', 'subagent', 'tool', NOTE_CHAT_SESSION_SOURCE, ...MESSAGING_SESSION_SOURCE_IDS]
 // The messaging slice is the inverse: drop cron + every local source so only
 // external-platform conversations remain, then split per platform in the UI.
 const MESSAGING_EXCLUDED_SOURCES = ['cron', ...LOCAL_SESSION_SOURCE_IDS]

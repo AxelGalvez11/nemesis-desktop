@@ -21,6 +21,7 @@ import {
   IconPresentation,
   IconCards,
   IconChecklist,
+  IconMessage,
   IconSitemap,
   IconSparkles,
   IconTrash,
@@ -29,6 +30,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import { NOTE_CHAT_PANE_ID, setNoteChatContext } from '@/app/note-chat/active-context'
+import { assembleNoteContext } from '@/app/note-chat/context'
 import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -40,6 +43,7 @@ import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
 import { type ComposerAttachment, seedComposerDraft, stashSessionDraft } from '@/store/composer'
+import { setPaneOpen } from '@/store/panes'
 import { getRememberedSessionId } from '@/store/session'
 
 import { NEW_CHAT_ROUTE, sessionRoute } from '../routes'
@@ -509,6 +513,22 @@ export function LibraryView() {
   }, [activeTab, contents, tabs])
 
   const activeNote = selection?.kind === 'note' ? selection.note : null
+
+  // Publish the open note as the mini-chat's scope so the docked note-chat pane can talk
+  // about it; clear it when leaving the Library so the pane goes dormant elsewhere. Scope
+  // is path-keyed, so content edits don't churn the conversation.
+  useEffect(() => {
+    if (!activeNote) {
+      setNoteChatContext(null)
+
+      return
+    }
+
+    setNoteChatContext(assembleNoteContext({ content: activeNote.content, path: activeNote.path }))
+
+    return () => setNoteChatContext(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNote?.path])
 
   const navigate = useNavigate()
 
@@ -1101,6 +1121,18 @@ export function LibraryView() {
                     </Button>
                   </Tip>
                 </>
+              )}
+              {activeNote && (
+                <Tip label="Chat about this note">
+                  <Button
+                    aria-label="Chat about this note"
+                    onClick={() => setPaneOpen(NOTE_CHAT_PANE_ID, true)}
+                    size="icon-xs"
+                    variant="ghost"
+                  >
+                    <IconMessage />
+                  </Button>
+                </Tip>
               )}
               <Tip label={activeNote ? `Ask the agent about “${activeNote.title}”` : 'Ask the agent'}>
                 <Button aria-label="Ask the agent" onClick={askAgent} size="icon-xs" variant="ghost">
