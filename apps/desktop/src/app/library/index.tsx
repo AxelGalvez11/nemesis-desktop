@@ -19,6 +19,8 @@ import {
   IconPencil,
   IconPhoto,
   IconPresentation,
+  IconCards,
+  IconChecklist,
   IconSparkles,
   IconTrash,
   IconX
@@ -26,6 +28,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -35,7 +38,7 @@ import { SearchField } from '@/components/ui/search-field'
 import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { NEMESIS_STUDENT_BUILD } from '@/nemesis'
-import { seedComposerDraft } from '@/store/composer'
+import { type ComposerAttachment, seedComposerDraft, stashSessionDraft } from '@/store/composer'
 import { getRememberedSessionId } from '@/store/session'
 
 import { NEW_CHAT_ROUTE, sessionRoute } from '../routes'
@@ -523,6 +526,40 @@ export function LibraryView() {
     navigate(lastSession ? sessionRoute(lastSession) : NEW_CHAT_ROUTE)
   }, [navigate, selection])
 
+  // NotebookLM-style scoped generation (Library Brain phase 1): build flashcards or
+  // a practice test from ONLY the open note/file. The source is attached as a
+  // `@file:` ref so the agent gets the exact path, and the prompt hard-restricts the
+  // scope; the deck/test the agent writes to the vault is picked up by the Study
+  // page's folder scan as usual. Seed-and-review (same as askAgent) — the user sees
+  // the request and hits Enter.
+  const generateFromSelection = useCallback(
+    (kind: 'flashcards' | 'test') => {
+      if (!selection) {
+        return
+      }
+
+      const lastSession = getRememberedSessionId()
+      const path = selection.kind === 'note' ? selection.note.path : selection.file.path
+      const name = selection.kind === 'note' ? selection.note.title : selection.file.name
+      const what = kind === 'flashcards' ? 'a set of flashcards' : 'a practice test'
+      const attachment: ComposerAttachment = {
+        detail: path,
+        id: `library-scope:${path}`,
+        kind: 'file',
+        label: name,
+        path,
+        refText: `@file:${formatRefValue(path)}`
+      }
+      const text =
+        `Using ONLY the attached source ("${name}") and no other material, build ${what} with the nemesis-study-decks skill. ` +
+        'Do not use anything that is not in that source. Name the deck/test after the source, and start your reply by stating exactly which file you built it from.'
+
+      stashSessionDraft(lastSession, text, [attachment])
+      navigate(lastSession ? sessionRoute(lastSession) : NEW_CHAT_ROUTE)
+    },
+    [navigate, selection]
+  )
+
   const scheduleSave = useCallback((note: VaultNote, content: string) => {
     setContents(current =>
       current ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) } : current
@@ -1000,6 +1037,30 @@ export function LibraryView() {
             ))}
             </div>
             <div className="flex shrink-0 items-center gap-0.5 border-l border-(--ui-stroke-quaternary) px-1.5">
+              {selection && (
+                <>
+                  <Tip label="Generate flashcards from this source only">
+                    <Button
+                      aria-label="Generate flashcards from this source"
+                      onClick={() => generateFromSelection('flashcards')}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <IconCards />
+                    </Button>
+                  </Tip>
+                  <Tip label="Generate a practice test from this source only">
+                    <Button
+                      aria-label="Generate a practice test from this source"
+                      onClick={() => generateFromSelection('test')}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <IconChecklist />
+                    </Button>
+                  </Tip>
+                </>
+              )}
               <Tip label={activeNote ? `Ask the agent about “${activeNote.title}”` : 'Ask the agent'}>
                 <Button aria-label="Ask the agent" onClick={askAgent} size="icon-xs" variant="ghost">
                   <IconSparkles />

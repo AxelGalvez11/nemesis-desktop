@@ -26,11 +26,11 @@ import { NEW_CHAT_ROUTE, sessionRoute } from '../routes';
 import { hasClozeMarker, renderClozeAnswer, renderClozePrompt } from './cloze';
 import { DECK_DIR, importedDeckFileNames, scanAllDeckFiles } from './deck-files';
 import { readDiskStudyState, readDiskTestAttempts } from './disk-state';
-import { STUDY_STATE_EXTERNAL_CHANGE_EVENT } from './phone-sync';
 import { bestAttempt, groupExtras, lastAttempt, loadTestAttempts, saveTestAttempts, scanMindmapFiles, scanTestFiles } from './extras';
 import { parseCardPaste } from './import-cards';
 import { MindmapViewerDialog } from './mindmap-viewer';
 import { addCard, addSection, adoptLegacyDeckFiles, assignDeckSection, buildQueue, DEFAULT_STUDY_SETTINGS, deleteCard, deleteDeck, deleteSection, freshId, getSettings, gradeCard, groupDecks, LEECH_TAG, loadState, localDayKey, previewIntervals, reconcileDeckFiles, renameDeck, reviewHeatmap, saveState, setSettings, toggleSuspendCard, undoLastGrade, updateCard } from './model';
+import { STUDY_STATE_EXTERNAL_CHANGE_EVENT } from './phone-sync';
 import { TestSurface } from './test-mode';
 const GRADES = [
     { key: '1', label: 'Again', rating: 'again' },
@@ -154,15 +154,17 @@ export function StudyView() {
     // pinned card (dropping it from the queue) or the queue empties.
     const [currentKey, setCurrentKey] = useState(null);
     const current = useMemo(() => {
-        if (!reviewing)
+        if (!reviewing) {
             return undefined;
+        }
         const pinned = currentKey ? queue.find(item => item.scheduleKey === currentKey) : undefined;
         return pinned ?? queue[0];
     }, [reviewing, queue, currentKey]);
     useEffect(() => {
         const key = current?.scheduleKey ?? null;
-        if (key !== currentKey)
+        if (key !== currentKey) {
             setCurrentKey(key);
+        }
     }, [current, currentKey]);
     const remainingCounts = useMemo(() => countQueueCategories(queue, state), [queue, state]);
     const todayQueue = useMemo(() => buildQueue(state, null, now), [now, state]);
@@ -170,8 +172,9 @@ export function StudyView() {
     // minutes (learning cards on their short FSRS steps) — drives the "coming back
     // soon" hint on the caught-up screen so the student keeps the window open.
     const comingBackSoon = useMemo(() => {
-        if (!reviewing || current)
+        if (!reviewing || current) {
             return 0;
+        }
         return buildQueue(state, reviewDeckId, new Date(now.getTime() + 20 * 60_000)).length;
     }, [reviewing, current, now, state, reviewDeckId]);
     const sections = useMemo(() => groupDecks(state, now)

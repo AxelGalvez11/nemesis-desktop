@@ -57,14 +57,13 @@ import { NEW_CHAT_ROUTE, sessionRoute } from '../routes'
 import { hasClozeMarker, renderClozeAnswer, renderClozePrompt } from './cloze'
 import { DECK_DIR, importedDeckFileNames, scanAllDeckFiles } from './deck-files'
 import { readDiskStudyState, readDiskTestAttempts } from './disk-state'
-import { STUDY_STATE_EXTERNAL_CHANGE_EVENT } from './phone-sync'
 import {
   bestAttempt,
   groupExtras,
   lastAttempt,
   loadTestAttempts,
-  saveTestAttempts,
   type MindmapFile,
+  saveTestAttempts,
   scanMindmapFiles,
   scanTestFiles,
   type TestAttempt,
@@ -108,6 +107,7 @@ import {
   undoLastGrade,
   updateCard
 } from './model'
+import { STUDY_STATE_EXTERNAL_CHANGE_EVENT } from './phone-sync'
 import { TestSurface } from './test-mode'
 
 const GRADES: { key: string; label: string; rating: StudyRating }[] = [
@@ -253,6 +253,7 @@ export function StudyView() {
   useEffect(() => {
     setNow(new Date())
     const id = window.setInterval(() => setNow(new Date()), 15_000)
+
     return () => window.clearInterval(id)
   }, [reviewing])
 
@@ -266,14 +267,18 @@ export function StudyView() {
   // card out from under the user mid-review. It changes only when they grade the
   // pinned card (dropping it from the queue) or the queue empties.
   const [currentKey, setCurrentKey] = useState<string | null>(null)
+
   const current: QueueItem | undefined = useMemo(() => {
-    if (!reviewing) return undefined
+    if (!reviewing) {return undefined}
     const pinned = currentKey ? queue.find(item => item.scheduleKey === currentKey) : undefined
+
     return pinned ?? queue[0]
   }, [reviewing, queue, currentKey])
+
   useEffect(() => {
     const key = current?.scheduleKey ?? null
-    if (key !== currentKey) setCurrentKey(key)
+
+    if (key !== currentKey) {setCurrentKey(key)}
   }, [current, currentKey])
 
   const remainingCounts = useMemo(
@@ -287,7 +292,8 @@ export function StudyView() {
   // minutes (learning cards on their short FSRS steps) — drives the "coming back
   // soon" hint on the caught-up screen so the student keeps the window open.
   const comingBackSoon = useMemo(() => {
-    if (!reviewing || current) return 0
+    if (!reviewing || current) {return 0}
+
     return buildQueue(state, reviewDeckId, new Date(now.getTime() + 20 * 60_000)).length
   }, [reviewing, current, now, state, reviewDeckId])
 
@@ -1338,6 +1344,7 @@ function DeckBrowser({
 
       {groups.map(group => {
         const isCollapsed = collapsedSections.has(group.course)
+
         const rollup = group.decks.reduce<ReviewCategoryCounts>(
           (sum, deck) => {
             const counts = queueCounts.get(deck.id) ?? ZERO_COUNTS
@@ -1576,6 +1583,7 @@ function TestsBrowser({
     <div className="pb-10">
       {courses.map(([course, extras]) => {
         const isCollapsed = collapsedSections.has(course)
+
         const bestPct = extras.tests.reduce<null | number>((best, test) => {
           const attempt = bestAttempt(testAttempts[test.fileName]?.attempts ?? [])
 
