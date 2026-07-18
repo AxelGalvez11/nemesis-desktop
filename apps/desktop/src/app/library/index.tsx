@@ -21,6 +21,7 @@ import {
   IconPresentation,
   IconCards,
   IconChecklist,
+  IconSitemap,
   IconSparkles,
   IconTrash,
   IconX
@@ -560,6 +561,36 @@ export function LibraryView() {
     [navigate, selection]
   )
 
+  // Library Brain phase 2 slice 1: turn the open source into atomic, linked notes using
+  // the nemesis-notes skill's 5-type link grammar. Same scoped-attachment + seed-and-review
+  // pattern as generateFromSelection above — the source is attached as a `@file:` ref and
+  // the prompt hard-restricts scope to it.
+  const extractNotesFromSelection = useCallback(() => {
+    if (!selection) {
+      return
+    }
+
+    const lastSession = getRememberedSessionId()
+    const path = selection.kind === 'note' ? selection.note.path : selection.file.path
+    const name = selection.kind === 'note' ? selection.note.title : selection.file.name
+    const attachment: ComposerAttachment = {
+      detail: path,
+      id: `library-scope:${path}`,
+      kind: 'file',
+      label: name,
+      path,
+      refText: `@file:${formatRefValue(path)}`
+    }
+    const text =
+      `Using ONLY the attached source ("${name}") and no other material, break it into atomic notes — ` +
+      'one idea each — using the nemesis-notes skill and its 5-type link grammar (Prerequisite of / Part ' +
+      'of / Related to / Contrasts with / Applied in), each note citing its source, links in root-relative ' +
+      'form (never ../). Start by stating which source you used.'
+
+    stashSessionDraft(lastSession, text, [attachment])
+    navigate(lastSession ? sessionRoute(lastSession) : NEW_CHAT_ROUTE)
+  }, [navigate, selection])
+
   const scheduleSave = useCallback((note: VaultNote, content: string) => {
     setContents(current =>
       current ? { ...current, notes: current.notes.map(n => (n.path === note.path ? { ...n, content } : n)) } : current
@@ -1057,6 +1088,16 @@ export function LibraryView() {
                       variant="ghost"
                     >
                       <IconChecklist />
+                    </Button>
+                  </Tip>
+                  <Tip label="Extract linked notes from this source">
+                    <Button
+                      aria-label="Extract linked notes from this source"
+                      onClick={extractNotesFromSelection}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <IconSitemap />
                     </Button>
                   </Tip>
                 </>

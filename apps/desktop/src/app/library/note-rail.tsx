@@ -22,7 +22,15 @@ import { Tip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 import { buildResolvableTitleSet, isWikilinkResolved } from './links'
-import { extractHeadings, extractTags, extractWikilinks, type NoteHeading, type VaultIndex, type VaultNote } from './vault'
+import {
+  extractHeadings,
+  extractTags,
+  extractTypedLinks,
+  extractWikilinks,
+  type NoteHeading,
+  type VaultIndex,
+  type VaultNote
+} from './vault'
 
 type RailTab = 'outline' | 'links'
 
@@ -74,6 +82,13 @@ export function NoteRail({
 
     return extractWikilinks(activeNote.content).filter(target => !isWikilinkResolved(target, resolvable))
   }, [activeNote.content, notes])
+
+  // Library Brain phase 2's link grammar (skills/nemesis-notes/SKILL.md): a "## Related"
+  // bullet with a leading "word:" that isn't one of the five allowed relationship types.
+  const offGrammarLinks = useMemo(
+    () => extractTypedLinks(activeNote.content).filter(link => link.type === null),
+    [activeNote.content]
+  )
 
   const openByTitle = (title: string) => {
     const note = notes.find(n => n.title === title)
@@ -168,6 +183,26 @@ export function NoteRail({
                       </Tip>
                     )
                   })}
+                </RailSection>
+              )}
+
+              {offGrammarLinks.length > 0 && (
+                <RailSection count={offGrammarLinks.length} emptyLabel="" title="Off-grammar links">
+                  <p className="px-2 pb-1 text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">
+                    Only the five grammar words resolve as typed relationships — see nemesis-notes.
+                  </p>
+                  {offGrammarLinks.map((link, i) => (
+                    <div
+                      className="flex min-w-0 items-center gap-1.5 px-2 py-1"
+                      key={`${link.prefix}::${link.target}::${i}`}
+                    >
+                      <span className="truncate text-[0.8125rem] text-(--ui-text-secondary)">{link.prefix}</span>
+                      <span className="shrink-0 text-(--ui-text-quaternary)">{'→'}</span>
+                      <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-muted-foreground">
+                        [[{link.target}]]
+                      </span>
+                    </div>
+                  ))}
                 </RailSection>
               )}
             </>

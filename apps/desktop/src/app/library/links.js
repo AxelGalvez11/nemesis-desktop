@@ -38,6 +38,25 @@ export function findLinkedNote(target, notes) {
     const wanted = normalizeWikilinkKey(target);
     return notes.find(note => keysForNote(note).includes(wanted));
 }
+/** Normalized (lowercased, trimmed, no trailing colon) relationship prefix → its type.
+ *  'example of' is an accepted alias of 'applied-in' — phrasing the relationship from the
+ *  specific instance's side ("Lisinopril is an example of ACE inhibitors") rather than the
+ *  general concept's side ("ACE inhibitors are applied in heart failure"). */
+const LINK_TYPES_BY_PREFIX = {
+    'applied in': 'applied-in',
+    'contrasts with': 'contrasts-with',
+    'example of': 'applied-in',
+    'part of': 'part-of',
+    'prerequisite of': 'prerequisite-of',
+    'related to': 'related-to'
+};
+/** Resolve a raw "## Related" bullet prefix (any case, optional surrounding whitespace or
+ *  trailing colon) to its grammar type, or null when it isn't one of the five allowed
+ *  words. The null case is what note-rail.tsx's "Off-grammar links" section surfaces. */
+export function linkTypeForPrefix(prefix) {
+    const key = prefix.trim().toLowerCase().replace(/:$/, '').trim();
+    return LINK_TYPES_BY_PREFIX[key] ?? null;
+}
 const WIKILINK_FULL_RE = /\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]/g;
 /** Rewrite every wikilink in `content` that targets `oldTitle` (exact title match,
  *  case-insensitive) so it targets `newTitle` instead — preserving any folder-path prefix,

@@ -55,6 +55,36 @@ export function findLinkedNote<T extends LinkableNote>(target: string, notes: re
   return notes.find(note => keysForNote(note).includes(wanted))
 }
 
+// Library Brain phase 2's link grammar (skills/nemesis-notes/SKILL.md § "Link grammar") —
+// the five relationship words allowed under a note's "## Related"/"## Connections" section.
+// This lookup is the actual enforcement: a skill file alone doesn't stop an agent from
+// inventing a sixth relationship word, but a mapping that returns null for anything else
+// does — the concept-graph accumulated 17 invented types when a free-text field had no
+// code behind it. vault.ts's extractTypedLinks is the parser that calls this per bullet.
+export type LinkType = 'prerequisite-of' | 'part-of' | 'related-to' | 'contrasts-with' | 'applied-in'
+
+/** Normalized (lowercased, trimmed, no trailing colon) relationship prefix → its type.
+ *  'example of' is an accepted alias of 'applied-in' — phrasing the relationship from the
+ *  specific instance's side ("Lisinopril is an example of ACE inhibitors") rather than the
+ *  general concept's side ("ACE inhibitors are applied in heart failure"). */
+const LINK_TYPES_BY_PREFIX: Record<string, LinkType> = {
+  'applied in': 'applied-in',
+  'contrasts with': 'contrasts-with',
+  'example of': 'applied-in',
+  'part of': 'part-of',
+  'prerequisite of': 'prerequisite-of',
+  'related to': 'related-to'
+}
+
+/** Resolve a raw "## Related" bullet prefix (any case, optional surrounding whitespace or
+ *  trailing colon) to its grammar type, or null when it isn't one of the five allowed
+ *  words. The null case is what note-rail.tsx's "Off-grammar links" section surfaces. */
+export function linkTypeForPrefix(prefix: string): LinkType | null {
+  const key = prefix.trim().toLowerCase().replace(/:$/, '').trim()
+
+  return LINK_TYPES_BY_PREFIX[key] ?? null
+}
+
 const WIKILINK_FULL_RE = /\[\[([^\]|#]+)(#[^\]|]*)?(\|[^\]]*)?\]\]/g
 
 /** Rewrite every wikilink in `content` that targets `oldTitle` (exact title match,

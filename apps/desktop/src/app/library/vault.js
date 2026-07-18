@@ -3,7 +3,7 @@
 // construction (a student can point Obsidian at the same folder). Wiki-links use the
 // Obsidian syntax family: [[Title]], [[Title|alias]], [[Title#heading]].
 // The link index built here also feeds the Graph page (node = note, edge = wikilink).
-import { keysForNote } from './links';
+import { keysForNote, linkTypeForPrefix } from './links';
 export const VAULT_DIR = '~/Documents/Nemesis Library';
 function fileKind(name) {
     const ext = name.toLowerCase().split('.').pop() ?? '';
@@ -34,6 +34,40 @@ export function extractWikilinks(markdown) {
         }
     }
     return targets;
+}
+const RELATED_HEADING_RE = /^##\s+(Related|Connections)\s*$/i;
+const SECTION_HEADING_RE = /^##\s+/;
+const TYPED_LINK_BULLET_RE = /^\s*[-*]\s+([^:\n\[]+):\s*\[\[([^\]|#]+)/;
+/** Extract typed relationship bullets ("- Prerequisite of: [[Target]]") from ONLY a note's
+ *  "## Related" or "## Connections" section (Library Brain phase 2's link grammar — see
+ *  skills/nemesis-notes/SKILL.md), stopping at the next "## " heading. Untyped bullets
+ *  ("- [[Target]]", "- [[Target]] — note") are intentionally NOT returned: they're still
+ *  allowed under the grammar, just outside it — only a bullet that DOES carry a leading
+ *  "word:" prefix gets checked against the five allowed types. */
+export function extractTypedLinks(content) {
+    const links = [];
+    let inSection = false;
+    for (const line of content.split('\n')) {
+        if (RELATED_HEADING_RE.test(line)) {
+            inSection = true;
+            continue;
+        }
+        if (SECTION_HEADING_RE.test(line)) {
+            inSection = false;
+            continue;
+        }
+        if (!inSection) {
+            continue;
+        }
+        const match = TYPED_LINK_BULLET_RE.exec(line);
+        if (!match) {
+            continue;
+        }
+        const prefix = match[1].trim();
+        const target = match[2].trim();
+        links.push({ prefix, target, type: linkTypeForPrefix(prefix) });
+    }
+    return links;
 }
 const MD_LINK = /\[[^\]]*\]\(([^)]+)\)/g;
 /** Extract relative ".md" link targets ("[label](Note.md)" / "[label](folder/Note.md)")

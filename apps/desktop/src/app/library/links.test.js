@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildResolvableTitleSet, findLinkedNote, isWikilinkResolved, rewriteWikilinks } from './links';
+import { buildResolvableTitleSet, findLinkedNote, isWikilinkResolved, linkTypeForPrefix, rewriteWikilinks } from './links';
 const NOTES = [
     { folder: '', title: 'Heart failure' },
     { folder: 'Cardio', title: 'ACE inhibitors' },
@@ -26,6 +26,26 @@ describe('buildResolvableTitleSet + isWikilinkResolved', () => {
     });
     it('does not resolve a similar-but-different title', () => {
         expect(isWikilinkResolved('Heart failure symptoms', resolvable)).toBe(false);
+    });
+});
+describe('linkTypeForPrefix', () => {
+    it('maps each of the five grammar prefixes to its type', () => {
+        expect(linkTypeForPrefix('Prerequisite of')).toBe('prerequisite-of');
+        expect(linkTypeForPrefix('Part of')).toBe('part-of');
+        expect(linkTypeForPrefix('Related to')).toBe('related-to');
+        expect(linkTypeForPrefix('Contrasts with')).toBe('contrasts-with');
+        expect(linkTypeForPrefix('Applied in')).toBe('applied-in');
+    });
+    it('accepts "Example of" as an alias of applied-in', () => {
+        expect(linkTypeForPrefix('Example of')).toBe('applied-in');
+    });
+    it('is case-insensitive and tolerates a trailing colon or surrounding whitespace', () => {
+        expect(linkTypeForPrefix('PREREQUISITE OF:')).toBe('prerequisite-of');
+        expect(linkTypeForPrefix('  related to  ')).toBe('related-to');
+    });
+    it('returns null for an invented prefix', () => {
+        expect(linkTypeForPrefix('Causes')).toBeNull();
+        expect(linkTypeForPrefix('See also')).toBeNull();
     });
 });
 describe('findLinkedNote', () => {

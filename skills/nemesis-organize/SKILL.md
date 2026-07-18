@@ -207,7 +207,10 @@ structure audit and FIX what you find:
    or that `Folder/Title` path — exists. A link that points nowhere is either (a) a note you
    should create, or (b) a stale link to fix or remove. Never leave dead links. Note that
    after moving a note into a folder, links to it must become `[[Folder/Title]]` (the app
-   resolves path-qualified links).
+   resolves path-qualified links). Also check link grammar: every `## Related` bullet's
+   leading relationship word must be one of the five allowed prefixes (Prerequisite of /
+   Part of / Related to / Contrasts with / Applied in, or the Example of alias) — flag any
+   other word as off-grammar (see nemesis-notes).
 2. **Important notes aren't orphans.** A note that nothing links to and that links to nothing
    is marooned — the student will never find it. Link it in from `Home.md` or the relevant
    course overview, or from a related note.
